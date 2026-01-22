@@ -25,6 +25,7 @@ from acp.schema import (
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
     EnvVariable,
+    FileSystemCapability,
     ImageContentBlock,
     Implementation,
     KillTerminalCommandResponse,
@@ -94,7 +95,9 @@ class JaiAcpClient(Client):
         conn = connect_to_agent(self, proc.stdin, proc.stdout)
         await conn.initialize(
             protocol_version=PROTOCOL_VERSION,
-            client_capabilities=ClientCapabilities(),
+            client_capabilities=ClientCapabilities(
+                fs=FileSystemCapability(read_text_file=True, write_text_file=True),
+            ),
             client_info=Implementation(name="Jupyter AI", title="Jupyter AI ACP Client", version="0.1.0"),
         )
         return conn
@@ -214,19 +217,77 @@ class JaiAcpClient(Client):
             outcome=AllowedOutcome(option_id=option_id, outcome='selected')
         )
 
-    ##############################
-    # Unimplemented methods below
-    ##############################
-
     async def write_text_file(
         self, content: str, path: str, session_id: str, **kwargs: Any
     ) -> WriteTextFileResponse | None:
-        raise RequestError.method_not_found("fs/write_text_file")
+        # Validate path parameter
+        if not path or not path.strip():
+            raise RequestError.invalid_params({"path": "path cannot be empty"})
+
+        file_path = Path(path)
+
+        # Check if path is a directory
+        if file_path.is_dir():
+            raise RequestError.invalid_params({"path": "path cannot be a directory"})
+
+        try:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(file_path.write_text, content, encoding="utf-8")
+        except PermissionError as e:
+            raise RequestError.internal_error({"path": path, "error": f"Permission denied: {e}"})
+        except OSError as e:
+            raise RequestError.internal_error({"path": path, "error": str(e)})
+
+        return WriteTextFileResponse()
 
     async def read_text_file(
         self, path: str, session_id: str, limit: int | None = None, line: int | None = None, **kwargs: Any
     ) -> ReadTextFileResponse:
-        raise RequestError.method_not_found("fs/read_text_file")
+        # Validate path parameter
+        if not path or not path.strip():
+            raise RequestError.invalid_params({"path": "path cannot be empty"})
+
+        # Validate line parameter (must be >= 1 if provided)
+        if line is not None and line < 1:
+            raise RequestError.invalid_params({"line": "line must be >= 1 (1-indexed)"})
+
+        # Validate limit parameter (must be >= 1 if provided)
+        if limit is not None and limit < 1:
+            raise RequestError.invalid_params({"limit": "limit must be >= 1"})
+
+        file_path = Path(path)
+
+        # Check if file exists
+        if not file_path.exists():
+            raise RequestError.resource_not_found(path)
+
+        # Check if path is a directory
+        if file_path.is_dir():
+            raise RequestError.invalid_params({"path": "path cannot be a directory"})
+
+        try:
+            text = await asyncio.to_thread(file_path.read_text, encoding="utf-8")
+        except PermissionError as e:
+            raise RequestError.internal_error({"path": path, "error": f"Permission denied: {e}"})
+        except OSError as e:
+            raise RequestError.internal_error({"path": path, "error": str(e)})
+
+        lines = text.splitlines(keepends=True)
+
+        # line is 1-indexed; default to line 1 if not specified
+        start_index = (line - 1) if line is not None else 0
+
+        if limit is not None:
+            lines = lines[start_index : start_index + limit]
+        else:
+            lines = lines[start_index:]
+
+        content = "".join(lines)
+        return ReadTextFileResponse(content=content)
+
+    ##############################
+    # Terminal methods
+    ##############################
 
     async def create_terminal(
         self,
