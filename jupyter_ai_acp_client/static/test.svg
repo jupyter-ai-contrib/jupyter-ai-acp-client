@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!-- Background -->
+  <rect width="100" height="100" rx="12" fill="#4A90D9"/>
+
+  <!-- Antenna -->
+  <line x1="50" y1="8" x2="50" y2="18" stroke="#2D3748" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="50" cy="6" r="4" fill="#F6AD55"/>
+
+  <!-- Robot Head -->
+  <rect x="20" y="22" width="60" height="50" rx="8" fill="#E2E8F0"/>
+  <rect x="20" y="22" width="60" height="50" rx="8" fill="none" stroke="#2D3748" stroke-width="2"/>
+
+  <!-- Eyes -->
+  <rect x="28" y="34" width="16" height="12" rx="3" fill="#2D3748"/>
+  <rect x="56" y="34" width="16" height="12" rx="3" fill="#2D3748"/>
+
+  <!-- Eye glow -->
+  <circle cx="36" cy="40" r="4" fill="#48BB78"/>
+  <circle cx="64" cy="40" r="4" fill="#48BB78"/>
+
+  <!-- Mouth / Speaker grille -->
+  <rect x="35" y="54" width="30" height="10" rx="2" fill="#2D3748"/>
+  <line x1="40" y1="56" x2="40" y2="62" stroke="#E2E8F0" stroke-width="2"/>
+  <line x1="45" y1="56" x2="45" y2="62" stroke="#E2E8F0" stroke-width="2"/>
+  <line x1="50" y1="56" x2="50" y2="62" stroke="#E2E8F0" stroke-width="2"/>
+  <line x1="55" y1="56" x2="55" y2="62" stroke="#E2E8F0" stroke-width="2"/>
+  <line x1="60" y1="56" x2="60" y2="62" stroke="#E2E8F0" stroke-width="2"/>
+
+  <!-- Ears / Side panels -->
+  <rect x="10" y="35" width="8" height="20" rx="2" fill="#CBD5E0" stroke="#2D3748" stroke-width="1.5"/>
+  <rect x="82" y="35" width="8" height="20" rx="2" fill="#CBD5E0" stroke="#2D3748" stroke-width="1.5"/>
+
+  <!-- Body hint -->
+  <rect x="30" y="74" width="40" height="18" rx="4" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
+
+  <!-- Body details -->
+  <circle cx="42" cy="83" r="3" fill="#F6AD55"/>
+  <circle cx="50" cy="83" r="3" fill="#48BB78"/>
+  <circle cx="58" cy="83" r="3" fill="#FC8181"/>
+</svg>
