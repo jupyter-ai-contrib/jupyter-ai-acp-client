@@ -91,4 +91,5 @@ before-build-python = ["jlpm clean:all"]
 ignore = ["W002"]
 
 [project.entry-points."jupyter_ai.personas"]
-test-acp = "jupyter_ai_acp_client.test_acp_persona:TestAcpPersona"
+test-acp = "jupyter_ai_acp_client.acp_personas.test:TestAcpPersona"
+claude-acp = "jupyter_ai_acp_client.acp_personas.claude:ClaudeAcpPersona"
