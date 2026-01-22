@@ -124,18 +124,14 @@ class BaseAcpPersona(BasePersona):
         This method may be overriden by child classes.
         """
         client = await self.get_client()
-        conn = await client.get_connection()
         session_id = await self.get_session_id()
 
         # TODO: add attachments!
         prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
-        response = await conn.prompt(
-            prompt=[
-                TextContentBlock(text=prompt, type="text"),
-            ],
-            session_id=session_id
+        await client.prompt_and_reply(
+            session_id=session_id,
+            prompt=prompt,
         )
-        self.log.info(response)
 
     async def shutdown(self):
         self.log.info(f"Closing ACP agent and client for '{self.__class__.__name__}'.")

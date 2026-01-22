@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from acp import (
     PROTOCOL_VERSION,
@@ -30,6 +30,7 @@ from acp.schema import (
     KillTerminalCommandResponse,
     NewSessionResponse,
     PermissionOption,
+    PromptResponse,
     ReadTextFileResponse,
     ReleaseTerminalResponse,
     RequestPermissionResponse,
@@ -46,8 +47,16 @@ from acp.schema import (
 )
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.ychat import YChat
-from typing import Awaitable
+from typing import Awaitable, ClassVar
 from asyncio.subprocess import Process
+
+async def queue_to_iterator(queue: asyncio.Queue[str], sentinel: str = "__end__") -> AsyncGenerator[str]:
+    """Convert an asyncio queue to an async iterator."""
+    while True:
+        item = await queue.get()
+        if item == sentinel:
+            break
+        yield item
 
 class JaiAcpClient(Client):
     """
@@ -57,9 +66,10 @@ class JaiAcpClient(Client):
     """
 
     agent_subprocess: Process
-    _connection_future: Awaitable[ClientSideConnection] | None
+    _connection_future: ClassVar[Awaitable[ClientSideConnection] | None] = None
     event_loop: asyncio.AbstractEventLoop
     _personas_by_session: dict[str, BasePersona]
+    _queues_by_session: dict[str, asyncio.Queue[str]]
 
     def __init__(self, *args, agent_subprocess: Awaitable[Process], event_loop: asyncio.AbstractEventLoop, **kwargs):
         """
@@ -69,9 +79,13 @@ class JaiAcpClient(Client):
         :param event_loop: The `asyncio` event loop running this process.
         """
         self.agent_subprocess = agent_subprocess
-        self._connection_future = event_loop.create_task(self._init_connection())
+        if self.__class__._connection_future is None:
+            self.__class__._connection_future = event_loop.create_task(
+                self._init_connection()
+            )
         self.event_loop = event_loop
         self._personas_by_session = {}
+        self._queues_by_session = {}
         super().__init__(*args, **kwargs)
     
 
@@ -86,7 +100,7 @@ class JaiAcpClient(Client):
         return conn
     
     async def get_connection(self) -> ClientSideConnection:
-        return await self._connection_future
+        return await self.__class__._connection_future
 
     async def create_session(self, persona: BasePersona) -> NewSessionResponse:
         """
@@ -99,6 +113,46 @@ class JaiAcpClient(Client):
         self._personas_by_session[session.session_id] = persona
         return session
     
+    async def prompt_and_reply(self, session_id: str, prompt: str, attachments: list[dict] = []) -> PromptResponse:
+        """
+        A helper method that sends a prompt with an optional list of attachments
+        to the assigned ACP server. This method writes back to the chat by
+        calling methods on the persona corresponding to this session ID.
+        """
+        assert session_id in self._personas_by_session
+        conn = await self.get_connection()
+
+        # ensure an asyncio Queue exists for this session
+        # the `session_update()` method will push chunks to this queue
+        queue = self._queues_by_session.get(session_id, None)
+        if queue is None:
+            queue: asyncio.Queue[str] = asyncio.Queue()
+            self._queues_by_session[session_id] = queue
+
+        # create async iterator that yields until the response is complete
+        aiter = queue_to_iterator(queue)
+
+        # create background task to stream message back to client using the
+        # dedicated persona method 
+        persona = self._personas_by_session[session_id]
+        self.event_loop.create_task(
+            persona.stream_message(aiter)
+        )
+
+        # call the model and await
+        # TODO: add attachments!
+        response = await conn.prompt(
+            prompt=[
+                TextContentBlock(text=prompt, type="text"),
+            ],
+            session_id=session_id
+        )
+
+        # push sentinel value to queue to close the async iterator
+        queue.put_nowait("__end__")
+
+        return response
+
     async def session_update(
         self,
         session_id: str,
@@ -113,11 +167,15 @@ class JaiAcpClient(Client):
         **kwargs: Any,
     ) -> None:
         """
-        Handles `session/update` requests from the ACP agent.
+        Handles `session/update` requests from the ACP agent. There must be an
+        `asyncio.Queue` corresponding to this session ID - this should be set by
+        the `prompt_and_reply()` method.
         """
 
         if not isinstance(update, AgentMessageChunk):
             return
+
+        assert session_id in self._queues_by_session
 
         content = update.content
         text: str
@@ -134,9 +192,8 @@ class JaiAcpClient(Client):
         else:
             text = "<content>"
         
-        persona = self._personas_by_session[session_id]
-        persona.send_message(text)
-        print(text)
+        queue = self._queues_by_session[session_id]
+        queue.put_nowait(text)
 
     async def request_permission(
         self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any
