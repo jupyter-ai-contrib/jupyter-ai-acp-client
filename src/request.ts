@@ -17,7 +17,7 @@ export async function requestAPI<T>(
   const settings = ServerConnection.makeSettings();
   const requestUrl = URLExt.join(
     settings.baseUrl,
-    'jupyter-ai-acp-client', // our server extension's API namespace
+    'ai/acp', // our server extension's API namespace
     endPoint
   );
 
@@ -43,4 +43,34 @@ export async function requestAPI<T>(
   }
 
   return data;
+}
+
+type AcpSlashCommand = {
+  name: string;
+  description: string;
+};
+
+type AcpSlashCommandsResponse = {
+  commands: AcpSlashCommand[];
+};
+
+export async function getAcpSlashCommands(
+  chatPath: string,
+  personaMentionName: string | null = null
+): Promise<AcpSlashCommand[]> {
+  let response: AcpSlashCommandsResponse;
+  try {
+    if (personaMentionName === null) {
+      response = await requestAPI(`/slash_commands?chat_path=${chatPath}`);
+    } else {
+      response = await requestAPI(
+        `/slash_commands/${personaMentionName}?chat_path=${chatPath}`
+      );
+    }
+  } catch (e) {
+    console.warn('Error retrieving ACP slash commands: ', e);
+    return [];
+  }
+
+  return response.commands;
 }

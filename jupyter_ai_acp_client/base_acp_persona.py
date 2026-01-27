@@ -4,6 +4,7 @@ import asyncio
 from asyncio.subprocess import Process
 from typing import Awaitable, ClassVar
 from acp import NewSessionResponse
+from acp.schema import AvailableCommand
 
 from .default_acp_client import JaiAcpClient
 
@@ -35,6 +36,8 @@ class BaseAcpPersona(BasePersona):
     Developers should always call `self.get_session()` or `self.get_session_id()`.
     """
 
+    _acp_slash_commands: list[AvailableCommand]
+
     def __init__(self, *args, executable: list[str], **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -50,6 +53,7 @@ class BaseAcpPersona(BasePersona):
         self._client_session_future = self.event_loop.create_task(
             self._init_client_session()
         )
+        self._acp_slash_commands = []
 
     async def _init_agent_subprocess(self) -> Process:
         process = await asyncio.create_subprocess_exec(
@@ -116,6 +120,25 @@ class BaseAcpPersona(BasePersona):
             session_id=session_id,
             prompt=prompt,
         )
+    
+    @property
+    def acp_slash_commands(self) -> list[AvailableCommand]:
+        """
+        Returns the list of slash commands advertised by the ACP agent in the
+        current session.
+
+        This initializes to an empty list, and should be updated **only** by the
+        ACP client upon receiving a `session/update` request containing an
+        `AvailableCommandsUpdate` payload from the ACP agent.
+        """
+        return self._acp_slash_commands
+    
+    @acp_slash_commands.setter
+    def acp_slash_commands(self, commands: list[AvailableCommand]):
+        self.log.info(
+            f"Setting {len(commands)} slash commands for '{self.name}' in room '{self.parent.room_id}'."
+        )
+        self._acp_slash_commands = commands
 
     def shutdown(self):
         # TODO: allow shutdown() to be async

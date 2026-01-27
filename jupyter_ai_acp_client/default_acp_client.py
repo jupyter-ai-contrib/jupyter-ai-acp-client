@@ -47,7 +47,6 @@ from acp.schema import (
     AllowedOutcome
 )
 from jupyter_ai_persona_manager import BasePersona
-from jupyterlab_chat.ychat import YChat
 from typing import Awaitable, ClassVar
 from asyncio.subprocess import Process
 
@@ -179,6 +178,14 @@ class JaiAcpClient(Client):
         `asyncio.Queue` corresponding to this session ID - this should be set by
         the `prompt_and_reply()` method.
         """
+
+        if isinstance(update, AvailableCommandsUpdate):
+            if not update.available_commands:
+                return
+            persona = self._personas_by_session.get(session_id)
+            if persona and hasattr(persona, 'acp_slash_commands'):
+                persona.acp_slash_commands = update.available_commands
+            return
 
         if not isinstance(update, AgentMessageChunk):
             return

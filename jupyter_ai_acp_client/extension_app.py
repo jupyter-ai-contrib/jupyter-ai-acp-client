@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 from jupyter_server.extension.application import ExtensionApp
-from .routes import HelloRouteHandler
+from .routes import AcpSlashCommandsHandler
 
 
 class JaiAcpClientExtension(ExtensionApp):
@@ -11,7 +11,7 @@ class JaiAcpClientExtension(ExtensionApp):
 
     name = "jupyter_ai_acp_client"
     handlers = [
-        (r"jupyter-ai-acp-client/hello/?", HelloRouteHandler),
+        (r"ai/acp/slash_commands/?([^/]*)?", AcpSlashCommandsHandler),
     ]
 
     def initialize_settings(self):
