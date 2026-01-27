@@ -2,11 +2,62 @@
 
 [![Github Actions Status](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/workflows/Build/badge.svg)](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/actions/workflows/build.yml)
 
-The ACP client for Jupyter AI, allowing for ACP agents to be used in JupyterLab
+A proof-of-concept package providing a client implementation of the Agent Client
+Protocol (ACP) in Jupyter AI v3, as well as helper classes for other developers
+to use when custom AI personas wrapping ACP agents.
 
-This extension is composed of a Python package named `jupyter_ai_acp_client`
-for the server extension and a NPM package named `@jupyter-ai/acp-client`
-for the frontend extension.
+This package provides a default ACP client implementation as `JaiAcpClient`.
+This client provides a `prompt_and_reply()` method which calls the ACP server
+and streams the reply back to the chat. In addition, it provides file read, file
+write, and terminal use capabilities.
+
+This package also provides a default `BaseAcpPersona` class which can be easily
+extended to add ACP agents as AI personas in JupyterLab. This base class takes
+an additional `executable` argument which starts the ACP agent server. This
+package also provides a default ACP client implementation as `JaiAcpClient`.
+
+- `BaseAcpPersona` automatically creates new subprocesses for the ACP agent and
+client when needed. These are stored as class attributes, so all instances of
+the same ACP persona share a common ACP agent subprocess.
+
+- Since `BaseAcpPersona` inherits from `BasePersona`, subclasses can be provided
+simply as entry points to become available for use in Jupyter AI. (see
+[documentation](https://jupyter-ai.readthedocs.io/en/v3/developers/entry_points_api/personas_group.html))
+
+- Personas based on ACP now just need to derive from `BaseAcpPersona` and define
+the persona name, the persona avatar, and the `executable` starting the ACP
+agent server.
+
+For example, the `@Claude-ACP` persona is defined in `claude.py` using less than
+20 lines of code:
+
+```py
+class ClaudeAcpPersona(BaseAcpPersona):
+    def __init__(self, *args, **kwargs):
+        executable = ["claude-code-acp"]
+        super().__init__(*args, executable=executable, **kwargs)
+    
+    @property
+    def defaults(self) -> PersonaDefaults:
+        avatar_path = str(os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "static", "claude.svg")
+        ))
+
+        return PersonaDefaults(
+            name="Claude-ACP",
+            description="Claude Code as an ACP agent persona.",
+            avatar_path=avatar_path,
+            system_prompt="unused"
+        )
+```
+
+Currently, this package provides 2 personas: `@Test-ACP` and `@Claude-ACP`.
+Note that `@Claude-ACP` requires the `claude-code-acp` executable to appear.
+This can be installed via:
+
+```
+npm install -g @zed-industries/claude-code-acp
+```
 
 ## Requirements
 
