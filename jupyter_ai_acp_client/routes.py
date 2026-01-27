@@ -53,7 +53,7 @@ class AcpSlashCommandsHandler(APIHandler):
                 # raise HTTP error: persona not found
                 raise tornado.web.HTTPError(404, f"Persona not found: @{persona_mention_name}")
         else:
-            persona = persona_manager.default_persona
+            persona = persona_manager.last_mentioned_persona or persona_manager.default_persona
 
         # Return early with empty response if either:
         # 1. no default persona, or
