@@ -17,16 +17,16 @@ an additional `executable` argument which starts the ACP agent server. This
 package also provides a default ACP client implementation as `JaiAcpClient`.
 
 - `BaseAcpPersona` automatically creates new subprocesses for the ACP agent and
-client when needed. These are stored as class attributes, so all instances of
-the same ACP persona share a common ACP agent subprocess.
+  client when needed. These are stored as class attributes, so all instances of
+  the same ACP persona share a common ACP agent subprocess.
 
 - Since `BaseAcpPersona` inherits from `BasePersona`, subclasses can be provided
-simply as entry points to become available for use in Jupyter AI. (see
-[documentation](https://jupyter-ai.readthedocs.io/en/v3/developers/entry_points_api/personas_group.html))
+  simply as entry points to become available for use in Jupyter AI. (see
+  [documentation](https://jupyter-ai.readthedocs.io/en/v3/developers/entry_points_api/personas_group.html))
 
 - Personas based on ACP now just need to derive from `BaseAcpPersona` and define
-the persona name, the persona avatar, and the `executable` starting the ACP
-agent server.
+  the persona name, the persona avatar, and the `executable` starting the ACP
+  agent server.
 
 For example, the `@Claude-ACP` persona is defined in `claude.py` using less than
 20 lines of code:
@@ -36,7 +36,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["claude-code-acp"]
         super().__init__(*args, executable=executable, **kwargs)
-    
+
     @property
     def defaults(self) -> PersonaDefaults:
         avatar_path = str(os.path.abspath(
