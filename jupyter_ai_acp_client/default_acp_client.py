@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncIterator
 
 from acp import (
     PROTOCOL_VERSION,
@@ -52,7 +52,7 @@ from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
 
-async def queue_to_iterator(queue: asyncio.Queue[str], sentinel: str = "__end__") -> AsyncGenerator[str]:
+async def queue_to_iterator(queue: asyncio.Queue[str], sentinel: str = "__end__") -> AsyncIterator[str]:
     """Convert an asyncio queue to an async iterator."""
     while True:
         item = await queue.get()
