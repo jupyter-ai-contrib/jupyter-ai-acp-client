@@ -47,7 +47,7 @@ from acp.schema import (
     AllowedOutcome
 )
 from jupyter_ai_persona_manager import BasePersona
-from typing import Awaitable, ClassVar
+from typing import Awaitable
 from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
@@ -68,7 +68,7 @@ class JaiAcpClient(Client):
     """
 
     agent_subprocess: Process
-    _connection_future: ClassVar[Awaitable[ClientSideConnection] | None] = None
+    _connection_future: Awaitable[ClientSideConnection]
     event_loop: asyncio.AbstractEventLoop
     _personas_by_session: dict[str, BasePersona]
     _queues_by_session: dict[str, asyncio.Queue[str]]
@@ -82,11 +82,12 @@ class JaiAcpClient(Client):
         :param event_loop: The `asyncio` event loop running this process.
         """
         self.agent_subprocess = agent_subprocess
-        if self.__class__._connection_future is None:
-            self.__class__._connection_future = event_loop.create_task(
-                self._init_connection()
-            )
+        # Each client instance needs its own connection to its own subprocess
+        self._connection_future = event_loop.create_task(
+            self._init_connection()
+        )
         self.event_loop = event_loop
+        # Each client instance maintains its own session mappings
         self._personas_by_session = {}
         self._queues_by_session = {}
         self._terminal_manager = TerminalManager(event_loop)
@@ -107,7 +108,7 @@ class JaiAcpClient(Client):
         return conn
     
     async def get_connection(self) -> ClientSideConnection:
-        return await self.__class__._connection_future
+        return await self._connection_future
 
     async def create_session(self, persona: BasePersona) -> NewSessionResponse:
         """
@@ -140,7 +141,7 @@ class JaiAcpClient(Client):
         aiter = queue_to_iterator(queue)
 
         # create background task to stream message back to client using the
-        # dedicated persona method 
+        # dedicated persona method
         persona = self._personas_by_session[session_id]
         self.event_loop.create_task(
             persona.stream_message(aiter)
@@ -190,7 +191,9 @@ class JaiAcpClient(Client):
         if not isinstance(update, AgentMessageChunk):
             return
 
-        assert session_id in self._queues_by_session
+        if session_id not in self._queues_by_session:
+            logging.error(f"No queue found for session_id: {session_id}")
+            return
 
         content = update.content
         text: str
@@ -206,7 +209,7 @@ class JaiAcpClient(Client):
             text = "<resource>"
         else:
             text = "<content>"
-        
+
         queue = self._queues_by_session[session_id]
         queue.put_nowait(text)
 

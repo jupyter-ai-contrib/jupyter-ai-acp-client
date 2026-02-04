@@ -1,10 +1,15 @@
 import os
+import sys
 from ..base_acp_persona import BaseAcpPersona
 from jupyter_ai_persona_manager import PersonaDefaults
 
 class TestAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
-        executable = ["python", "jupyter-ai-acp-client/examples/agent.py"]
+        # Get absolute path to agent.py
+        agent_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "examples", "agent.py")
+        )
+        executable = [sys.executable, agent_path]
         super().__init__(*args, executable=executable, **kwargs)
     
     @property

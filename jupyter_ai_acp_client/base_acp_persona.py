@@ -1,6 +1,7 @@
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
 import asyncio
+import sys
 from asyncio.subprocess import Process
 from typing import Awaitable, ClassVar
 from acp import NewSessionResponse
@@ -42,14 +43,18 @@ class BaseAcpPersona(BasePersona):
         super().__init__(*args, **kwargs)
 
         self._executable = executable
-        if self.__class__._subprocess_future is None:
+
+        # Ensure each subclass has its own subprocess and client by checking if the
+        # class variable is defined directly on this class (not inherited)
+        if '_subprocess_future' not in self.__class__.__dict__ or self.__class__._subprocess_future is None:
             self.__class__._subprocess_future = self.event_loop.create_task(
                 self._init_agent_subprocess()
             )
-        if self.__class__._client_future is None:
+        if '_client_future' not in self.__class__.__dict__ or self.__class__._client_future is None:
             self.__class__._client_future = self.event_loop.create_task(
                 self._init_client()
             )
+
         self._client_session_future = self.event_loop.create_task(
             self._init_client_session()
         )
@@ -60,6 +65,7 @@ class BaseAcpPersona(BasePersona):
             *self._executable,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
+            stderr=sys.stderr,
         )
         self.log.info(f"Spawned ACP agent subprocess for '{self.__class__.__name__}'.")
         return process
