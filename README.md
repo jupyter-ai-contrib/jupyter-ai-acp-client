@@ -62,11 +62,13 @@ Currently, this package provides 3 personas:
 ## Dependencies
 
 **Required**:
+
 - JupyterLab >= 4.0.0
 - `jupyter-ai-persona-manager>=0.0.5`
 - `agent_client_protocol`
 
 **Optional**
+
 - `claude-code-acp` (enables `@Claude-ACP`)
 - `kiro-cli` (enables `@Kiro`)
 
