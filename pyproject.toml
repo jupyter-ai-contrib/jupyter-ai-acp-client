@@ -97,3 +97,4 @@ ignore = ["W002"]
 [project.entry-points."jupyter_ai.personas"]
 test-acp = "jupyter_ai_acp_client.acp_personas.test:TestAcpPersona"
 claude-acp = "jupyter_ai_acp_client.acp_personas.claude:ClaudeAcpPersona"
+kiro-acp = "jupyter_ai_acp_client.acp_personas.kiro:KiroAcpPersona"
