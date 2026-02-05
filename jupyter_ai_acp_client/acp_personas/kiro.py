@@ -1,9 +1,67 @@
 import shutil
+import subprocess
+import re
 from jupyter_ai_persona_manager import PersonaRequirementsUnmet
+
+# Raise `PersonaRequirementsUnmet` if `kiro-cli` not installed
 if shutil.which("kiro-cli") is None:
     raise PersonaRequirementsUnmet(
         "This persona requires `kiro-cli` to be installed."
         " See https://kiro.dev for installation instructions."
+    )
+
+# Raise `PersonaRequirementsUnmet` if `kiro-cli<1.25.0`
+try:
+    result = subprocess.run(
+        ["kiro-cli", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=5
+    )
+
+    # Check for non-zero exit code or stderr output
+    if result.returncode != 0:
+        raise PersonaRequirementsUnmet(
+            f"kiro-cli --version returned non-zero exit code {result.returncode}."
+            " Please ensure kiro-cli is properly installed."
+        )
+
+    if result.stderr:
+        raise PersonaRequirementsUnmet(
+            f"kiro-cli --version produced stderr output: {result.stderr.strip()}"
+        )
+
+    # Extract semver from stdout using regex
+    version_match = re.search(r'(\d+\.\d+\.\d+)', result.stdout)
+    if not version_match:
+        raise PersonaRequirementsUnmet(
+            "Could not extract version number from kiro-cli --version output."
+            f" Got: {result.stdout.strip()}"
+        )
+
+    version_str = version_match.group(1)
+    version_parts = [int(x) for x in version_str.split('.')]
+
+    # Check if version >= 1.25.0
+    required_version = (1, 25, 0)
+    current_version = tuple(version_parts)
+
+    if current_version < required_version:
+        raise PersonaRequirementsUnmet(
+            f"kiro-cli version {version_str} is installed, but version >= 1.25.0 is required."
+            " Please upgrade kiro-cli. See https://kiro.dev for instructions."
+        )
+
+except subprocess.TimeoutExpired:
+    raise PersonaRequirementsUnmet(
+        "kiro-cli --version command timed out."
+        " Please ensure kiro-cli is properly installed."
+    )
+except FileNotFoundError:
+    # This shouldn't happen since we checked with shutil.which, but handle it anyway
+    raise PersonaRequirementsUnmet(
+        "kiro-cli command not found."
+        " Please ensure kiro-cli is properly installed."
     )
 
 import os
