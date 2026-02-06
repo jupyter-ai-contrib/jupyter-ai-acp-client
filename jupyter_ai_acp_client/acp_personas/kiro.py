@@ -1,7 +1,10 @@
+import os
+import re
 import shutil
 import subprocess
-import re
-from jupyter_ai_persona_manager import PersonaRequirementsUnmet
+
+from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
+from ..base_acp_persona import BaseAcpPersona
 
 # Raise `PersonaRequirementsUnmet` if `kiro-cli` not installed
 if shutil.which("kiro-cli") is None:
@@ -63,10 +66,6 @@ except FileNotFoundError:
         "kiro-cli command not found."
         " Please ensure kiro-cli is properly installed."
     )
-
-import os
-from ..base_acp_persona import BaseAcpPersona
-from jupyter_ai_persona_manager import PersonaDefaults
 
 class KiroAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
