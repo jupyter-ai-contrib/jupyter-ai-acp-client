@@ -19,17 +19,17 @@ try:
         timeout=5
     )
 
-    # Check for non-zero exit code or stderr output
+    # Check for non-zero exit code
     if result.returncode != 0:
-        raise PersonaRequirementsUnmet(
+        stderr = result.stderr.strip()
+        error_msg = (
             f"kiro-cli --version returned non-zero exit code {result.returncode}."
             " Please ensure kiro-cli is properly installed."
         )
+        if stderr:
+            error_msg += f"\nStderr output: {stderr}"
 
-    if result.stderr:
-        raise PersonaRequirementsUnmet(
-            f"kiro-cli --version produced stderr output: {result.stderr.strip()}"
-        )
+        raise PersonaRequirementsUnmet(error_msg)
 
     # Extract semver from stdout using regex
     version_match = re.search(r'(\d+\.\d+\.\d+)', result.stdout)
