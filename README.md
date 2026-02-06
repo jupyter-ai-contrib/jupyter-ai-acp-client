@@ -51,20 +51,26 @@ class ClaudeAcpPersona(BaseAcpPersona):
         )
 ```
 
-Currently, this package provides 2 personas: `@Test-ACP` and `@Claude-ACP`.
-Note that `@Claude-ACP` requires the `claude-code-acp` executable to appear.
-This can be installed via:
+Currently, this package provides 3 personas:
 
-```
-npm install -g @zed-industries/claude-code-acp
-```
+1. `@Test-ACP` (a test persona that echoes responses)
+2. `@Claude-ACP`
+   - requires `claude-code-acp`, installed via `npm install -g @zed-industries/claude-code-acp`
+3. `@Kiro`
+   - requires `kiro-cli`, installed from https://kiro.dev
 
-## Requirements
+## Dependencies
+
+**Required**:
 
 - JupyterLab >= 4.0.0
 - `jupyter-ai-persona-manager>=0.0.5`
 - `agent_client_protocol`
-- Optional: `claude-code-acp`
+
+**Optional**
+
+- `claude-code-acp` (enables `@Claude-ACP`)
+- `kiro-cli` (enables `@Kiro`)
 
 ## Install
 
