@@ -1,6 +1,6 @@
 {
     "name": "@jupyter-ai/acp-client",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "description": "The ACP client for Jupyter AI, allowing for ACP agents to be used in JupyterLab",
     "keywords": [
         "jupyter",
