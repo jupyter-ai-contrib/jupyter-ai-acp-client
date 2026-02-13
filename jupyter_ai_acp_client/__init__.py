@@ -1,3 +1,7 @@
+import logging
+
+logging.getLogger("jupyter_ai_acp_client").setLevel(logging.INFO)
+
 try:
     from ._version import __version__
 except ImportError:

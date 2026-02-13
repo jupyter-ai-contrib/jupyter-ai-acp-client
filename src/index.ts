@@ -1,5 +1,5 @@
 import {
-  // JupyterFrontEnd,
+  JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
@@ -7,8 +7,11 @@ import {
   IChatCommandProvider,
   IChatCommandRegistry,
   IInputModel,
+  IMessagePreambleRegistry,
   ChatCommand
 } from '@jupyter/chat';
+
+import { ToolCallsComponent } from './tool-calls';
 
 import { getAcpSlashCommands } from './request';
 
@@ -119,8 +122,23 @@ export const slashCommandPlugin: JupyterFrontEndPlugin<void> = {
   description: 'Adds support for slash commands in Jupyter AI.',
   autoStart: true,
   requires: [IChatCommandRegistry],
-  activate: (app, registry: IChatCommandRegistry) => {
+  optional: [IMessagePreambleRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    registry: IChatCommandRegistry,
+    preambleRegistry: IMessagePreambleRegistry | null
+  ) => {
     registry.addProvider(new SlashCommandProvider());
+    if (preambleRegistry) {
+      console.warn(
+        '[ACP] Registered ToolCallsComponent with preamble registry'
+      );
+      preambleRegistry.addComponent(ToolCallsComponent);
+    } else {
+      console.warn(
+        '[ACP] IMessagePreambleRegistry not available — tool call UI disabled'
+      );
+    }
   }
 };
 

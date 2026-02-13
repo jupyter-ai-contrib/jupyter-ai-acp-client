@@ -3,3 +3,44 @@
 
     https://jupyterlab.readthedocs.io/en/stable/developer/css.html
 */
+
+/* Tool call UI */
+.jp-jupyter-ai-acp-client-tool-calls {
+  padding: 4px 0;
+  font-size: var(--jp-ui-font-size1);
+  line-height: 1.6;
+}
+
+.jp-jupyter-ai-acp-client-tool-call {
+  padding: 1px 0;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-jupyter-ai-acp-client-tool-call-in_progress,
+.jp-jupyter-ai-acp-client-tool-call-pending {
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-jupyter-ai-acp-client-tool-call-completed {
+  color: var(--jp-success-color1, #388e3c);
+}
+
+.jp-jupyter-ai-acp-client-tool-call-failed {
+  color: var(--jp-error-color1, #d32f2f);
+}
+
+details.jp-jupyter-ai-acp-client-tool-call summary {
+  cursor: pointer;
+}
+
+.jp-jupyter-ai-acp-client-tool-call-output {
+  margin: 4px 0 4px 20px;
+  padding: 4px 8px;
+  font-size: var(--jp-code-font-size);
+  font-family: var(--jp-code-font-family);
+  background: var(--jp-cell-editor-background);
+  border: var(--jp-border-width) solid var(--jp-cell-editor-border-color);
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre;
+}

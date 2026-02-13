@@ -1,10 +1,9 @@
 import asyncio
-import contextlib
 import logging
 import os
-import sys
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, Optional
+from time import time
 
 from acp import (
     PROTOCOL_VERSION,
@@ -47,18 +46,21 @@ from acp.schema import (
     AllowedOutcome
 )
 from jupyter_ai_persona_manager import BasePersona
+from jupyterlab_chat.models import Message, NewMessage
+from jupyterlab_chat.utils import find_mentions
 from typing import Awaitable
 from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
+from .tool_call_renderer import (
+    ToolCallState,
+    update_tool_call_from_start,
+    update_tool_call_from_progress,
+    serialize_tool_calls,
+)
 
-async def queue_to_iterator(queue: asyncio.Queue[str], sentinel: str = "__end__") -> AsyncIterator[str]:
-    """Convert an asyncio queue to an async iterator."""
-    while True:
-        item = await queue.get()
-        if item == sentinel:
-            break
-        yield item
+logger = logging.getLogger(__name__)
+
 
 class JaiAcpClient(Client):
     """
@@ -71,8 +73,9 @@ class JaiAcpClient(Client):
     _connection_future: Awaitable[ClientSideConnection]
     event_loop: asyncio.AbstractEventLoop
     _personas_by_session: dict[str, BasePersona]
-    _queues_by_session: dict[str, asyncio.Queue[str]]
     _terminal_manager: TerminalManager
+    _tool_calls_by_session: dict[str, dict[str, ToolCallState]]
+    _message_ids_by_session: dict[str, Optional[str]]
 
     def __init__(self, *args, agent_subprocess: Awaitable[Process], event_loop: asyncio.AbstractEventLoop, **kwargs):
         """
@@ -89,10 +92,11 @@ class JaiAcpClient(Client):
         self.event_loop = event_loop
         # Each client instance maintains its own session mappings
         self._personas_by_session = {}
-        self._queues_by_session = {}
+        self._tool_calls_by_session = {}
+        self._message_ids_by_session = {}
         self._terminal_manager = TerminalManager(event_loop)
         super().__init__(*args, **kwargs)
-    
+
 
     async def _init_connection(self) -> ClientSideConnection:
         proc = self.agent_subprocess
@@ -106,7 +110,7 @@ class JaiAcpClient(Client):
             client_info=Implementation(name="Jupyter AI", title="Jupyter AI ACP Client", version="0.1.0"),
         )
         return conn
-    
+
     async def get_connection(self) -> ClientSideConnection:
         return await self._connection_future
 
@@ -120,81 +124,157 @@ class JaiAcpClient(Client):
         session = await conn.new_session(mcp_servers=[], cwd=os.getcwd())
         self._personas_by_session[session.session_id] = persona
         return session
-    
+
     async def prompt_and_reply(self, session_id: str, prompt: str, attachments: list[dict] = []) -> PromptResponse:
         """
         A helper method that sends a prompt with an optional list of attachments
         to the assigned ACP server. This method writes back to the chat by
-        calling methods on the persona corresponding to this session ID.
+        handling all events in session_update().
         """
         assert session_id in self._personas_by_session
         conn = await self.get_connection()
-
-        # ensure an asyncio Queue exists for this session
-        # the `session_update()` method will push chunks to this queue
-        queue = self._queues_by_session.get(session_id, None)
-        if queue is None:
-            queue: asyncio.Queue[str] = asyncio.Queue()
-            self._queues_by_session[session_id] = queue
-
-        # create async iterator that yields until the response is complete
-        aiter = queue_to_iterator(queue)
-
-        # create background task to stream message back to client using the
-        # dedicated persona method
         persona = self._personas_by_session[session_id]
-        self.event_loop.create_task(
-            persona.stream_message(aiter)
+
+        # Reset session state for this prompt
+        self._tool_calls_by_session[session_id] = {}
+        self._message_ids_by_session[session_id] = None
+
+        logger.info(f"prompt_and_reply: starting for session {session_id}")
+
+        # Set awareness to indicate writing
+        persona.awareness.set_local_state_field("isWriting", True)
+
+        try:
+            # Call the model and await — session_update() handles all events
+            response = await conn.prompt(
+                prompt=[
+                    TextContentBlock(text=prompt, type="text"),
+                ],
+                session_id=session_id
+            )
+
+            # Trigger find_mentions on the final message
+            message_id = self._message_ids_by_session.get(session_id)
+            if message_id:
+                msg = persona.ychat.get_message(message_id)
+                if msg:
+                    persona.ychat.update_message(
+                        msg,
+                        trigger_actions=[find_mentions],
+                    )
+
+            logger.info(f"prompt_and_reply: completed for session {session_id}")
+            return response
+        except Exception as e:
+            logger.exception(f"prompt_and_reply: failed for session {session_id}")
+            raise
+        finally:
+            # Clear awareness writing state
+            persona.awareness.set_local_state_field("isWriting", False)
+
+    def _get_or_create_message(self, session_id: str) -> str:
+        """
+        Get the existing message ID for a session, or create a new message.
+        Returns the message ID.
+        """
+        message_id = self._message_ids_by_session.get(session_id)
+        if message_id:
+            return message_id
+
+        persona = self._personas_by_session[session_id]
+        tool_calls = self._tool_calls_by_session.get(session_id, {})
+
+        message_id = persona.ychat.add_message(
+            NewMessage(body="", sender=persona.id),
+            trigger_actions=[],
+        )
+        self._message_ids_by_session[session_id] = message_id
+        logger.info(f"Created message {message_id} for session {session_id}")
+
+        # Update awareness to point to the message
+        persona.awareness.set_local_state_field("isWriting", message_id)
+
+        # If there are tool_calls, update the message with them
+        if tool_calls:
+            msg = persona.ychat.get_message(message_id)
+            if msg:
+                msg.tool_calls = serialize_tool_calls(tool_calls)
+                persona.ychat.update_message(msg, trigger_actions=[])
+
+        return message_id
+
+    def _update_message_tool_calls(self, session_id: str) -> None:
+        """
+        Update the message's tool_calls field with the current tool call state.
+        """
+        message_id = self._message_ids_by_session.get(session_id)
+        if not message_id:
+            return
+
+        persona = self._personas_by_session[session_id]
+        tool_calls = self._tool_calls_by_session.get(session_id, {})
+
+        msg = persona.ychat.get_message(message_id)
+        if msg:
+            serialized = serialize_tool_calls(tool_calls)
+            logger.info(f"update_tool_calls: message={message_id} count={len(tool_calls)}")
+            logger.debug(f"tool_calls payload: {serialized}")
+            msg.tool_calls = serialized
+            persona.ychat.update_message(msg, trigger_actions=[])
+
+    def _handle_tool_call_start(self, session_id: str, update: ToolCallStart) -> None:
+        """Handle a ToolCallStart event."""
+        if session_id not in self._tool_calls_by_session:
+            self._tool_calls_by_session[session_id] = {}
+
+        tool_calls = self._tool_calls_by_session[session_id]
+        kind_str = update.kind.value if update.kind else None
+        locations_paths = [loc.path for loc in update.locations] if update.locations else None
+        logger.info(f"tool_call_start: id={update.tool_call_id} title={update.title!r} kind={kind_str} locations={locations_paths}")
+        update_tool_call_from_start(
+            tool_calls,
+            tool_call_id=update.tool_call_id,
+            title=update.title,
+            kind=kind_str,
+            locations=locations_paths,
         )
 
-        # call the model and await
-        # TODO: add attachments!
-        response = await conn.prompt(
-            prompt=[
-                TextContentBlock(text=prompt, type="text"),
-            ],
-            session_id=session_id
+        # Create message if it doesn't exist, then update tool_calls
+        self._get_or_create_message(session_id)
+        self._update_message_tool_calls(session_id)
+
+    def _handle_tool_call_progress(self, session_id: str, update: ToolCallProgress) -> None:
+        """Handle a ToolCallProgress event."""
+        if session_id not in self._tool_calls_by_session:
+            self._tool_calls_by_session[session_id] = {}
+
+        tool_calls = self._tool_calls_by_session[session_id]
+
+        # Convert raw_output to a serializable value
+        raw_output = update.raw_output
+        if raw_output is not None and not isinstance(raw_output, (str, int, float, bool, list, dict)):
+            raw_output = str(raw_output)
+
+        kind_str = update.kind.value if update.kind else None
+        status_str = update.status.value if update.status else None
+        locations_paths = [loc.path for loc in update.locations] if update.locations else None
+        logger.info(f"tool_call_progress: id={update.tool_call_id} title={update.title!r} status={status_str} locations={locations_paths}")
+        update_tool_call_from_progress(
+            tool_calls,
+            tool_call_id=update.tool_call_id,
+            title=update.title,
+            kind=kind_str,
+            status=status_str,
+            raw_output=raw_output,
+            locations=locations_paths,
         )
 
-        # push sentinel value to queue to close the async iterator
-        queue.put_nowait("__end__")
+        # Update tool_calls on existing message (it should exist by now from ToolCallStart)
+        self._get_or_create_message(session_id)
+        self._update_message_tool_calls(session_id)
 
-        return response
-
-    async def session_update(
-        self,
-        session_id: str,
-        update: UserMessageChunk
-        | AgentMessageChunk
-        | AgentThoughtChunk
-        | ToolCallStart
-        | ToolCallProgress
-        | AgentPlanUpdate
-        | AvailableCommandsUpdate
-        | CurrentModeUpdate,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Handles `session/update` requests from the ACP agent. There must be an
-        `asyncio.Queue` corresponding to this session ID - this should be set by
-        the `prompt_and_reply()` method.
-        """
-
-        if isinstance(update, AvailableCommandsUpdate):
-            if not update.available_commands:
-                return
-            persona = self._personas_by_session.get(session_id)
-            if persona and hasattr(persona, 'acp_slash_commands'):
-                persona.acp_slash_commands = update.available_commands
-            return
-
-        if not isinstance(update, AgentMessageChunk):
-            return
-
-        if session_id not in self._queues_by_session:
-            logging.error(f"No queue found for session_id: {session_id}")
-            return
-
+    def _handle_agent_message_chunk(self, session_id: str, update: AgentMessageChunk) -> None:
+        """Handle an AgentMessageChunk event by appending text to the message."""
         content = update.content
         text: str
         if isinstance(content, TextContentBlock):
@@ -210,8 +290,59 @@ class JaiAcpClient(Client):
         else:
             text = "<content>"
 
-        queue = self._queues_by_session[session_id]
-        queue.put_nowait(text)
+        message_id = self._get_or_create_message(session_id)
+        persona = self._personas_by_session[session_id]
+        tool_calls = self._tool_calls_by_session.get(session_id, {})
+        logger.info(f"agent_message_chunk: {len(text)} chars, tool_calls={len(tool_calls)}")
+
+        msg = Message(
+            id=message_id,
+            body=text,
+            time=time(),
+            sender=persona.id,
+            raw_time=False,
+            tool_calls=serialize_tool_calls(tool_calls),
+        )
+        persona.ychat.update_message(msg, append=True, trigger_actions=[])
+
+    async def session_update(
+        self,
+        session_id: str,
+        update: UserMessageChunk
+        | AgentMessageChunk
+        | AgentThoughtChunk
+        | ToolCallStart
+        | ToolCallProgress
+        | AgentPlanUpdate
+        | AvailableCommandsUpdate
+        | CurrentModeUpdate,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Handles `session/update` requests from the ACP agent. All event types
+        are handled directly here — tool calls, text chunks, and slash commands.
+        """
+        logger.info(f"session_update: {type(update).__name__} for session {session_id}")
+
+        if isinstance(update, AvailableCommandsUpdate):
+            if not update.available_commands:
+                return
+            persona = self._personas_by_session.get(session_id)
+            if persona and hasattr(persona, 'acp_slash_commands'):
+                persona.acp_slash_commands = update.available_commands
+            return
+
+        if isinstance(update, ToolCallStart):
+            self._handle_tool_call_start(session_id, update)
+            return
+
+        if isinstance(update, ToolCallProgress):
+            self._handle_tool_call_progress(session_id, update)
+            return
+
+        if isinstance(update, AgentMessageChunk):
+            self._handle_agent_message_chunk(session_id, update)
+            return
 
     async def request_permission(
         self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any
@@ -365,4 +496,3 @@ class JaiAcpClient(Client):
 
     async def ext_notification(self, method: str, params: dict) -> None:
         raise RequestError.method_not_found(method)
-
