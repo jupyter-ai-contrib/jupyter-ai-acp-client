@@ -225,7 +225,7 @@ class JaiAcpClient(Client):
 
         persona = self._personas_by_session[session_id]
         tool_calls = self._tool_calls_by_session[session_id]
-        kind_str = update.kind.value if update.kind else None
+        kind_str = update.kind if update.kind else None
         locations_paths = [loc.path for loc in update.locations] if update.locations else None
         persona.log.info(f"tool_call_start: id={update.tool_call_id} title={update.title!r} kind={kind_str} locations={locations_paths}")
         update_tool_call_from_start(
@@ -253,8 +253,8 @@ class JaiAcpClient(Client):
         if raw_output is not None and not isinstance(raw_output, (str, int, float, bool, list, dict)):
             raw_output = str(raw_output)
 
-        kind_str = update.kind.value if update.kind else None
-        status_str = update.status.value if update.status else None
+        kind_str = update.kind if update.kind else None
+        status_str = update.status if update.status else None
         locations_paths = [loc.path for loc in update.locations] if update.locations else None
         persona.log.info(f"tool_call_progress: id={update.tool_call_id} title={update.title!r} status={status_str} locations={locations_paths}")
         update_tool_call_from_progress(
