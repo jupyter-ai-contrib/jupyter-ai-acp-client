@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -58,8 +57,6 @@ from .tool_call_renderer import (
     update_tool_call_from_progress,
     serialize_tool_calls,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class JaiAcpClient(Client):
@@ -139,7 +136,7 @@ class JaiAcpClient(Client):
         self._tool_calls_by_session[session_id] = {}
         self._message_ids_by_session[session_id] = None
 
-        logger.info(f"prompt_and_reply: starting for session {session_id}")
+        persona.log.info(f"prompt_and_reply: starting for session {session_id}")
 
         # Set awareness to indicate writing
         persona.awareness.set_local_state_field("isWriting", True)
@@ -163,10 +160,10 @@ class JaiAcpClient(Client):
                         trigger_actions=[find_mentions],
                     )
 
-            logger.info(f"prompt_and_reply: completed for session {session_id}")
+            persona.log.info(f"prompt_and_reply: completed for session {session_id}")
             return response
         except Exception as e:
-            logger.exception(f"prompt_and_reply: failed for session {session_id}")
+            persona.log.exception(f"prompt_and_reply: failed for session {session_id}")
             raise
         finally:
             # Clear awareness writing state
@@ -189,7 +186,7 @@ class JaiAcpClient(Client):
             trigger_actions=[],
         )
         self._message_ids_by_session[session_id] = message_id
-        logger.info(f"Created message {message_id} for session {session_id}")
+        persona.log.info(f"Created message {message_id} for session {session_id}")
 
         # Update awareness to point to the message
         persona.awareness.set_local_state_field("isWriting", message_id)
@@ -217,8 +214,7 @@ class JaiAcpClient(Client):
         msg = persona.ychat.get_message(message_id)
         if msg:
             serialized = serialize_tool_calls(tool_calls)
-            logger.info(f"update_tool_calls: message={message_id} count={len(tool_calls)}")
-            logger.debug(f"tool_calls payload: {serialized}")
+            persona.log.info(f"update_tool_calls: message={message_id} count={len(tool_calls)} payload={serialized}")
             msg.tool_calls = serialized
             persona.ychat.update_message(msg, trigger_actions=[])
 
@@ -227,10 +223,11 @@ class JaiAcpClient(Client):
         if session_id not in self._tool_calls_by_session:
             self._tool_calls_by_session[session_id] = {}
 
+        persona = self._personas_by_session[session_id]
         tool_calls = self._tool_calls_by_session[session_id]
         kind_str = update.kind.value if update.kind else None
         locations_paths = [loc.path for loc in update.locations] if update.locations else None
-        logger.info(f"tool_call_start: id={update.tool_call_id} title={update.title!r} kind={kind_str} locations={locations_paths}")
+        persona.log.info(f"tool_call_start: id={update.tool_call_id} title={update.title!r} kind={kind_str} locations={locations_paths}")
         update_tool_call_from_start(
             tool_calls,
             tool_call_id=update.tool_call_id,
@@ -248,6 +245,7 @@ class JaiAcpClient(Client):
         if session_id not in self._tool_calls_by_session:
             self._tool_calls_by_session[session_id] = {}
 
+        persona = self._personas_by_session[session_id]
         tool_calls = self._tool_calls_by_session[session_id]
 
         # Convert raw_output to a serializable value
@@ -258,7 +256,7 @@ class JaiAcpClient(Client):
         kind_str = update.kind.value if update.kind else None
         status_str = update.status.value if update.status else None
         locations_paths = [loc.path for loc in update.locations] if update.locations else None
-        logger.info(f"tool_call_progress: id={update.tool_call_id} title={update.title!r} status={status_str} locations={locations_paths}")
+        persona.log.info(f"tool_call_progress: id={update.tool_call_id} title={update.title!r} status={status_str} locations={locations_paths}")
         update_tool_call_from_progress(
             tool_calls,
             tool_call_id=update.tool_call_id,
@@ -293,7 +291,7 @@ class JaiAcpClient(Client):
         message_id = self._get_or_create_message(session_id)
         persona = self._personas_by_session[session_id]
         tool_calls = self._tool_calls_by_session.get(session_id, {})
-        logger.info(f"agent_message_chunk: {len(text)} chars, tool_calls={len(tool_calls)}")
+        persona.log.info(f"agent_message_chunk: {len(text)} chars, tool_calls={len(tool_calls)}")
 
         msg = Message(
             id=message_id,
@@ -322,7 +320,9 @@ class JaiAcpClient(Client):
         Handles `session/update` requests from the ACP agent. All event types
         are handled directly here — tool calls, text chunks, and slash commands.
         """
-        logger.info(f"session_update: {type(update).__name__} for session {session_id}")
+        persona = self._personas_by_session.get(session_id)
+        if persona:
+            persona.log.info(f"session_update: {type(update).__name__} for session {session_id}")
 
         if isinstance(update, AvailableCommandsUpdate):
             if not update.available_commands:
