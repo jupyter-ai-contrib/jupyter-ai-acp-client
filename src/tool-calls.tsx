@@ -42,28 +42,6 @@ const FILE_KINDS = new Set(['read', 'edit', 'delete', 'move']);
 /** Tool kinds where expanded view shows raw_output (stdout, search results, etc.). */
 const OUTPUT_KINDS = new Set(['search', 'execute', 'think', 'fetch']);
 
-/** Display tier for expanded details content. */
-type DetailStyle = 'inline' | 'block';
-
-/**
- * Determine display tier based on kind and content length.
- * File paths and short output get lightweight inline treatment;
- * long command output gets a bordered scrollable code block.
- */
-function getDetailStyle(toolCall: IToolCall, lines: string[]): DetailStyle {
-  const kind = toolCall.kind;
-  // File operations are always inline (just paths)
-  if (kind && FILE_KINDS.has(kind)) return 'inline';
-  // Think is always inline (prose)
-  if (kind === 'think') return 'inline';
-  // Count actual newlines in content
-  const totalLines = lines.join('\n').split('\n').length;
-  // Short output (≤ 3 lines) gets inline treatment
-  if (totalLines <= 3) return 'inline';
-  // Long output gets scrollable code block
-  return 'block';
-}
-
 /**
  * Build the expandable details content for a tool call.
  * Returns lines of metadata to display, or empty array if nothing to show.
@@ -118,21 +96,14 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
   const showDetails = detailsLines.length > 0;
 
   if (showDetails) {
-    const detailStyle = getDetailStyle(toolCall, detailsLines);
     return (
       <details className={cssClass}>
         <summary>
           <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span> {displayTitle}
         </summary>
-        {detailStyle === 'block' ? (
-          <pre className="jp-jupyter-ai-acp-client-tool-call-output">
-            {detailsLines.join('\n')}
-          </pre>
-        ) : (
-          <div className="jp-jupyter-ai-acp-client-tool-call-detail">
-            {detailsLines.join('\n')}
-          </div>
-        )}
+        <div className="jp-jupyter-ai-acp-client-tool-call-detail">
+          {detailsLines.join('\n')}
+        </div>
       </details>
     );
   }
