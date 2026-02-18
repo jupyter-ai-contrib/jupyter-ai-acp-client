@@ -1,7 +1,7 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Awaitable, Optional
 from time import time
 
 from acp import (
@@ -47,7 +47,6 @@ from acp.schema import (
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message, NewMessage
 from jupyterlab_chat.utils import find_mentions
-from typing import Awaitable
 from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
@@ -73,6 +72,7 @@ class JaiAcpClient(Client):
     _terminal_manager: TerminalManager
     _tool_calls_by_session: dict[str, dict[str, ToolCallState]]
     _message_ids_by_session: dict[str, Optional[str]]
+    _prompt_locks_by_session: dict[str, asyncio.Lock]
 
     def __init__(self, *args, agent_subprocess: Awaitable[Process], event_loop: asyncio.AbstractEventLoop, **kwargs):
         """
@@ -123,7 +123,7 @@ class JaiAcpClient(Client):
         self._personas_by_session[session.session_id] = persona
         return session
 
-    async def prompt_and_reply(self, session_id: str, prompt: str, attachments: list[dict] = []) -> PromptResponse:
+    async def prompt_and_reply(self, session_id: str, prompt: str, attachments: list[dict] | None = None) -> PromptResponse:
         """
         A helper method that sends a prompt with an optional list of attachments
         to the assigned ACP server. This method writes back to the chat by
@@ -169,7 +169,7 @@ class JaiAcpClient(Client):
 
                 persona.log.info(f"prompt_and_reply: completed for session {session_id}")
                 return response
-            except Exception as e:
+            except Exception:
                 persona.log.exception(f"prompt_and_reply: failed for session {session_id}")
                 raise
             finally:
