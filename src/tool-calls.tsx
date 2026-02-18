@@ -92,14 +92,18 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
   const cssClass = `jp-jupyter-ai-acp-client-tool-call jp-jupyter-ai-acp-client-tool-call-${status || 'in_progress'}`;
 
   // Progressive disclosure: completed/failed tool calls with metadata get expandable details
-  const detailsLines = (isCompleted || isFailed) ? buildDetailsLines(toolCall) : [];
+  const detailsLines =
+    isCompleted || isFailed ? buildDetailsLines(toolCall) : [];
   const showDetails = detailsLines.length > 0;
 
   if (showDetails) {
     return (
       <details className={cssClass}>
         <summary>
-          <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span> {displayTitle}
+          <span className="jp-jupyter-ai-acp-client-tool-call-icon">
+            {icon}
+          </span>{' '}
+          {displayTitle}
         </summary>
         <div className="jp-jupyter-ai-acp-client-tool-call-detail">
           {detailsLines.join('\n')}
@@ -112,7 +116,8 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
   if (isInProgress) {
     return (
       <div className={cssClass}>
-        <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span> <em>{displayTitle}</em>
+        <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span>{' '}
+        <em>{displayTitle}</em>
       </div>
     );
   }
@@ -120,7 +125,8 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
   // Completed/failed without metadata
   return (
     <div className={cssClass}>
-      <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span> {displayTitle}
+      <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span>{' '}
+      {displayTitle}
     </div>
   );
 }
