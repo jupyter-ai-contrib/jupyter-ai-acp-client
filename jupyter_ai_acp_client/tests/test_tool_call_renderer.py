@@ -1,6 +1,5 @@
 """Unit tests for the tool_call_renderer module."""
 
-import pytest
 from jupyter_ai_acp_client.tool_call_renderer import (
     ToolCallState,
     _shorten_title,
@@ -433,3 +432,29 @@ class TestShortenTitleIntegration:
         assert result[0]["title"] == "Read justfile"
         assert result[0]["locations"] == ["/Users/aieroshe/Documents/project/justfile"]
         assert result[0]["status"] == "completed"
+
+
+class TestGenerateTitle:
+    def test_kind_with_locations(self):
+        assert _generate_title("read", ["/Users/foo/project/justfile"]) == "Reading justfile"
+
+    def test_kind_without_locations(self):
+        assert _generate_title("read") == "Reading..."
+
+    def test_edit_kind(self):
+        assert _generate_title("edit", ["/a/b/c.py"]) == "Editing c.py"
+
+    def test_execute_kind(self):
+        assert _generate_title("execute") == "Running command..."
+
+    def test_no_kind_no_locations(self):
+        assert _generate_title(None) == "Working..."
+
+    def test_unknown_kind(self):
+        assert _generate_title("unknown_kind") == "Working..."
+
+    def test_location_without_slash(self):
+        assert _generate_title("read", ["justfile"]) == "Reading justfile"
+
+    def test_multiple_locations_uses_first(self):
+        assert _generate_title("read", ["/a/b/first.py", "/a/b/second.py"]) == "Reading first.py"

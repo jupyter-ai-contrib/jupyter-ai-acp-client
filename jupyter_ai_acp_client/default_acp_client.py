@@ -91,6 +91,7 @@ class JaiAcpClient(Client):
         self._personas_by_session = {}
         self._tool_calls_by_session = {}
         self._message_ids_by_session = {}
+        self._prompt_locks_by_session: dict[str, asyncio.Lock] = {}
         self._terminal_manager = TerminalManager(event_loop)
         super().__init__(*args, **kwargs)
 
@@ -127,47 +128,53 @@ class JaiAcpClient(Client):
         A helper method that sends a prompt with an optional list of attachments
         to the assigned ACP server. This method writes back to the chat by
         handling all events in session_update().
+
+        Uses a per-session lock to serialize concurrent calls, preventing
+        state corruption if multiple messages arrive before the first completes.
         """
         assert session_id in self._personas_by_session
-        conn = await self.get_connection()
-        persona = self._personas_by_session[session_id]
+        lock = self._prompt_locks_by_session.setdefault(session_id, asyncio.Lock())
 
-        # Reset session state for this prompt
-        self._tool_calls_by_session[session_id] = {}
-        self._message_ids_by_session[session_id] = None
+        async with lock:
+            conn = await self.get_connection()
+            persona = self._personas_by_session[session_id]
 
-        persona.log.info(f"prompt_and_reply: starting for session {session_id}")
+            # Reset session state for this prompt
+            self._tool_calls_by_session[session_id] = {}
+            self._message_ids_by_session[session_id] = None
 
-        # Set awareness to indicate writing
-        persona.awareness.set_local_state_field("isWriting", True)
+            persona.log.info(f"prompt_and_reply: starting for session {session_id}")
 
-        try:
-            # Call the model and await — session_update() handles all events
-            response = await conn.prompt(
-                prompt=[
-                    TextContentBlock(text=prompt, type="text"),
-                ],
-                session_id=session_id
-            )
+            # Set awareness to indicate writing
+            persona.awareness.set_local_state_field("isWriting", True)
 
-            # Trigger find_mentions on the final message
-            message_id = self._message_ids_by_session.get(session_id)
-            if message_id:
-                msg = persona.ychat.get_message(message_id)
-                if msg:
-                    persona.ychat.update_message(
-                        msg,
-                        trigger_actions=[find_mentions],
-                    )
+            try:
+                # Call the model and await — session_update() handles all events
+                response = await conn.prompt(
+                    prompt=[
+                        TextContentBlock(text=prompt, type="text"),
+                    ],
+                    session_id=session_id
+                )
 
-            persona.log.info(f"prompt_and_reply: completed for session {session_id}")
-            return response
-        except Exception as e:
-            persona.log.exception(f"prompt_and_reply: failed for session {session_id}")
-            raise
-        finally:
-            # Clear awareness writing state
-            persona.awareness.set_local_state_field("isWriting", False)
+                # Trigger find_mentions on the final message
+                message_id = self._message_ids_by_session.get(session_id)
+                if message_id:
+                    msg = persona.ychat.get_message(message_id)
+                    if msg:
+                        persona.ychat.update_message(
+                            msg,
+                            trigger_actions=[find_mentions],
+                        )
+
+                persona.log.info(f"prompt_and_reply: completed for session {session_id}")
+                return response
+            except Exception as e:
+                persona.log.exception(f"prompt_and_reply: failed for session {session_id}")
+                raise
+            finally:
+                # Clear awareness writing state
+                persona.awareness.set_local_state_field("isWriting", False)
 
     def _get_or_create_message(self, session_id: str) -> str:
         """
