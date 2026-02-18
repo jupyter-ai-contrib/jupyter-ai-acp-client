@@ -7,13 +7,14 @@
 /* Tool call UI */
 .jp-jupyter-ai-acp-client-tool-calls {
   padding: 4px 0;
-  font-size: var(--jp-ui-font-size1);
-  line-height: 1.6;
+  font-size: var(--jp-content-font-size1);
+  line-height: var(--jp-content-line-height);
+  margin-bottom: 4px;
 }
 
 .jp-jupyter-ai-acp-client-tool-call {
   padding: 1px 0;
-  font-family: var(--jp-ui-font-family);
+  font-family: var(--jp-content-font-family);
 }
 
 .jp-jupyter-ai-acp-client-tool-call-in_progress,
@@ -21,16 +22,51 @@
   color: var(--jp-ui-font-color2);
 }
 
-.jp-jupyter-ai-acp-client-tool-call-completed {
+.jp-jupyter-ai-acp-client-tool-call-completed,
+.jp-jupyter-ai-acp-client-tool-call-failed {
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-jupyter-ai-acp-client-tool-call-completed .jp-jupyter-ai-acp-client-tool-call-icon {
   color: var(--jp-success-color1, #388e3c);
 }
 
-.jp-jupyter-ai-acp-client-tool-call-failed {
+.jp-jupyter-ai-acp-client-tool-call-failed .jp-jupyter-ai-acp-client-tool-call-icon {
   color: var(--jp-error-color1, #d32f2f);
 }
 
 details.jp-jupyter-ai-acp-client-tool-call summary {
   cursor: pointer;
+  list-style: none;
+}
+
+details.jp-jupyter-ai-acp-client-tool-call summary::-webkit-details-marker {
+  display: none;
+}
+
+details.jp-jupyter-ai-acp-client-tool-call summary::after {
+  content: '';
+  display: inline-block;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  margin-left: 6px;
+  vertical-align: middle;
+  opacity: 0.5;
+}
+
+details[open].jp-jupyter-ai-acp-client-tool-call summary::after {
+  border-top: none;
+  border-bottom: 5px solid currentColor;
+}
+
+.jp-jupyter-ai-acp-client-tool-call-detail {
+  margin: 2px 0 2px 20px;
+  font-size: var(--jp-code-font-size);
+  font-family: var(--jp-code-font-family);
+  color: var(--jp-ui-font-color2);
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .jp-jupyter-ai-acp-client-tool-call-output {
@@ -40,7 +76,8 @@ details.jp-jupyter-ai-acp-client-tool-call summary {
   font-family: var(--jp-code-font-family);
   background: var(--jp-cell-editor-background);
   border: var(--jp-border-width) solid var(--jp-cell-editor-border-color);
-  max-height: 300px;
+  max-height: 200px;
   overflow: auto;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

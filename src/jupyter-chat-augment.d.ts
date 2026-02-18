@@ -19,6 +19,7 @@ declare module '@jupyter/chat' {
     kind?: string;
     status?: string;
     raw_output?: unknown;
+    locations?: string[];
   }
 
   // Augment IChatMessage with tool_calls field

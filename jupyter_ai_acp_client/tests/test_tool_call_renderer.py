@@ -3,6 +3,8 @@
 import pytest
 from jupyter_ai_acp_client.tool_call_renderer import (
     ToolCallState,
+    _shorten_title,
+    _generate_title,
     update_tool_call_from_start,
     update_tool_call_from_progress,
     serialize_tool_calls,
@@ -244,3 +246,190 @@ class TestSerializeToolCalls:
         }
         result = serialize_tool_calls(tool_calls)
         assert result[0]["raw_output"] == ["item1", "item2"]
+
+    def test_serializes_locations(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Read justfile",
+                kind="read",
+                status="completed",
+                locations=["/Users/foo/project/justfile"],
+            )
+        }
+        result = serialize_tool_calls(tool_calls)
+        assert result[0]["locations"] == ["/Users/foo/project/justfile"]
+
+    def test_strips_none_locations(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Working...",
+                status="in_progress",
+                locations=None,
+            )
+        }
+        result = serialize_tool_calls(tool_calls)
+        assert "locations" not in result[0]
+
+
+class TestShortenTitle:
+    def test_absolute_path(self):
+        assert _shorten_title("Read /Users/foo/bar/justfile") == "Read justfile"
+
+    def test_multiple_absolute_paths(self):
+        assert _shorten_title("Moved /a/b/old.py /a/b/new.py") == "Moved old.py new.py"
+
+    def test_no_paths(self):
+        assert _shorten_title("Read File") == "Read File"
+
+    def test_relative_path(self):
+        # Doesn't start with / — not an absolute path, leave as-is
+        assert _shorten_title("Read src/foo.py") == "Read src/foo.py"
+
+    def test_single_component_path(self):
+        # Starts with / but only one component — not shortened
+        assert _shorten_title("Read /justfile") == "Read /justfile"
+
+    def test_empty_string(self):
+        assert _shorten_title("") == ""
+
+    def test_only_path(self):
+        assert _shorten_title("/Users/foo/bar/baz.py") == "baz.py"
+
+    def test_mixed_words_and_paths(self):
+        assert _shorten_title("Editing /a/b/c.py with changes") == "Editing c.py with changes"
+
+
+class TestShortenTitleIntegration:
+    def test_start_shortens_agent_title(self):
+        tool_calls = {}
+        update_tool_call_from_start(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="Read /Users/aieroshe/Documents/project/justfile",
+            kind="read",
+        )
+        assert tool_calls["tc-1"].title == "Read justfile"
+
+    def test_start_preserves_short_title(self):
+        tool_calls = {}
+        update_tool_call_from_start(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="Read File",
+            kind="read",
+        )
+        assert tool_calls["tc-1"].title == "Read File"
+
+    def test_start_generates_title_when_empty(self):
+        tool_calls = {}
+        update_tool_call_from_start(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="",
+            kind="read",
+            locations=["/Users/foo/project/justfile"],
+        )
+        assert tool_calls["tc-1"].title == "Reading justfile"
+
+    def test_start_stores_locations(self):
+        tool_calls = {}
+        update_tool_call_from_start(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="Read File",
+            kind="read",
+            locations=["/Users/foo/project/justfile"],
+        )
+        assert tool_calls["tc-1"].locations == ["/Users/foo/project/justfile"]
+
+    def test_progress_shortens_title_update(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Read File",
+                kind="read",
+                status="in_progress",
+            )
+        }
+        update_tool_call_from_progress(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="Read /Users/aieroshe/Documents/project/justfile",
+            status="completed",
+        )
+        assert tool_calls["tc-1"].title == "Read justfile"
+
+    def test_progress_creates_with_shortened_title(self):
+        tool_calls = {}
+        update_tool_call_from_progress(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="Read /Users/aieroshe/Documents/project/justfile",
+            status="completed",
+        )
+        assert tool_calls["tc-1"].title == "Read justfile"
+
+    def test_progress_stores_locations(self):
+        tool_calls = {}
+        update_tool_call_from_progress(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="Read File",
+            status="in_progress",
+            locations=["/Users/foo/project/justfile"],
+        )
+        assert tool_calls["tc-1"].locations == ["/Users/foo/project/justfile"]
+
+    def test_progress_updates_locations(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Read File",
+                kind="read",
+                status="in_progress",
+            )
+        }
+        update_tool_call_from_progress(
+            tool_calls,
+            tool_call_id="tc-1",
+            locations=["/Users/foo/project/justfile"],
+        )
+        assert tool_calls["tc-1"].locations == ["/Users/foo/project/justfile"]
+
+    def test_full_flow_start_start_progress(self):
+        """Simulate actual agent flow: two starts + completed progress."""
+        tool_calls = {}
+
+        # ToolCallStart #1: generic title, no locations
+        update_tool_call_from_start(
+            tool_calls, tool_call_id="tc-1",
+            title="Read File", kind="read",
+        )
+        assert tool_calls["tc-1"].title == "Read File"
+        assert tool_calls["tc-1"].status == "in_progress"
+
+        # ToolCallStart #2: full path, with locations
+        update_tool_call_from_start(
+            tool_calls, tool_call_id="tc-1",
+            title="Read /Users/aieroshe/Documents/project/justfile",
+            kind="read",
+            locations=["/Users/aieroshe/Documents/project/justfile"],
+        )
+        assert tool_calls["tc-1"].title == "Read justfile"
+        assert tool_calls["tc-1"].locations == ["/Users/aieroshe/Documents/project/justfile"]
+
+        # ToolCallProgress: completed, no title change
+        update_tool_call_from_progress(
+            tool_calls, tool_call_id="tc-1",
+            status="completed",
+        )
+        assert tool_calls["tc-1"].title == "Read justfile"
+        assert tool_calls["tc-1"].status == "completed"
+
+        # Serialize — locations should be included for frontend
+        result = serialize_tool_calls(tool_calls)
+        assert result[0]["title"] == "Read justfile"
+        assert result[0]["locations"] == ["/Users/aieroshe/Documents/project/justfile"]
+        assert result[0]["status"] == "completed"

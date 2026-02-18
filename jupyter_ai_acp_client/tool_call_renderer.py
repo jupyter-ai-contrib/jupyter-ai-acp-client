@@ -18,6 +18,7 @@ class ToolCallState:
     kind: Optional[str] = None
     status: Optional[str] = None
     raw_output: Optional[Any] = None
+    locations: Optional[list[str]] = None
 
 
 def _generate_title(kind: Optional[str], locations: Optional[list[str]] = None) -> str:
@@ -43,6 +44,15 @@ def _generate_title(kind: Optional[str], locations: Optional[list[str]] = None) 
     return f"{verb}..."
 
 
+def _shorten_title(title: str) -> str:
+    """Replace absolute paths in a title with just the filename."""
+    words = title.split()
+    return " ".join(
+        word.rsplit("/", 1)[-1] if word.startswith("/") and "/" in word[1:] else word
+        for word in words
+    )
+
+
 def update_tool_call_from_start(
     tool_calls: dict[str, ToolCallState],
     tool_call_id: str,
@@ -60,12 +70,15 @@ def update_tool_call_from_start(
         title = _generate_title(kind, locations)
     elif not title:
         title = "Working..."
+    else:
+        title = _shorten_title(title)
 
     tool_calls[tool_call_id] = ToolCallState(
         tool_call_id=tool_call_id,
         title=title,
         kind=kind,
         status="in_progress",
+        locations=locations,
     )
 
 
@@ -86,7 +99,7 @@ def update_tool_call_from_progress(
     Generates a title from kind/locations if the title is empty.
     """
     if tool_call_id not in tool_calls:
-        resolved_title = title or ""
+        resolved_title = _shorten_title(title) if title else ""
         if not resolved_title and (kind or locations):
             resolved_title = _generate_title(kind, locations)
         elif not resolved_title:
@@ -97,18 +110,21 @@ def update_tool_call_from_progress(
             kind=kind,
             status=status or "in_progress",
             raw_output=raw_output,
+            locations=locations,
         )
         return
 
     tc = tool_calls[tool_call_id]
     if title is not None:
-        tc.title = title
+        tc.title = _shorten_title(title)
     if kind is not None:
         tc.kind = kind
     if status is not None:
         tc.status = status
     if raw_output is not None:
         tc.raw_output = raw_output
+    if locations is not None:
+        tc.locations = locations
 
 
 def serialize_tool_calls(tool_calls: dict[str, ToolCallState]) -> list[dict]:
