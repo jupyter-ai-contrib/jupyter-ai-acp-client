@@ -51,7 +51,7 @@ details.jp-jupyter-ai-acp-client-tool-call summary::after {
   display: inline-block;
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
-  border-top: 5px solid currentColor;
+  border-top: 5px solid currentcolor;
   margin-left: 6px;
   vertical-align: middle;
   opacity: 0.5;
@@ -59,7 +59,7 @@ details.jp-jupyter-ai-acp-client-tool-call summary::after {
 
 details[open].jp-jupyter-ai-acp-client-tool-call summary::after {
   border-top: none;
-  border-bottom: 5px solid currentColor;
+  border-bottom: 5px solid currentcolor;
 }
 
 .jp-jupyter-ai-acp-client-tool-call-detail {
