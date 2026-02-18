@@ -1,5 +1,3 @@
-"""Unit tests for the tool_call_renderer module."""
-
 from jupyter_ai_acp_client.tool_call_renderer import (
     ToolCallState,
     _shorten_title,
