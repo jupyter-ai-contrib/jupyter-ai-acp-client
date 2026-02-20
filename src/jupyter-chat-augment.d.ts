@@ -1,16 +1,14 @@
 /**
- * Type augmentations for @jupyter/chat types that exist in the local
- * jupyter-chat build but are not yet published to npm.
+ * Type augmentations for @jupyter/chat types not yet published to npm.
  *
- * This file should be removed once @jupyter/chat is published with
- * IToolCall, IMessagePreambleRegistry, MessagePreambleProps, and
- * tool_calls on IChatMessage.
+ * Remove once @jupyter/chat ships IMessagePreambleRegistry, MessagePreambleProps,
+ * and IMessageMetadata with tool_calls support.
  */
 
 /* eslint-disable @typescript-eslint/naming-convention */
 import { Token } from '@lumino/coreutils';
 import React from 'react';
-import { IChatModel, IChatMessage, IUser, IAttachment } from '@jupyter/chat';
+import { IChatModel } from '@jupyter/chat';
 
 declare module '@jupyter/chat' {
   export interface IToolCall {
@@ -22,9 +20,12 @@ declare module '@jupyter/chat' {
     locations?: string[];
   }
 
-  // Augment IChatMessage with tool_calls field
-  export interface IChatMessage<T = IUser, U = IAttachment> {
+  export interface IMessageMetadata {
     tool_calls?: IToolCall[];
+  }
+
+  export interface IChatMessage {
+    metadata?: IMessageMetadata;
   }
 
   export type MessagePreambleProps = {

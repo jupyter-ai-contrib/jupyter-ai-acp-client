@@ -202,14 +202,14 @@ class JaiAcpClient(Client):
         if tool_calls:
             msg = persona.ychat.get_message(message_id)
             if msg:
-                msg.tool_calls = serialize_tool_calls(tool_calls)
+                msg.metadata = {"tool_calls": serialize_tool_calls(tool_calls)}
                 persona.ychat.update_message(msg, trigger_actions=[])
 
         return message_id
 
     def _update_message_tool_calls(self, session_id: str) -> None:
         """
-        Update the message's tool_calls field with the current tool call state.
+        Update the message's metadata field with the current tool call state.
         """
         message_id = self._message_ids_by_session.get(session_id)
         if not message_id:
@@ -222,7 +222,7 @@ class JaiAcpClient(Client):
         if msg:
             serialized = serialize_tool_calls(tool_calls)
             persona.log.info(f"update_tool_calls: message={message_id} count={len(tool_calls)} payload={serialized}")
-            msg.tool_calls = serialized
+            msg.metadata = {"tool_calls": serialized}
             persona.ychat.update_message(msg, trigger_actions=[])
 
     def _handle_tool_call_start(self, session_id: str, update: ToolCallStart) -> None:
@@ -306,7 +306,7 @@ class JaiAcpClient(Client):
             time=time(),
             sender=persona.id,
             raw_time=False,
-            tool_calls=serialize_tool_calls(tool_calls),
+            metadata={"tool_calls": serialize_tool_calls(tool_calls)},
         )
         persona.ychat.update_message(msg, append=True, trigger_actions=[])
 

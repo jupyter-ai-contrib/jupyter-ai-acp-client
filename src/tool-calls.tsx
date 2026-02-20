@@ -9,13 +9,13 @@ export function ToolCallsComponent(
   props: MessagePreambleProps
 ): JSX.Element | null {
   const { message } = props;
-  if (!message.tool_calls?.length) {
+  if (!message.metadata?.tool_calls?.length) {
     return null;
   }
 
   return (
     <div className="jp-jupyter-ai-acp-client-tool-calls">
-      {message.tool_calls.map((tc: IToolCall) => (
+      {(message.metadata?.tool_calls ?? []).map((tc: IToolCall) => (
         <ToolCallLine key={tc.tool_call_id} toolCall={tc} />
       ))}
     </div>
