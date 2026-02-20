@@ -1,22 +1,51 @@
 /**
- * Type augmentations for @jupyter/chat types not yet published to npm.
+ * Type augmentation for @jupyter/chat.
  *
- * Remove once @jupyter/chat ships IMessagePreambleRegistry, MessagePreambleProps,
- * and IMessageMetadata with tool_calls support.
+ * Extends IMessageMetadata with ACP-specific tool call fields.
+ * Remove IChatMessage and MessagePreambleProps blocks once @jupyter/chat
+ * ships IMessageMetadata and IMessagePreambleRegistry.
  */
 
 /* eslint-disable @typescript-eslint/naming-convention */
 import { Token } from '@lumino/coreutils';
-import React from 'react';
 import { IChatModel } from '@jupyter/chat';
 
 declare module '@jupyter/chat' {
   export interface IToolCall {
+    /**
+     * Unique identifier for this tool call, used to correlate events
+     * across the tool call lifecycle.
+     */
     tool_call_id: string;
+    /**
+     * Human-readable label displayed in the message preamble.
+     */
     title: string;
-    kind?: string;
-    status?: string;
+    /**
+     * The category of tool operation.
+     */
+    kind?:
+      | 'read'
+      | 'edit'
+      | 'delete'
+      | 'move'
+      | 'search'
+      | 'execute'
+      | 'think'
+      | 'fetch'
+      | 'switch_mode'
+      | (string & {});
+    /**
+     * Current execution status.
+     */
+    status?: 'in_progress' | 'completed' | (string & {});
+    /**
+     * Raw return value from tool execution.
+     */
     raw_output?: unknown;
+    /**
+     * File paths or resource URIs involved in this tool call.
+     */
     locations?: string[];
   }
 
@@ -34,8 +63,10 @@ declare module '@jupyter/chat' {
   };
 
   export interface IMessagePreambleRegistry {
-    addComponent(component: React.FC<MessagePreambleProps>): void;
-    getComponents(): React.FC<MessagePreambleProps>[];
+    addComponent(
+      component: (props: MessagePreambleProps) => JSX.Element | null
+    ): void;
+    getComponents(): ((props: MessagePreambleProps) => JSX.Element | null)[];
   }
 
   export const IMessagePreambleRegistry: Token<IMessagePreambleRegistry>;
