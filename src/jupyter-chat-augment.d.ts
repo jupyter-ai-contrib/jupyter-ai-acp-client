@@ -1,14 +1,6 @@
-/**
- * Type augmentation for @jupyter/chat.
- *
- * Extends IMessageMetadata with ACP-specific tool call fields.
- * Remove IChatMessage and MessagePreambleProps blocks once @jupyter/chat
- * ships IMessageMetadata and IMessagePreambleRegistry.
- */
-
-/* eslint-disable @typescript-eslint/naming-convention */
-import { Token } from '@lumino/coreutils';
-import { IChatModel } from '@jupyter/chat';
+// Required: makes this a module file so `declare module` below augments
+// @jupyter/chat rather than replacing it with an ambient module declaration.
+export {};
 
 declare module '@jupyter/chat' {
   export interface IToolCall {
@@ -38,7 +30,7 @@ declare module '@jupyter/chat' {
     /**
      * Current execution status.
      */
-    status?: 'in_progress' | 'completed' | (string & {});
+    status?: 'in_progress' | 'completed' | 'failed' | (string & {});
     /**
      * Raw return value from tool execution.
      */
@@ -52,22 +44,4 @@ declare module '@jupyter/chat' {
   export interface IMessageMetadata {
     tool_calls?: IToolCall[];
   }
-
-  export interface IChatMessage {
-    metadata?: IMessageMetadata;
-  }
-
-  export type MessagePreambleProps = {
-    model: IChatModel;
-    message: IChatMessage;
-  };
-
-  export interface IMessagePreambleRegistry {
-    addComponent(
-      component: (props: MessagePreambleProps) => JSX.Element | null
-    ): void;
-    getComponents(): ((props: MessagePreambleProps) => JSX.Element | null)[];
-  }
-
-  export const IMessagePreambleRegistry: Token<IMessagePreambleRegistry>;
 }

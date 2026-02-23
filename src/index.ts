@@ -52,13 +52,17 @@ export class SlashCommandProvider implements IChatCommandProvider {
     inputModel: IInputModel
   ): Promise<ChatCommand[]> {
     const currentWord = inputModel.currentWord || '';
-    const chatPath = inputModel.chatContext.name;
-    const existingMentions = this._getExistingMentions(inputModel);
 
     // return early if current word doesn't start with '/'.
     if (!currentWord.startsWith('/')) {
       return [];
     }
+
+    if (!inputModel.chatContext) {
+      return [];
+    }
+    const chatPath = inputModel.chatContext.name;
+    const existingMentions = this._getExistingMentions(inputModel);
 
     // return early if >1 persona is mentioned in the input. we never show ACP
     // slash command suggestions in this case.
