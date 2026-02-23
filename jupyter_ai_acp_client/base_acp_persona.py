@@ -6,7 +6,6 @@ from asyncio.subprocess import Process
 from typing import Awaitable, ClassVar
 from acp import NewSessionResponse
 from acp.schema import AvailableCommand
-import os
 
 from .default_acp_client import JaiAcpClient
 
