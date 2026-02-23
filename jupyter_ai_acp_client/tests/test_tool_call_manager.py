@@ -175,12 +175,6 @@ class TestSerialize:
 
 
 class TestHandleStart:
-    def test_creates_session_if_absent(self):
-        mgr = ToolCallManager()
-        persona = make_persona()
-        mgr.handle_start(SESSION_ID, make_tool_call_start(), persona)
-        assert SESSION_ID in mgr._sessions
-
     def test_adds_tool_call_to_session(self):
         mgr = ToolCallManager()
         persona = make_persona()
@@ -332,6 +326,20 @@ class TestHandleProgress:
         tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
         assert tc.raw_output == {"key": "value"}
 
+    def test_mid_stream_progress_updates_raw_output(self):
+        """Progress event while still in_progress — status unchanged, raw_output updated."""
+        mgr = ToolCallManager()
+        persona = make_persona()
+        mgr.reset(SESSION_ID)
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
+
+        update = make_tool_call_progress("tc-1", status="in_progress", raw_output="partial")
+        mgr.handle_progress(SESSION_ID, update, persona)
+
+        tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
+        assert tc.status == "in_progress"
+        assert tc.raw_output == "partial"
+
     def test_empty_status_treated_as_none(self):
         """Empty string status must be converted to None, not stored as ''."""
         mgr = ToolCallManager()
@@ -386,8 +394,6 @@ class TestFullFlow:
         mgr.reset(SESSION_ID)
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
 
-        # Simulate new turn
-        persona = make_persona("msg-2")
         mgr.reset(SESSION_ID)
 
         assert mgr.get_message_id(SESSION_ID) is None

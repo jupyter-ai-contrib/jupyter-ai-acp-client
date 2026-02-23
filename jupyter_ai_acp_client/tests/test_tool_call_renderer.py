@@ -54,6 +54,17 @@ class TestUpdateToolCallFromStart:
         )
         assert tool_calls["tc-1"].kind is None
 
+    def test_empty_title_generates_from_kind_and_locations(self):
+        tool_calls = {}
+        update_tool_call_from_start(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="",
+            kind="read",
+            locations=["/Users/foo/project/justfile"],
+        )
+        assert tool_calls["tc-1"].title == "Reading justfile"
+
 
 class TestUpdateToolCallFromProgress:
     def test_updates_existing_tool_call(self):
@@ -318,17 +329,6 @@ class TestShortenTitleIntegration:
             kind="read",
         )
         assert tool_calls["tc-1"].title == "Read File"
-
-    def test_start_generates_title_when_empty(self):
-        tool_calls = {}
-        update_tool_call_from_start(
-            tool_calls,
-            tool_call_id="tc-1",
-            title="",
-            kind="read",
-            locations=["/Users/foo/project/justfile"],
-        )
-        assert tool_calls["tc-1"].title == "Reading justfile"
 
     def test_start_stores_locations(self):
         tool_calls = {}
