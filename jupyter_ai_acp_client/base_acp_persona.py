@@ -6,6 +6,7 @@ from asyncio.subprocess import Process
 from typing import Awaitable, ClassVar
 from acp import NewSessionResponse
 from acp.schema import AvailableCommand
+import os
 
 from .default_acp_client import JaiAcpClient
 
@@ -38,6 +39,10 @@ class BaseAcpPersona(BasePersona):
     """
 
     _acp_slash_commands: list[AvailableCommand]
+    """
+    List of slash commands broadcast by the ACP agent in the current session.
+    This attribute is set automatically by the default ACP client.
+    """
 
     def __init__(self, *args, executable: list[str], **kwargs):
         super().__init__(*args, **kwargs)
@@ -78,7 +83,8 @@ class BaseAcpPersona(BasePersona):
     
     async def _init_client_session(self) -> NewSessionResponse:
         client = await self.get_client()
-        session = await client.create_session(persona=self)
+        mcp_settings = self.get_mcp_settings()
+        session = await client.create_session(persona=self, mcp_settings=mcp_settings)
         self.log.info(
             f"Initialized new ACP client session for '{self.__class__.__name__}'"
             f" with ID '{session.session_id}'."
