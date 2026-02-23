@@ -1,10 +1,8 @@
 import asyncio
-import contextlib
-import logging
 import os
-import sys
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, Awaitable
+from time import time
 
 from acp import (
     PROTOCOL_VERSION,
@@ -47,18 +45,13 @@ from acp.schema import (
     AllowedOutcome
 )
 from jupyter_ai_persona_manager import BasePersona
-from typing import Awaitable
+from jupyterlab_chat.models import Message
+from jupyterlab_chat.utils import find_mentions
 from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
+from .tool_call_manager import ToolCallManager
 
-async def queue_to_iterator(queue: asyncio.Queue[str], sentinel: str = "__end__") -> AsyncIterator[str]:
-    """Convert an asyncio queue to an async iterator."""
-    while True:
-        item = await queue.get()
-        if item == sentinel:
-            break
-        yield item
 
 class JaiAcpClient(Client):
     """
@@ -71,8 +64,9 @@ class JaiAcpClient(Client):
     _connection_future: Awaitable[ClientSideConnection]
     event_loop: asyncio.AbstractEventLoop
     _personas_by_session: dict[str, BasePersona]
-    _queues_by_session: dict[str, asyncio.Queue[str]]
     _terminal_manager: TerminalManager
+    _tool_call_manager: ToolCallManager
+    _prompt_locks_by_session: dict[str, asyncio.Lock]
 
     def __init__(self, *args, agent_subprocess: Awaitable[Process], event_loop: asyncio.AbstractEventLoop, **kwargs):
         """
@@ -89,10 +83,11 @@ class JaiAcpClient(Client):
         self.event_loop = event_loop
         # Each client instance maintains its own session mappings
         self._personas_by_session = {}
-        self._queues_by_session = {}
+        self._prompt_locks_by_session: dict[str, asyncio.Lock] = {}
         self._terminal_manager = TerminalManager(event_loop)
+        self._tool_call_manager = ToolCallManager()
         super().__init__(*args, **kwargs)
-    
+
 
     async def _init_connection(self) -> ClientSideConnection:
         proc = self.agent_subprocess
@@ -106,7 +101,7 @@ class JaiAcpClient(Client):
             client_info=Implementation(name="Jupyter AI", title="Jupyter AI ACP Client", version="0.1.0"),
         )
         return conn
-    
+
     async def get_connection(self) -> ClientSideConnection:
         return await self._connection_future
 
@@ -120,81 +115,61 @@ class JaiAcpClient(Client):
         session = await conn.new_session(mcp_servers=[], cwd=os.getcwd())
         self._personas_by_session[session.session_id] = persona
         return session
-    
-    async def prompt_and_reply(self, session_id: str, prompt: str, attachments: list[dict] = []) -> PromptResponse:
+
+    async def prompt_and_reply(self, session_id: str, prompt: str, attachments: list[dict] | None = None) -> PromptResponse:
         """
         A helper method that sends a prompt with an optional list of attachments
         to the assigned ACP server. This method writes back to the chat by
-        calling methods on the persona corresponding to this session ID.
+        handling all events in session_update().
+
+        Uses a per-session lock to serialize concurrent calls, preventing
+        state corruption if multiple messages arrive before the first completes.
         """
         assert session_id in self._personas_by_session
-        conn = await self.get_connection()
+        lock = self._prompt_locks_by_session.setdefault(session_id, asyncio.Lock())
 
-        # ensure an asyncio Queue exists for this session
-        # the `session_update()` method will push chunks to this queue
-        queue = self._queues_by_session.get(session_id, None)
-        if queue is None:
-            queue: asyncio.Queue[str] = asyncio.Queue()
-            self._queues_by_session[session_id] = queue
+        async with lock:
+            conn = await self.get_connection()
+            persona = self._personas_by_session[session_id]
 
-        # create async iterator that yields until the response is complete
-        aiter = queue_to_iterator(queue)
+            # Reset session state for this prompt
+            self._tool_call_manager.reset(session_id)
 
-        # create background task to stream message back to client using the
-        # dedicated persona method
-        persona = self._personas_by_session[session_id]
-        self.event_loop.create_task(
-            persona.stream_message(aiter)
-        )
+            persona.log.info(f"prompt_and_reply: starting for session {session_id}")
 
-        # call the model and await
-        # TODO: add attachments!
-        response = await conn.prompt(
-            prompt=[
-                TextContentBlock(text=prompt, type="text"),
-            ],
-            session_id=session_id
-        )
+            # Set awareness to indicate writing
+            persona.awareness.set_local_state_field("isWriting", True)
 
-        # push sentinel value to queue to close the async iterator
-        queue.put_nowait("__end__")
+            try:
+                # Call the model and await — session_update() handles all events
+                response = await conn.prompt(
+                    prompt=[
+                        TextContentBlock(text=prompt, type="text"),
+                    ],
+                    session_id=session_id
+                )
 
-        return response
+                # Trigger find_mentions on the final message
+                message_id = self._tool_call_manager.get_message_id(session_id)
+                if message_id:
+                    msg = persona.ychat.get_message(message_id)
+                    if msg:
+                        persona.ychat.update_message(
+                            msg,
+                            trigger_actions=[find_mentions],
+                        )
 
-    async def session_update(
-        self,
-        session_id: str,
-        update: UserMessageChunk
-        | AgentMessageChunk
-        | AgentThoughtChunk
-        | ToolCallStart
-        | ToolCallProgress
-        | AgentPlanUpdate
-        | AvailableCommandsUpdate
-        | CurrentModeUpdate,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Handles `session/update` requests from the ACP agent. There must be an
-        `asyncio.Queue` corresponding to this session ID - this should be set by
-        the `prompt_and_reply()` method.
-        """
+                persona.log.info(f"prompt_and_reply: completed for session {session_id}")
+                return response
+            except Exception:
+                persona.log.exception(f"prompt_and_reply: failed for session {session_id}")
+                raise
+            finally:
+                # Clear awareness writing state
+                persona.awareness.set_local_state_field("isWriting", False)
 
-        if isinstance(update, AvailableCommandsUpdate):
-            if not update.available_commands:
-                return
-            persona = self._personas_by_session.get(session_id)
-            if persona and hasattr(persona, 'acp_slash_commands'):
-                persona.acp_slash_commands = update.available_commands
-            return
-
-        if not isinstance(update, AgentMessageChunk):
-            return
-
-        if session_id not in self._queues_by_session:
-            logging.error(f"No queue found for session_id: {session_id}")
-            return
-
+    def _handle_agent_message_chunk(self, session_id: str, update: AgentMessageChunk) -> None:
+        """Handle an AgentMessageChunk event by appending text to the message."""
         content = update.content
         text: str
         if isinstance(content, TextContentBlock):
@@ -210,8 +185,63 @@ class JaiAcpClient(Client):
         else:
             text = "<content>"
 
-        queue = self._queues_by_session[session_id]
-        queue.put_nowait(text)
+        persona = self._personas_by_session[session_id]
+        message_id = self._tool_call_manager.get_or_create_message(session_id, persona)
+        serialized_tool_calls = self._tool_call_manager.serialize(session_id)
+        persona.log.info(f"agent_message_chunk: {len(text)} chars, tool_calls={len(serialized_tool_calls)}")
+
+        msg = Message(
+            id=message_id,
+            body=text,
+            time=time(),
+            sender=persona.id,
+            raw_time=False,
+            metadata={"tool_calls": serialized_tool_calls},
+        )
+        persona.ychat.update_message(msg, append=True, trigger_actions=[])
+
+    async def session_update(
+        self,
+        session_id: str,
+        update: UserMessageChunk
+        | AgentMessageChunk
+        | AgentThoughtChunk
+        | ToolCallStart
+        | ToolCallProgress
+        | AgentPlanUpdate
+        | AvailableCommandsUpdate
+        | CurrentModeUpdate,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Handles `session/update` requests from the ACP agent. All event types
+        are handled directly here — tool calls, text chunks, and slash commands.
+        """
+        persona = self._personas_by_session.get(session_id)
+        if persona:
+            persona.log.info(f"session_update: {type(update).__name__} for session {session_id}")
+
+        if isinstance(update, AvailableCommandsUpdate):
+            if not update.available_commands:
+                return
+            if persona and hasattr(persona, 'acp_slash_commands'):
+                persona.acp_slash_commands = update.available_commands
+            return
+
+        if persona is None:
+            return
+
+        if isinstance(update, ToolCallStart):
+            self._tool_call_manager.handle_start(session_id, update, persona)
+            return
+
+        if isinstance(update, ToolCallProgress):
+            self._tool_call_manager.handle_progress(session_id, update, persona)
+            return
+
+        if isinstance(update, AgentMessageChunk):
+            self._handle_agent_message_chunk(session_id, update)
+            return
 
     async def request_permission(
         self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any
@@ -365,4 +395,3 @@ class JaiAcpClient(Client):
 
     async def ext_notification(self, method: str, params: dict) -> None:
         raise RequestError.method_not_found(method)
-

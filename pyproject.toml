@@ -29,6 +29,7 @@ classifiers = [
 dependencies = [
     "jupyter_server>=2.4.0,<3",
     "jupyter_ai_persona_manager>=0.0.5",
+    "jupyterlab_chat>=0.20.0a2",
     "agent_client_protocol",
 ]
 dynamic = ["version", "description", "authors", "urls", "keywords"]
