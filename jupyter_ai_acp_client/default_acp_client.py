@@ -1,7 +1,7 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import Any, Awaitable, Optional
+from typing import Any, Awaitable
 from time import time
 
 from acp import (
@@ -45,17 +45,12 @@ from acp.schema import (
     AllowedOutcome
 )
 from jupyter_ai_persona_manager import BasePersona
-from jupyterlab_chat.models import Message, NewMessage
+from jupyterlab_chat.models import Message
 from jupyterlab_chat.utils import find_mentions
 from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
-from .tool_call_renderer import (
-    ToolCallState,
-    update_tool_call_from_start,
-    update_tool_call_from_progress,
-    serialize_tool_calls,
-)
+from .tool_call_manager import ToolCallManager
 
 
 class JaiAcpClient(Client):
@@ -70,8 +65,7 @@ class JaiAcpClient(Client):
     event_loop: asyncio.AbstractEventLoop
     _personas_by_session: dict[str, BasePersona]
     _terminal_manager: TerminalManager
-    _tool_calls_by_session: dict[str, dict[str, ToolCallState]]
-    _message_ids_by_session: dict[str, Optional[str]]
+    _tool_call_manager: ToolCallManager
     _prompt_locks_by_session: dict[str, asyncio.Lock]
 
     def __init__(self, *args, agent_subprocess: Awaitable[Process], event_loop: asyncio.AbstractEventLoop, **kwargs):
@@ -89,10 +83,9 @@ class JaiAcpClient(Client):
         self.event_loop = event_loop
         # Each client instance maintains its own session mappings
         self._personas_by_session = {}
-        self._tool_calls_by_session = {}
-        self._message_ids_by_session = {}
         self._prompt_locks_by_session: dict[str, asyncio.Lock] = {}
         self._terminal_manager = TerminalManager(event_loop)
+        self._tool_call_manager = ToolCallManager()
         super().__init__(*args, **kwargs)
 
 
@@ -140,8 +133,7 @@ class JaiAcpClient(Client):
             persona = self._personas_by_session[session_id]
 
             # Reset session state for this prompt
-            self._tool_calls_by_session[session_id] = {}
-            self._message_ids_by_session[session_id] = None
+            self._tool_call_manager.reset(session_id)
 
             persona.log.info(f"prompt_and_reply: starting for session {session_id}")
 
@@ -158,7 +150,7 @@ class JaiAcpClient(Client):
                 )
 
                 # Trigger find_mentions on the final message
-                message_id = self._message_ids_by_session.get(session_id)
+                message_id = self._tool_call_manager.get_message_id(session_id)
                 if message_id:
                     msg = persona.ychat.get_message(message_id)
                     if msg:
@@ -175,108 +167,6 @@ class JaiAcpClient(Client):
             finally:
                 # Clear awareness writing state
                 persona.awareness.set_local_state_field("isWriting", False)
-
-    def _get_or_create_message(self, session_id: str) -> str:
-        """
-        Get the existing message ID for a session, or create a new message.
-        Returns the message ID.
-        """
-        message_id = self._message_ids_by_session.get(session_id)
-        if message_id:
-            return message_id
-
-        persona = self._personas_by_session[session_id]
-        tool_calls = self._tool_calls_by_session.get(session_id, {})
-
-        message_id = persona.ychat.add_message(
-            NewMessage(body="", sender=persona.id),
-            trigger_actions=[],
-        )
-        self._message_ids_by_session[session_id] = message_id
-        persona.log.info(f"Created message {message_id} for session {session_id}")
-
-        # Update awareness to point to the message
-        persona.awareness.set_local_state_field("isWriting", message_id)
-
-        # If there are tool_calls, update the message with them
-        if tool_calls:
-            msg = persona.ychat.get_message(message_id)
-            if msg:
-                msg.metadata = {"tool_calls": serialize_tool_calls(tool_calls)}
-                persona.ychat.update_message(msg, trigger_actions=[])
-
-        return message_id
-
-    def _update_message_tool_calls(self, session_id: str) -> None:
-        """
-        Update the message's metadata field with the current tool call state.
-        """
-        message_id = self._message_ids_by_session.get(session_id)
-        if not message_id:
-            return
-
-        persona = self._personas_by_session[session_id]
-        tool_calls = self._tool_calls_by_session.get(session_id, {})
-
-        msg = persona.ychat.get_message(message_id)
-        if msg:
-            serialized = serialize_tool_calls(tool_calls)
-            persona.log.info(f"update_tool_calls: message={message_id} count={len(tool_calls)} payload={serialized}")
-            msg.metadata = {"tool_calls": serialized}
-            persona.ychat.update_message(msg, trigger_actions=[])
-
-    def _handle_tool_call_start(self, session_id: str, update: ToolCallStart) -> None:
-        """Handle a ToolCallStart event."""
-        if session_id not in self._tool_calls_by_session:
-            self._tool_calls_by_session[session_id] = {}
-
-        persona = self._personas_by_session[session_id]
-        tool_calls = self._tool_calls_by_session[session_id]
-        kind_str = update.kind if update.kind else None
-        locations_paths = [loc.path for loc in update.locations] if update.locations else None
-        persona.log.info(f"tool_call_start: id={update.tool_call_id} title={update.title!r} kind={kind_str} locations={locations_paths}")
-        update_tool_call_from_start(
-            tool_calls,
-            tool_call_id=update.tool_call_id,
-            title=update.title,
-            kind=kind_str,
-            locations=locations_paths,
-        )
-
-        # Create message if it doesn't exist, then update tool_calls
-        self._get_or_create_message(session_id)
-        self._update_message_tool_calls(session_id)
-
-    def _handle_tool_call_progress(self, session_id: str, update: ToolCallProgress) -> None:
-        """Handle a ToolCallProgress event."""
-        if session_id not in self._tool_calls_by_session:
-            self._tool_calls_by_session[session_id] = {}
-
-        persona = self._personas_by_session[session_id]
-        tool_calls = self._tool_calls_by_session[session_id]
-
-        # Convert raw_output to a serializable value
-        raw_output = update.raw_output
-        if raw_output is not None and not isinstance(raw_output, (str, int, float, bool, list, dict)):
-            raw_output = str(raw_output)
-
-        kind_str = update.kind if update.kind else None
-        status_str = update.status if update.status else None
-        locations_paths = [loc.path for loc in update.locations] if update.locations else None
-        persona.log.info(f"tool_call_progress: id={update.tool_call_id} title={update.title!r} status={status_str} locations={locations_paths}")
-        update_tool_call_from_progress(
-            tool_calls,
-            tool_call_id=update.tool_call_id,
-            title=update.title,
-            kind=kind_str,
-            status=status_str,
-            raw_output=raw_output,
-            locations=locations_paths,
-        )
-
-        # Update tool_calls on existing message (it should exist by now from ToolCallStart)
-        self._get_or_create_message(session_id)
-        self._update_message_tool_calls(session_id)
 
     def _handle_agent_message_chunk(self, session_id: str, update: AgentMessageChunk) -> None:
         """Handle an AgentMessageChunk event by appending text to the message."""
@@ -295,10 +185,10 @@ class JaiAcpClient(Client):
         else:
             text = "<content>"
 
-        message_id = self._get_or_create_message(session_id)
         persona = self._personas_by_session[session_id]
-        tool_calls = self._tool_calls_by_session.get(session_id, {})
-        persona.log.info(f"agent_message_chunk: {len(text)} chars, tool_calls={len(tool_calls)}")
+        message_id = self._tool_call_manager.get_or_create_message(session_id, persona)
+        serialized_tool_calls = self._tool_call_manager.serialize(session_id)
+        persona.log.info(f"agent_message_chunk: {len(text)} chars, tool_calls={len(serialized_tool_calls)}")
 
         msg = Message(
             id=message_id,
@@ -306,7 +196,7 @@ class JaiAcpClient(Client):
             time=time(),
             sender=persona.id,
             raw_time=False,
-            metadata={"tool_calls": serialize_tool_calls(tool_calls)},
+            metadata={"tool_calls": serialized_tool_calls},
         )
         persona.ychat.update_message(msg, append=True, trigger_actions=[])
 
@@ -334,17 +224,19 @@ class JaiAcpClient(Client):
         if isinstance(update, AvailableCommandsUpdate):
             if not update.available_commands:
                 return
-            persona = self._personas_by_session.get(session_id)
             if persona and hasattr(persona, 'acp_slash_commands'):
                 persona.acp_slash_commands = update.available_commands
             return
 
+        if persona is None:
+            return
+
         if isinstance(update, ToolCallStart):
-            self._handle_tool_call_start(session_id, update)
+            self._tool_call_manager.handle_start(session_id, update, persona)
             return
 
         if isinstance(update, ToolCallProgress):
-            self._handle_tool_call_progress(session_id, update)
+            self._tool_call_manager.handle_progress(session_id, update, persona)
             return
 
         if isinstance(update, AgentMessageChunk):
