@@ -326,22 +326,6 @@ class JaiAcpClient(Client):
             # then flush to Yjs so the frontend renders the buttons.
             session_state = self._tool_call_manager._ensure_session(session_id)
             tc = session_state.tool_calls.get(tool_call.tool_call_id)
-            # Fallback: create ToolCallState if ToolCallStart hasn't arrived yet.
-            # Commented out for POC — ToolCallStart always precedes request_permission.
-            # if not tc:
-            #     from .tool_call_renderer import ToolCallState
-            #     locations_paths = (
-            #         [loc.path for loc in tool_call.locations] if tool_call.locations else None
-            #     )
-            #     tc = ToolCallState(
-            #         tool_call_id=tool_call.tool_call_id,
-            #         title=tool_call.title or "Requesting permission...",
-            #         kind=tool_call.kind or None,
-            #         status="in_progress",
-            #         locations=locations_paths,
-            #     )
-            #     session_state.tool_calls[tool_call.tool_call_id] = tc
-
             tc.permission_options = list(PERMISSION_OPTIONS)
             tc.permission_status = "pending"
             tc.session_id = session_id
