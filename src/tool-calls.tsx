@@ -78,9 +78,13 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
     (kind
       ? `${kind.charAt(0).toUpperCase()}${kind.slice(1)}...`
       : 'Working...');
-  const isInProgress = status === 'in_progress' || status === 'pending';
+  const isRejected =
+    toolCall.permission_status === 'resolved' &&
+    toolCall.selected_option_id?.startsWith('reject');
+  const isInProgress =
+    !isRejected && (status === 'in_progress' || status === 'pending');
   const isCompleted = status === 'completed';
-  const isFailed = status === 'failed';
+  const isFailed = status === 'failed' || isRejected;
 
   // Unicode text glyphs — consistent across OS/browser
   const icon = isInProgress
