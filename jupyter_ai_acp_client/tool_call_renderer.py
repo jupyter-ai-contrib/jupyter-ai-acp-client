@@ -19,6 +19,10 @@ class ToolCallState:
     status: Optional[str] = None
     raw_output: Optional[Any] = None
     locations: Optional[list[str]] = None
+    permission_options: Optional[list[dict]] = None  
+    permission_status: Optional[str] = None          
+    selected_option_id: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 def _generate_title(kind: Optional[str], locations: Optional[list[str]] = None) -> str:

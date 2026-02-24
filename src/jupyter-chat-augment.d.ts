@@ -39,6 +39,28 @@ declare module '@jupyter/chat' {
      * File paths or resource URIs involved in this tool call.
      */
     locations?: string[];
+    /**
+     * Permission options
+     */
+    permission_options?: IPermissionOption[];
+    /**
+     * Whether the permission request is waiting for user.
+     */
+    permission_status?: 'pending' | 'resolved';
+    /**
+     * The option_id the user selected.
+     */
+    selected_option_id?: string;
+    /**
+     * The ACP session ID this tool call belongs to.
+     */
+    session_id?: string;
+  }
+  
+  export interface IPermissionOption {
+    option_id: string;
+    title: string;
+    description?: string;
   }
 
   export interface IMessageMetadata {

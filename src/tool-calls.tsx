@@ -1,5 +1,6 @@
 import React from 'react';
-import { IToolCall, MessagePreambleProps } from '@jupyter/chat';
+import { IToolCall, IPermissionOption, MessagePreambleProps } from '@jupyter/chat';
+import { submitPermissionDecision } from './request';
 
 /**
  * Preamble component that renders tool call status lines above message body.
@@ -118,6 +119,7 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
       <div className={cssClass}>
         <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span>{' '}
         <em>{displayTitle}</em>
+        <PermissionButtons toolCall={toolCall} />
       </div>
     );
   }
@@ -127,6 +129,55 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
     <div className={cssClass}>
       <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span>{' '}
       {displayTitle}
+    </div>
+  );
+}
+
+/**
+ * Renders the permission buttons.
+ */
+function PermissionButtons({
+  toolCall
+}: {
+  toolCall: IToolCall;
+}): JSX.Element | null {
+  const [submitting, setSubmitting] = React.useState(false);
+
+  if (
+    !toolCall.permission_options?.length ||
+    toolCall.permission_status !== 'pending' ||
+    !toolCall.session_id
+  ) {
+    return null;
+  }
+
+  const handleClick = async (optionId: string) => {
+    setSubmitting(true);
+    try {
+      await submitPermissionDecision(
+        toolCall.session_id!,
+        toolCall.tool_call_id,
+        optionId
+      );
+    } catch (err) {
+      console.error('Failed to submit permission decision:', err);
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="jp-jupyter-ai-acp-client-permission-buttons">
+      {toolCall.permission_options.map((opt: IPermissionOption) => (
+        <button
+          key={opt.option_id}
+          className={`jp-jupyter-ai-acp-client-permission-btn jp-jupyter-ai-acp-client-permission-btn--${opt.option_id}`}
+          onClick={() => handleClick(opt.option_id)}
+          disabled={submitting}
+          title={opt.description}
+        >
+          {opt.title}
+        </button>
+      ))}
     </div>
   );
 }

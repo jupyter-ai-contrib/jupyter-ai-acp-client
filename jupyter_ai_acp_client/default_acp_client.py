@@ -54,6 +54,14 @@ from asyncio.subprocess import Process
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
 
+import traceback as tb_mod
+
+
+PERMISSION_OPTIONS = [
+    {"option_id": "allow_once", "title": "Allow Once", "description": ""},
+    {"option_id": "allow_always", "title": "Allow Always", "description": ""},
+    {"option_id": "reject_once", "title": "Reject Once", "description": ""},
+]
 
 class JaiAcpClient(Client):
     """
@@ -94,6 +102,7 @@ class JaiAcpClient(Client):
         self._prompt_locks_by_session: dict[str, asyncio.Lock] = {}
         self._terminal_manager = TerminalManager(event_loop)
         self._tool_call_manager = ToolCallManager()
+        self._pending_permissions: dict[tuple[str, str], asyncio.Future[str]] = {}
         super().__init__(*args, **kwargs)
 
 
@@ -267,24 +276,100 @@ class JaiAcpClient(Client):
             self._handle_agent_message_chunk(session_id, update)
             return
 
+    def resolve_permission(self, session_id: str, tool_call_id: str, option_id: str) -> bool:
+        """
+        Called by the REST endpoint when the user clicks a permission button.
+        Looks up the pending Future and sets its result, which wakes up the
+        suspended request_permission coroutine. Returns False if no pending
+        future exists (duplicate click or stale request).
+        """
+        key = (session_id, tool_call_id)
+        future = self._pending_permissions.get(key)
+        if future is None or future.done():
+            return False
+        future.set_result(option_id)
+        return True
+
     async def request_permission(
         self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any
     ) -> RequestPermissionResponse:
         """
         Handles `session/request_permission` requests from the ACP agent.
 
-        TODO: This currently always gives the agent permission. We will need to
-        add some tool call approval UI and handle permission requests properly.
+        Creates a Future, serializes the 3 standard permission options into
+        the tool call state for the frontend to render, then awaits the user's
+        decision via the REST endpoint.
         """
-        option_id = ""
-        for o in options:
-            if "allow" in o.option_id.lower():
-                option_id = o.option_id
-                break
+        #Debugging
+        persona = self._personas_by_session.get(session_id)
+        try:
+            if persona:
+                locations_paths = (
+                    [loc.path for loc in tool_call.locations] if tool_call.locations else None
+                )
+                persona.log.info(
+                    f"request_permission: session={session_id}"
+                    f" tool_call_id={tool_call.tool_call_id}"
+                    f" title={tool_call.title!r}"
+                    f" kind={tool_call.kind}"
+                    f" locations={locations_paths}"
+                    f" raw_input={tool_call.raw_input}"
+                    f" options={[(o.option_id, o.name) for o in options]}"
+                )
 
-        return RequestPermissionResponse(
-            outcome=AllowedOutcome(option_id=option_id, outcome='selected')
-        )
+            # Create a Future and store it so the REST endpoint can resolve it
+            perm_key = (session_id, tool_call.tool_call_id)
+            future: asyncio.Future[str] = self.event_loop.create_future()
+            self._pending_permissions[perm_key] = future
+
+            # Set the 3 standard options + pending status on the tool call state,
+            # then flush to Yjs so the frontend renders the buttons.
+            session_state = self._tool_call_manager._ensure_session(session_id)
+            tc = session_state.tool_calls.get(tool_call.tool_call_id)
+            # Fallback: create ToolCallState if ToolCallStart hasn't arrived yet.
+            # Commented out for POC — ToolCallStart always precedes request_permission.
+            # if not tc:
+            #     from .tool_call_renderer import ToolCallState
+            #     locations_paths = (
+            #         [loc.path for loc in tool_call.locations] if tool_call.locations else None
+            #     )
+            #     tc = ToolCallState(
+            #         tool_call_id=tool_call.tool_call_id,
+            #         title=tool_call.title or "Requesting permission...",
+            #         kind=tool_call.kind or None,
+            #         status="in_progress",
+            #         locations=locations_paths,
+            #     )
+            #     session_state.tool_calls[tool_call.tool_call_id] = tc
+
+            tc.permission_options = list(PERMISSION_OPTIONS)
+            tc.permission_status = "pending"
+            tc.session_id = session_id
+
+            if persona:
+                self._tool_call_manager.get_or_create_message(session_id, persona)
+                self._tool_call_manager._flush_to_message(session_id, persona) #Yjs sync and re-renders with the buttons
+
+            # Suspend until the user clicks a permission button
+            selected_option_id = await future
+            self._pending_permissions.pop(perm_key, None)
+
+            # Update tool call state to resolved
+            tc.permission_status = "resolved"
+            tc.selected_option_id = selected_option_id
+            if persona:
+                self._tool_call_manager._flush_to_message(session_id, persona)
+
+            return RequestPermissionResponse(
+                outcome=AllowedOutcome(option_id=selected_option_id, outcome='selected')
+            )
+        except Exception as e:
+            if persona:
+                persona.log.error(f"request_permission FAILED: {e}\n{tb_mod.format_exc()}")
+            else:
+                import logging
+                logging.error(f"request_permission FAILED: {e}\n{tb_mod.format_exc()}")
+            raise
 
     async def write_text_file(
         self, content: str, path: str, session_id: str, **kwargs: Any
