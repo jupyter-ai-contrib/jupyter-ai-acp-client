@@ -53,15 +53,9 @@ from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
+from .permission_manager import PermissionManager, PERMISSION_OPTIONS
 
 import traceback as tb_mod
-
-
-PERMISSION_OPTIONS = [
-    {"option_id": "allow_once", "title": "Allow Once", "description": ""},
-    {"option_id": "allow_always", "title": "Allow Always", "description": ""},
-    {"option_id": "reject_once", "title": "Reject Once", "description": ""},
-]
 
 class JaiAcpClient(Client):
     """
@@ -102,7 +96,7 @@ class JaiAcpClient(Client):
         self._prompt_locks_by_session: dict[str, asyncio.Lock] = {}
         self._terminal_manager = TerminalManager(event_loop)
         self._tool_call_manager = ToolCallManager()
-        self._pending_permissions: dict[tuple[str, str], asyncio.Future[str]] = {}
+        self._permission_manager = PermissionManager(event_loop)
         super().__init__(*args, **kwargs)
 
 
@@ -279,16 +273,9 @@ class JaiAcpClient(Client):
     def resolve_permission(self, session_id: str, tool_call_id: str, option_id: str) -> bool:
         """
         Called by the REST endpoint when the user clicks a permission button.
-        Looks up the pending Future and sets its result, which wakes up the
-        suspended request_permission coroutine. Returns False if no pending
-        future exists (duplicate click or stale request).
+        Delegates to PermissionManager to resolve the pending Future.
         """
-        key = (session_id, tool_call_id)
-        future = self._pending_permissions.get(key)
-        if future is None or future.done():
-            return False
-        future.set_result(option_id)
-        return True
+        return self._permission_manager.resolve(session_id, tool_call_id, option_id)
 
     async def request_permission(
         self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any
@@ -308,19 +295,11 @@ class JaiAcpClient(Client):
                     [loc.path for loc in tool_call.locations] if tool_call.locations else None
                 )
                 persona.log.info(
-                    f"request_permission: session={session_id}"
-                    f" tool_call_id={tool_call.tool_call_id}"
-                    f" title={tool_call.title!r}"
-                    f" kind={tool_call.kind}"
-                    f" locations={locations_paths}"
-                    f" raw_input={tool_call.raw_input}"
-                    f" options={[(o.option_id, o.name) for o in options]}"
+                    f"request_permission: session={session_id} tool_call_id={tool_call.tool_call_id}"
                 )
 
-            # Create a Future and store it so the REST endpoint can resolve it
-            perm_key = (session_id, tool_call.tool_call_id)
-            future: asyncio.Future[str] = self.event_loop.create_future()
-            self._pending_permissions[perm_key] = future
+            # Create a Future via PermissionManager
+            future = self._permission_manager.create_request(session_id, tool_call.tool_call_id)
 
             # Set the 3 standard options + pending status on the tool call state,
             # then flush to Yjs so the frontend renders the buttons.
@@ -336,7 +315,7 @@ class JaiAcpClient(Client):
 
             # Suspend until the user clicks a permission button
             selected_option_id = await future
-            self._pending_permissions.pop(perm_key, None)
+            self._permission_manager.cleanup(session_id, tool_call.tool_call_id)
 
             # Update tool call state to resolved
             tc.permission_status = "resolved"

@@ -118,9 +118,7 @@ class PermissionHandler(APIHandler):
                     continue
                 client = client_future.result()
                 known_sessions = list(client._personas_by_session.keys())
-                pending_keys = list(client._pending_permissions.keys())
-                logger.info(f"    {persona_id}: known_sessions={known_sessions}, "
-                            f"pending_permissions={pending_keys}")
+                logger.info(f"    {persona_id}: known_sessions={known_sessions}")
                 if session_id in client._personas_by_session:
                     logger.info(f"    FOUND client for session {session_id}")
                     return client
