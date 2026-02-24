@@ -82,8 +82,7 @@ class BaseAcpPersona(BasePersona):
     
     async def _init_client_session(self) -> NewSessionResponse:
         client = await self.get_client()
-        mcp_settings = self.get_mcp_settings()
-        session = await client.create_session(persona=self, mcp_settings=mcp_settings)
+        session = await client.create_session(persona=self)
         self.log.info(
             f"Initialized new ACP client session for '{self.__class__.__name__}'"
             f" with ID '{session.session_id}'."

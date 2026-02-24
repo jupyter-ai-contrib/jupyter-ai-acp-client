@@ -46,7 +46,7 @@ from acp.schema import (
     HttpMcpServer as AcpMcpServerHttp,
     AllowedOutcome
 )
-from jupyter_ai_persona_manager import BasePersona, McpSettings, McpServerHttp, McpServerStdio
+from jupyter_ai_persona_manager import BasePersona, McpServerStdio
 from jupyterlab_chat.models import Message, NewMessage
 from jupyterlab_chat.utils import find_mentions
 from asyncio.subprocess import Process
@@ -113,12 +113,15 @@ class JaiAcpClient(Client):
     async def get_connection(self) -> ClientSideConnection:
         return await self._connection_future
 
-    async def create_session(self, persona: BasePersona, mcp_settings: McpSettings | None) -> NewSessionResponse:
+    async def create_session(self, persona: BasePersona) -> NewSessionResponse:
         """
         Create an ACP agent session through this client scoped to a
         `BasePersona` instance.
         """
         conn = await self.get_connection()
+
+        # read MCP settings from persona
+        mcp_settings = persona.get_mcp_settings()
 
         # Parse MCP servers from `.jupyter/mcp_settings.json`.
         # We need to cast each from the PersonaManager model to the ACP model
