@@ -109,6 +109,7 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
             {icon}
           </span>{' '}
           {displayTitle}
+          <PermissionLabel toolCall={toolCall} />
         </summary>
         <div className="jp-jupyter-ai-acp-client-tool-call-detail">
           {detailsLines.join('\n')}
@@ -133,8 +134,30 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
     <div className={cssClass}>
       <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span>{' '}
       {displayTitle}
+      <PermissionLabel toolCall={toolCall} />
     </div>
   );
+}
+
+/**
+ * Shows the user's permission selection.
+ */
+const OPTION_LABELS: Record<string, string> = {
+  allow_once: 'Allowed once',
+  allow_always: 'Allowed always',
+  reject_once: 'Rejected',
+};
+
+function PermissionLabel({
+  toolCall
+}: {
+  toolCall: IToolCall;
+}): JSX.Element | null {
+  if (toolCall.permission_status !== 'resolved' || !toolCall.selected_option_id) {
+    return null;
+  }
+  const label = OPTION_LABELS[toolCall.selected_option_id] || toolCall.selected_option_id;
+  return <span className="jp-jupyter-ai-acp-client-permission-label"> — {label}</span>;
 }
 
 /**

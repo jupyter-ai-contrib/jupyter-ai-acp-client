@@ -111,3 +111,11 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after {
   border-color: var(--jp-error-color1, #d32f2f);
   color: var(--jp-error-color1, #d32f2f);
 }
+
+/* Permission selection label */
+.jp-jupyter-ai-acp-client-permission-label {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+
