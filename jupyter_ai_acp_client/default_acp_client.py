@@ -287,7 +287,6 @@ class JaiAcpClient(Client):
         the tool call state for the frontend to render, then awaits the user's
         decision via the REST endpoint.
         """
-        #Debugging
         persona = self._personas_by_session.get(session_id)
         try:
             if persona:
@@ -317,7 +316,6 @@ class JaiAcpClient(Client):
             selected_option_id = await future
             self._permission_manager.cleanup(session_id, tool_call.tool_call_id)
 
-            # Update tool call state to resolved
             tc.permission_status = "resolved"
             tc.selected_option_id = selected_option_id
             if persona:
