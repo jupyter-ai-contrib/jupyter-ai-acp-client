@@ -1,9 +1,11 @@
+import asyncio
 import os
 import re
 import shutil
 import subprocess
 
 from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
+from jupyterlab_chat.models import Message
 from ..base_acp_persona import BaseAcpPersona
 
 # Raise `PersonaRequirementsUnmet` if `kiro-cli` not installed
@@ -68,9 +70,11 @@ except FileNotFoundError:
     )
 
 class KiroAcpPersona(BaseAcpPersona):
+    _terminal_opened: bool
     def __init__(self, *args, **kwargs):
         executable = ["kiro-cli", "acp"]
         super().__init__(*args, executable=executable, **kwargs)
+        self._terminal_opened = False
     
     @property
     def defaults(self) -> PersonaDefaults:
@@ -84,3 +88,36 @@ class KiroAcpPersona(BaseAcpPersona):
             avatar_path=avatar_path,
             system_prompt="unused"
         )
+    
+    async def ensure_auth(self) -> None:
+        self.log.info("[Kiro] User is not logged in.")
+        while True:
+            # If authenticated with Kiro, return
+            if await self._check_kiro_auth():
+                break
+
+            # Otherwise, check every 2 seconds
+            await asyncio.sleep(2)
+    
+    async def handle_no_auth(self, message: Message) -> None:
+        # Return canned reply
+        self.send_message("Please sign in via `kiro-cli login`.")
+
+        # Open the terminal to help the user login
+        if not self._terminal_opened:
+            # TODO
+            self._terminal_opened = True
+
+    async def _check_kiro_auth(self) -> bool:
+        """
+        Helper method that checks if the client is authenticated with Kiro.
+        """
+        import asyncio
+        process = await asyncio.create_subprocess_exec(
+            "kiro-cli", "whoami",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        await process.wait()
+        return process.returncode == 0
+    
