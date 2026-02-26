@@ -7,6 +7,7 @@ from jupyterlab_chat.models import NewMessage
 
 from .tool_call_renderer import (
     ToolCallState,
+    extract_diffs,
     serialize_tool_calls,
     update_tool_call_from_progress,
     update_tool_call_from_start,
@@ -93,9 +94,11 @@ class ToolCallManager:
         locations_paths = (
             [loc.path for loc in update.locations] if update.locations else None
         )
+        diffs = extract_diffs(update.content)
         persona.log.info(
             f"tool_call_start: id={update.tool_call_id} title={update.title!r}"
             f" kind={kind_str} locations={locations_paths}"
+            f" diffs={len(diffs) if diffs else 0}"
         )
         update_tool_call_from_start(
             session.tool_calls,
@@ -103,6 +106,7 @@ class ToolCallManager:
             title=update.title,
             kind=kind_str,
             locations=locations_paths,
+            diffs=diffs,
         )
 
         self.get_or_create_message(session_id, persona)
@@ -126,9 +130,11 @@ class ToolCallManager:
         locations_paths = (
             [loc.path for loc in update.locations] if update.locations else None
         )
+        diffs = extract_diffs(update.content)
         persona.log.info(
             f"tool_call_progress: id={update.tool_call_id} title={update.title!r}"
             f" status={status_str} locations={locations_paths}"
+            f" diffs={len(diffs) if diffs else 0}"
         )
         update_tool_call_from_progress(
             session.tool_calls,
@@ -138,6 +144,7 @@ class ToolCallManager:
             status=status_str,
             raw_output=raw_output,
             locations=locations_paths,
+            diffs=diffs,
         )
 
         # Message should exist from the preceding ToolCallStart, but create if missing

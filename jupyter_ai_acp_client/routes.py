@@ -77,3 +77,70 @@ class AcpSlashCommandsHandler(APIHandler):
 
         response = AcpSlashCommandsResponse(commands=commands)
         self.finish(response.model_dump())
+
+
+class PermissionHandler(APIHandler):
+    """
+    REST endpoint for permission decisions. The frontend POSTs the user's
+    button click here, and this handler finds the right JaiAcpClient and
+    resolves the pending Future so the suspended request_permission coroutine
+    can resume.
+    """
+
+    def _find_client_for_session(self, session_id: str):
+        """
+        Iterate all persona managers → personas to find the JaiAcpClient
+        that has a pending permission for the given session_id.
+        Returns the client or None.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        persona_managers = (
+            self.serverapp.web_app.settings
+            .get("jupyter-ai", {})
+            .get("persona-managers", {})
+        )
+        logger.info(f"_find_client_for_session: looking for session_id={session_id}, "
+                     f"persona_managers count={len(persona_managers)}")
+        for room_id, pm in persona_managers.items():
+            logger.info(f"  checking room={room_id}, personas={list(pm.personas.keys())}")
+            for persona_id, persona in pm.personas.items():
+                if not isinstance(persona, BaseAcpPersona):
+                    logger.info(f"    {persona_id}: not BaseAcpPersona, skipping")
+                    continue
+                client_future = persona.__class__._client_future
+                if client_future is None:
+                    logger.info(f"    {persona_id}: _client_future is None")
+                    continue
+                if not client_future.done():
+                    logger.info(f"    {persona_id}: _client_future not done yet")
+                    continue
+                client = client_future.result()
+                known_sessions = list(client._personas_by_session.keys())
+                logger.info(f"    {persona_id}: known_sessions={known_sessions}")
+                if session_id in client._personas_by_session:
+                    logger.info(f"    FOUND client for session {session_id}")
+                    return client
+        logger.info(f"_find_client_for_session: no client found for session_id={session_id}")
+        return None
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self.get_json_body()
+        session_id = body.get("session_id")
+        tool_call_id = body.get("tool_call_id")
+        option_id = body.get("option_id")
+
+        if not all([session_id, tool_call_id, option_id]):
+            raise tornado.web.HTTPError(400, "Missing required fields: session_id, tool_call_id, option_id")
+
+        client = self._find_client_for_session(session_id)
+        if not client:
+            raise tornado.web.HTTPError(404, "No pending permission request found for this session")
+
+        resolved = client.resolve_permission(session_id, tool_call_id, option_id)
+        if not resolved:
+            raise tornado.web.HTTPError(404, "No pending permission request found")
+
+        self.finish({"status": "ok"})

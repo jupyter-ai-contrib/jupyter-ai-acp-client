@@ -1,7 +1,11 @@
+from acp.schema import FileEditToolCallContent
+
 from jupyter_ai_acp_client.tool_call_renderer import (
+    ToolCallDiff,
     ToolCallState,
     _shorten_title,
     _generate_title,
+    extract_diffs,
     update_tool_call_from_start,
     update_tool_call_from_progress,
     serialize_tool_calls,
@@ -64,6 +68,18 @@ class TestUpdateToolCallFromStart:
             locations=["/Users/foo/project/justfile"],
         )
         assert tool_calls["tc-1"].title == "Reading justfile"
+
+    def test_start_with_diffs(self):
+        diffs = [ToolCallDiff(path="/a/b.py", new_text="new", old_text="old")]
+        tool_calls = {}
+        update_tool_call_from_start(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="Editing b.py",
+            kind="edit",
+            diffs=diffs,
+        )
+        assert tool_calls["tc-1"].diffs == diffs
 
 
 class TestUpdateToolCallFromProgress:
@@ -155,6 +171,41 @@ class TestUpdateToolCallFromProgress:
         tc = tool_calls["tc-1"]
         assert tc.title == "Original title"
         assert tc.status == "in_progress"
+
+    def test_diffs_preserved_across_progress(self):
+        diffs = [ToolCallDiff(path="/a/b.py", new_text="new", old_text="old")]
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Editing b.py",
+                kind="edit",
+                status="in_progress",
+                diffs=diffs,
+            )
+        }
+        update_tool_call_from_progress(
+            tool_calls,
+            tool_call_id="tc-1",
+            status="completed",
+        )
+        assert tool_calls["tc-1"].diffs == diffs
+
+    def test_progress_updates_diffs(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Editing b.py",
+                kind="edit",
+                status="in_progress",
+            )
+        }
+        diffs = [ToolCallDiff(path="/a/b.py", new_text="new", old_text="old")]
+        update_tool_call_from_progress(
+            tool_calls,
+            tool_call_id="tc-1",
+            diffs=diffs,
+        )
+        assert tool_calls["tc-1"].diffs == diffs
 
 
 class TestSerializeToolCalls:
@@ -279,6 +330,33 @@ class TestSerializeToolCalls:
         }
         result = serialize_tool_calls(tool_calls)
         assert "locations" not in result[0]
+
+    def test_serializes_diffs(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Editing b.py",
+                kind="edit",
+                status="completed",
+                diffs=[ToolCallDiff(path="/a/b.py", new_text="new", old_text="old")],
+            )
+        }
+        result = serialize_tool_calls(tool_calls)
+        assert result[0]["diffs"] == [
+            {"path": "/a/b.py", "new_text": "new", "old_text": "old"}
+        ]
+
+    def test_strips_none_diffs(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Reading...",
+                status="in_progress",
+                diffs=None,
+            )
+        }
+        result = serialize_tool_calls(tool_calls)
+        assert "diffs" not in result[0]
 
 
 class TestShortenTitle:
@@ -431,6 +509,40 @@ class TestShortenTitleIntegration:
         assert result[0]["locations"] == ["/Users/aieroshe/Documents/project/justfile"]
         assert result[0]["status"] == "completed"
 
+    def test_full_flow_with_diffs(self):
+        """Simulate edit flow: start → start-with-diffs → progress-completed."""
+        tool_calls = {}
+        diffs = [ToolCallDiff(path="/a/b.py", new_text="new code", old_text="old code")]
+
+        # ToolCallStart #1: no diffs yet
+        update_tool_call_from_start(
+            tool_calls, tool_call_id="tc-1",
+            title="Editing b.py", kind="edit",
+        )
+        assert tool_calls["tc-1"].diffs is None
+
+        # ToolCallStart #2: diffs arrive
+        update_tool_call_from_start(
+            tool_calls, tool_call_id="tc-1",
+            title="Editing b.py", kind="edit",
+            diffs=diffs,
+        )
+        assert tool_calls["tc-1"].diffs == diffs
+
+        # ToolCallProgress: completed, diffs preserved
+        update_tool_call_from_progress(
+            tool_calls, tool_call_id="tc-1",
+            status="completed",
+        )
+        assert tool_calls["tc-1"].diffs == diffs
+        assert tool_calls["tc-1"].status == "completed"
+
+        # Serialize — diffs should be included for frontend
+        result = serialize_tool_calls(tool_calls)
+        assert result[0]["diffs"] == [
+            {"path": "/a/b.py", "new_text": "new code", "old_text": "old code"}
+        ]
+
 
 class TestGenerateTitle:
     def test_kind_with_locations(self):
@@ -456,3 +568,47 @@ class TestGenerateTitle:
 
     def test_multiple_locations_uses_first(self):
         assert _generate_title("read", ["/a/b/first.py", "/a/b/second.py"]) == "Reading first.py"
+
+
+class TestExtractDiffs:
+    def test_extracts_file_edit_content(self):
+        content = [
+            FileEditToolCallContent(
+                path="/a/b.py", newText="new", oldText="old", type="diff"
+            )
+        ]
+        result = extract_diffs(content)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].path == "/a/b.py"
+        assert result[0].new_text == "new"
+        assert result[0].old_text == "old"
+
+    def test_returns_none_for_empty_content(self):
+        assert extract_diffs([]) is None
+
+    def test_returns_none_for_none(self):
+        assert extract_diffs(None) is None
+
+    def test_skips_non_file_edit_items(self):
+        content = [
+            "not a FileEditToolCallContent",
+            FileEditToolCallContent(
+                path="/a/b.py", newText="new", oldText="old", type="diff"
+            ),
+            42,
+        ]
+        result = extract_diffs(content)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].path == "/a/b.py"
+
+    def test_new_file_has_none_old_text(self):
+        content = [
+            FileEditToolCallContent(
+                path="/a/new.py", newText="hello", type="diff"
+            )
+        ]
+        result = extract_diffs(content)
+        assert result is not None
+        assert result[0].old_text is None

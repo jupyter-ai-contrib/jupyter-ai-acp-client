@@ -37,16 +37,19 @@
   color: var(--jp-error-color1, #d32f2f);
 }
 
-details.jp-jupyter-ai-acp-client-tool-call summary {
+details.jp-jupyter-ai-acp-client-tool-call summary,
+.jp-jupyter-ai-acp-client-tool-call details summary {
   cursor: pointer;
   list-style: none;
 }
 
-details.jp-jupyter-ai-acp-client-tool-call summary::-webkit-details-marker {
+details.jp-jupyter-ai-acp-client-tool-call summary::-webkit-details-marker,
+.jp-jupyter-ai-acp-client-tool-call details summary::-webkit-details-marker {
   display: none;
 }
 
-details.jp-jupyter-ai-acp-client-tool-call summary::after {
+details.jp-jupyter-ai-acp-client-tool-call summary::after,
+.jp-jupyter-ai-acp-client-tool-call details summary::after {
   content: '';
   display: inline-block;
   border-left: 4px solid transparent;
@@ -57,7 +60,8 @@ details.jp-jupyter-ai-acp-client-tool-call summary::after {
   opacity: 0.5;
 }
 
-details[open].jp-jupyter-ai-acp-client-tool-call summary::after {
+details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
+.jp-jupyter-ai-acp-client-tool-call details[open] summary::after {
   border-top: none;
   border-bottom: 5px solid currentcolor;
 }
@@ -69,4 +73,136 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after {
   color: var(--jp-ui-font-color2);
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* Permission approval buttons */
+
+.jp-jupyter-ai-acp-client-permission-buttons {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 4px 20px;
+}
+
+.jp-jupyter-ai-acp-client-permission-btn {
+  padding: 2px 10px;
+  font-size: var(--jp-ui-font-size1);
+  font-family: var(--jp-ui-font-family);
+  border-radius: 3px;
+  border: 1px solid var(--jp-border-color1);
+  cursor: pointer;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  line-height: 1.6;
+}
+
+.jp-jupyter-ai-acp-client-permission-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.jp-jupyter-ai-acp-client-permission-btn:hover:not(:disabled) {
+  background: var(--jp-layout-color2);
+}
+
+.jp-jupyter-ai-acp-client-permission-btn-allow-once,
+.jp-jupyter-ai-acp-client-permission-btn-allow-always {
+  border-color: var(--jp-success-color1, #388e3c);
+  color: var(--jp-success-color1, #388e3c);
+}
+
+.jp-jupyter-ai-acp-client-permission-btn-reject-once {
+  border-color: var(--jp-error-color1, #d32f2f);
+  color: var(--jp-error-color1, #d32f2f);
+}
+
+/* Permission selection label */
+
+.jp-jupyter-ai-acp-client-permission-label {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+/* Diff view */
+
+.jp-jupyter-ai-acp-client-diff-container {
+  margin: 4px 0 4px 20px;
+}
+
+.jp-jupyter-ai-acp-client-diff-block {
+  margin-bottom: 4px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.jp-jupyter-ai-acp-client-diff-header {
+  padding: 0 8px;
+  font-size: var(--jp-ui-font-size0);
+  font-family: var(--jp-code-font-family);
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+}
+
+.jp-jupyter-ai-acp-client-diff-header:hover {
+  text-decoration: underline;
+}
+
+.jp-jupyter-ai-acp-client-diff-content {
+  margin: 0;
+  padding: 0;
+  font-size: var(--jp-code-font-size);
+  font-family: var(--jp-code-font-family);
+  line-height: var(--jp-code-line-height);
+}
+
+.jp-jupyter-ai-acp-client-diff-line {
+  display: flex;
+}
+
+.jp-jupyter-ai-acp-client-diff-gutter {
+  flex-shrink: 0;
+  width: 3ch;
+  text-align: right;
+  color: var(--jp-ui-font-color3);
+  user-select: none;
+  padding-right: 2px;
+}
+
+.jp-jupyter-ai-acp-client-diff-line-text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-all;
+  padding-left: 4px;
+}
+
+.jp-jupyter-ai-acp-client-diff-toggle {
+  display: block;
+  color: var(--jp-ui-font-color3);
+  font-style: italic;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.jp-jupyter-ai-acp-client-diff-toggle:hover {
+  text-decoration: underline;
+}
+
+.jp-jupyter-ai-acp-client-diff-added {
+  background: color-mix(
+    in srgb,
+    var(--jp-success-color1, #388e3c) 15%,
+    transparent
+  );
+}
+
+.jp-jupyter-ai-acp-client-diff-removed {
+  background: color-mix(
+    in srgb,
+    var(--jp-error-color1, #d32f2f) 15%,
+    transparent
+  );
+}
+
+.jp-jupyter-ai-acp-client-diff-context {
+  color: var(--jp-ui-font-color2);
 }

@@ -3,6 +3,12 @@
 export {};
 
 declare module '@jupyter/chat' {
+  export interface IToolCallDiff {
+    path: string;
+    new_text: string;
+    old_text?: string;
+  }
+
   export interface IToolCall {
     /**
      * Unique identifier for this tool call, used to correlate events
@@ -39,6 +45,32 @@ declare module '@jupyter/chat' {
      * File paths or resource URIs involved in this tool call.
      */
     locations?: string[];
+    /**
+     * Permission options
+     */
+    permission_options?: IPermissionOption[];
+    /**
+     * Whether the permission request is waiting for user.
+     */
+    permission_status?: 'pending' | 'resolved';
+    /**
+     * The option_id the user selected.
+     */
+    selected_option_id?: string;
+    /**
+     * The ACP session ID this tool call belongs to.
+     */
+    session_id?: string;
+    /**
+     * File diffs from ACP FileEditToolCallContent.
+     */
+    diffs?: IToolCallDiff[];
+  }
+
+  export interface IPermissionOption {
+    option_id: string;
+    title: string;
+    description?: string;
   }
 
   export interface IMessageMetadata {
