@@ -145,8 +145,20 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   font-size: var(--jp-code-font-size);
   font-family: var(--jp-code-font-family);
   line-height: var(--jp-code-line-height);
-  overflow: auto;
-  max-height: 400px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.jp-jupyter-ai-acp-client-diff-toggle {
+  display: block;
+  color: var(--jp-ui-font-color3);
+  font-style: italic;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.jp-jupyter-ai-acp-client-diff-toggle:hover {
+  text-decoration: underline;
 }
 
 .jp-jupyter-ai-acp-client-diff-added {

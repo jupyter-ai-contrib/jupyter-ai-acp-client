@@ -110,11 +110,11 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
 
   const hasDiffs = !!toolCall.diffs?.length;
 
-  // Pending permission with diffs: collapsible diff + permission buttons outside
+  // Pending permission with diffs: expanded diff + permission buttons outside
   if (hasDiffs && hasPendingPermission) {
     return (
       <div className={cssClass}>
-        <details>
+        <details open>
           <summary>
             <span className="jp-jupyter-ai-acp-client-tool-call-icon">
               {icon}
