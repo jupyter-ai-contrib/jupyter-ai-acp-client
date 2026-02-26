@@ -1,5 +1,9 @@
 import React from 'react';
-import { IToolCall, IPermissionOption, MessagePreambleProps } from '@jupyter/chat';
+import {
+  IToolCall,
+  IPermissionOption,
+  MessagePreambleProps
+} from '@jupyter/chat';
 import { submitPermissionDecision } from './request';
 
 /**
@@ -86,7 +90,8 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
     !!selectedOpt?.description?.includes('reject');
   const hasPendingPermission = toolCall.permission_status === 'pending';
   const isInProgress =
-    !isRejected && (status === 'in_progress' || status === 'pending' || hasPendingPermission);
+    !isRejected &&
+    (status === 'in_progress' || status === 'pending' || hasPendingPermission);
   const isCompleted = status === 'completed';
   const isFailed = status === 'failed' || isRejected;
 
@@ -99,7 +104,7 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
         ? '\u2717'
         : '\u2022';
   // Force 'failed' class when rejected
-  const effectiveStatus = isRejected ? 'failed' : (status || 'in_progress');
+  const effectiveStatus = isRejected ? 'failed' : status || 'in_progress';
   const cssClass = `jp-jupyter-ai-acp-client-tool-call jp-jupyter-ai-acp-client-tool-call-${effectiveStatus}`;
 
   // Progressive disclosure: completed/failed tool calls with metadata get expandable details
@@ -153,7 +158,10 @@ function PermissionLabel({
 }: {
   toolCall: IToolCall;
 }): JSX.Element | null {
-  if (toolCall.permission_status !== 'resolved' || !toolCall.selected_option_id) {
+  if (
+    toolCall.permission_status !== 'resolved' ||
+    !toolCall.selected_option_id
+  ) {
     return null;
   }
   const title = toolCall.permission_options?.find(
@@ -162,7 +170,12 @@ function PermissionLabel({
   if (!title) {
     return null;
   }
-  return <span className="jp-jupyter-ai-acp-client-permission-label"> — {title}</span>;
+  return (
+    <span className="jp-jupyter-ai-acp-client-permission-label">
+      {' '}
+      — {title}
+    </span>
+  );
 }
 
 /**
