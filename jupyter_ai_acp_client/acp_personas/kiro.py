@@ -90,7 +90,7 @@ class KiroAcpPersona(BaseAcpPersona):
         )
     
     async def ensure_auth(self) -> None:
-        self.log.info("[Kiro] User is not logged in.")
+        self.log.info("[Kiro] User is not signed in.")
         while True:
             # If authenticated with Kiro, return
             if await self._check_kiro_auth():
@@ -98,15 +98,21 @@ class KiroAcpPersona(BaseAcpPersona):
 
             # Otherwise, check every 2 seconds
             await asyncio.sleep(2)
+        
+        # Reaching this point := user is authenticated
+        # Send a message letting them know
+        self.log.info("[Kiro] User is signed in.")
+        self.send_message("Thanks for signing in! I'm ready to help.")
     
     async def handle_no_auth(self, message: Message) -> None:
         # Return canned reply
-        self.send_message("Please sign in via `kiro-cli login`.")
+        self.send_message("You're not signed in to Kiro yet. Please run `kiro-cli login` in a terminal to sign in.")
 
         # Open the terminal to help the user login
         if not self._terminal_opened:
-            # TODO
-            self._terminal_opened = True
+            self._terminal_opened = await self._open_kiro_login_terminal()
+            if self._terminal_opened:
+                self.send_message("I've opened a new terminal to help with that.")
 
     async def _check_kiro_auth(self) -> bool:
         """
@@ -121,3 +127,16 @@ class KiroAcpPersona(BaseAcpPersona):
         await process.wait()
         return process.returncode == 0
     
+    async def _open_kiro_login_terminal(self) -> bool:
+        """
+        Attempt to open a terminal to log in with Kiro.
+
+        Returns `True` if successful, `False` otherwise.
+        """
+        try:
+            from jupyterlab_commands_toolkit.tools import execute_command
+        except:
+            return False
+
+        response = await execute_command("terminal:create-new")
+        return response.get("success", False)
