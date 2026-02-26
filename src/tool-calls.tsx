@@ -212,6 +212,8 @@ function PermissionButtons({
 
   return (
     <div className="jp-jupyter-ai-acp-client-permission-buttons">
+      <span className="jp-jupyter-ai-acp-client-permission-tree">└─</span>
+      <span>Allow?</span>
       {toolCall.permission_options.map((opt: IPermissionOption) => (
         <button
           key={opt.option_id}
