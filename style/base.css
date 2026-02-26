@@ -100,13 +100,13 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after {
   background: var(--jp-layout-color2);
 }
 
-.jp-jupyter-ai-acp-client-permission-btn--allow-once,
-.jp-jupyter-ai-acp-client-permission-btn--allow-always {
+.jp-jupyter-ai-acp-client-permission-btn-allow-once,
+.jp-jupyter-ai-acp-client-permission-btn-allow-always {
   border-color: var(--jp-success-color1, #388e3c);
   color: var(--jp-success-color1, #388e3c);
 }
 
-.jp-jupyter-ai-acp-client-permission-btn--reject-once {
+.jp-jupyter-ai-acp-client-permission-btn-reject-once {
   border-color: var(--jp-error-color1, #d32f2f);
   color: var(--jp-error-color1, #d32f2f);
 }

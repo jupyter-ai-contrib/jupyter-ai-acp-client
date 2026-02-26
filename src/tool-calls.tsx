@@ -202,7 +202,7 @@ function PermissionButtons({
       {toolCall.permission_options.map((opt: IPermissionOption) => (
         <button
           key={opt.option_id}
-          className={`jp-jupyter-ai-acp-client-permission-btn jp-jupyter-ai-acp-client-permission-btn--${(opt.description || opt.option_id).replace(/_/g, '-')}`}
+          className={`jp-jupyter-ai-acp-client-permission-btn${opt.description ? ` jp-jupyter-ai-acp-client-permission-btn-${opt.description.replace(/_/g, '-')}` : ''}`}
           onClick={() => handleClick(opt.option_id)}
           disabled={submitting}
           title={opt.description}
