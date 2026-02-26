@@ -14,15 +14,23 @@ import { DiffView } from './diff-view';
 export function ToolCallsComponent(
   props: MessagePreambleProps
 ): JSX.Element | null {
-  const { message } = props;
+  const { message, model } = props;
   if (!message.metadata?.tool_calls?.length) {
     return null;
   }
 
+  const onOpenFile = (path: string) => {
+    model.documentManager?.openOrReveal(path);
+  };
+
   return (
     <div className="jp-jupyter-ai-acp-client-tool-calls">
       {(message.metadata?.tool_calls ?? []).map((tc: IToolCall) => (
-        <ToolCallLine key={tc.tool_call_id} toolCall={tc} />
+        <ToolCallLine
+          key={tc.tool_call_id}
+          toolCall={tc}
+          onOpenFile={onOpenFile}
+        />
       ))}
     </div>
   );
@@ -76,7 +84,13 @@ function buildDetailsLines(toolCall: IToolCall): string[] {
 /**
  * Renders a single tool call line with status icon and optional expandable output.
  */
-function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
+function ToolCallLine({
+  toolCall,
+  onOpenFile
+}: {
+  toolCall: IToolCall;
+  onOpenFile?: (path: string) => void;
+}): JSX.Element {
   const { title, status, kind } = toolCall;
   const displayTitle =
     title ||
@@ -121,7 +135,7 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
             </span>{' '}
             <em>{displayTitle}</em>
           </summary>
-          <DiffView diffs={toolCall.diffs!} />
+          <DiffView diffs={toolCall.diffs!} onOpenFile={onOpenFile} />
         </details>
         <PermissionButtons toolCall={toolCall} />
       </div>
@@ -139,7 +153,7 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
           {displayTitle}
           <PermissionLabel toolCall={toolCall} />
         </summary>
-        <DiffView diffs={toolCall.diffs!} />
+        <DiffView diffs={toolCall.diffs!} onOpenFile={onOpenFile} />
       </details>
     );
   }

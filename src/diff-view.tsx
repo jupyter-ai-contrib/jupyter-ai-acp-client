@@ -1,41 +1,75 @@
 import React from 'react';
 import { IToolCallDiff } from '@jupyter/chat';
-import { diffLines, Change } from 'diff';
+import { structuredPatch } from 'diff';
 
 /** Maximum number of diff lines shown before truncation. */
 const MAX_DIFF_LINES = 20;
 
-/** A single flattened diff line with its styling metadata. */
+/** A single flattened diff line with its styling and line number metadata. */
 interface IDiffLineInfo {
   cls: string;
   prefix: string;
   text: string;
   key: string;
+  oldLineNum: number | null;
+  newLineNum: number | null;
 }
 
 /**
- * Renders a single file diff block with filename header, line-level
- * highlighting, and click-to-expand truncation for long diffs.
+ * Renders a single file diff block with filename header, dual line number
+ * gutters, line-level highlighting, and click-to-expand truncation.
  */
-function DiffBlock({ diff }: { diff: IToolCallDiff }): JSX.Element {
-  const changes = diffLines(diff.old_text ?? '', diff.new_text);
+function DiffBlock({
+  diff,
+  onOpenFile
+}: {
+  diff: IToolCallDiff;
+  onOpenFile?: (path: string) => void;
+}): JSX.Element {
+  const patch = structuredPatch(
+    diff.path,
+    diff.path,
+    diff.old_text ?? '',
+    diff.new_text,
+    undefined,
+    undefined,
+    { context: Infinity }
+  );
   const filename = diff.path.split('/').pop() ?? diff.path;
   const [expanded, setExpanded] = React.useState(false);
 
-  // Flatten all change hunks into individual lines
+  // Flatten hunks into renderable lines
   const allLines: IDiffLineInfo[] = [];
-  changes.forEach((change: Change, i: number) => {
-    const cls = change.added
-      ? 'jp-jupyter-ai-acp-client-diff-added'
-      : change.removed
-        ? 'jp-jupyter-ai-acp-client-diff-removed'
-        : 'jp-jupyter-ai-acp-client-diff-context';
-    const prefix = change.added ? '+' : change.removed ? '-' : ' ';
-    const lines = change.value.replace(/\n$/, '').split('\n');
-    lines.forEach((line: string, j: number) => {
-      allLines.push({ cls, prefix, text: line, key: `${i}-${j}` });
-    });
-  });
+  for (const hunk of patch.hunks) {
+    let oldLine = hunk.oldStart;
+    let newLine = hunk.newStart;
+    hunk.lines
+      .filter(line => !line.startsWith('\\'))
+      .forEach((line, j) => {
+        const prefix = line[0];
+        const text = line.slice(1);
+        const isAdded = prefix === '+';
+        const isRemoved = prefix === '-';
+        allLines.push({
+          cls: isAdded
+            ? 'jp-jupyter-ai-acp-client-diff-added'
+            : isRemoved
+              ? 'jp-jupyter-ai-acp-client-diff-removed'
+              : 'jp-jupyter-ai-acp-client-diff-context',
+          prefix,
+          text,
+          key: `${hunk.oldStart}-${j}`,
+          oldLineNum: isAdded ? null : oldLine,
+          newLineNum: isRemoved ? null : newLine
+        });
+        if (!isAdded) {
+          oldLine++;
+        }
+        if (!isRemoved) {
+          newLine++;
+        }
+      });
+  }
 
   const canTruncate = allLines.length > MAX_DIFF_LINES;
   const visible =
@@ -44,31 +78,47 @@ function DiffBlock({ diff }: { diff: IToolCallDiff }): JSX.Element {
 
   return (
     <div className="jp-jupyter-ai-acp-client-diff-block">
-      <div className="jp-jupyter-ai-acp-client-diff-header">{filename}</div>
-      <pre className="jp-jupyter-ai-acp-client-diff-content">
+      <div
+        className="jp-jupyter-ai-acp-client-diff-header"
+        onClick={onOpenFile ? () => onOpenFile(diff.path) : undefined}
+        title={diff.path}
+      >
+        {filename}
+      </div>
+      <div className="jp-jupyter-ai-acp-client-diff-content">
         {visible.map((line: IDiffLineInfo) => (
-          <span key={line.key} className={line.cls}>
-            {line.prefix} {line.text}
-            {'\n'}
-          </span>
+          <div
+            key={line.key}
+            className={`jp-jupyter-ai-acp-client-diff-line ${line.cls}`}
+          >
+            <span className="jp-jupyter-ai-acp-client-diff-gutter">
+              {line.oldLineNum ?? ' '}
+            </span>
+            <span className="jp-jupyter-ai-acp-client-diff-gutter">
+              {line.newLineNum ?? ' '}
+            </span>
+            <span className="jp-jupyter-ai-acp-client-diff-line-text">
+              {line.prefix} {line.text}
+            </span>
+          </div>
         ))}
         {canTruncate && !expanded && (
-          <span
+          <div
             className="jp-jupyter-ai-acp-client-diff-toggle"
             onClick={() => setExpanded(true)}
           >
             ... {hiddenCount} more lines
-          </span>
+          </div>
         )}
         {canTruncate && expanded && (
-          <span
+          <div
             className="jp-jupyter-ai-acp-client-diff-toggle"
             onClick={() => setExpanded(false)}
           >
             show less
-          </span>
+          </div>
         )}
-      </pre>
+      </div>
     </div>
   );
 }
@@ -76,11 +126,17 @@ function DiffBlock({ diff }: { diff: IToolCallDiff }): JSX.Element {
 /**
  * Renders one or more file diffs.
  */
-export function DiffView({ diffs }: { diffs: IToolCallDiff[] }): JSX.Element {
+export function DiffView({
+  diffs,
+  onOpenFile
+}: {
+  diffs: IToolCallDiff[];
+  onOpenFile?: (path: string) => void;
+}): JSX.Element {
   return (
     <div className="jp-jupyter-ai-acp-client-diff-container">
       {diffs.map((d, i) => (
-        <DiffBlock key={i} diff={d} />
+        <DiffBlock key={i} diff={d} onOpenFile={onOpenFile} />
       ))}
     </div>
   );
