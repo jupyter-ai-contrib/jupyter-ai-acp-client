@@ -81,8 +81,9 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
   const isRejected =
     toolCall.permission_status === 'resolved' &&
     toolCall.selected_option_id?.startsWith('reject');
+  const hasPendingPermission = toolCall.permission_status === 'pending';
   const isInProgress =
-    !isRejected && (status === 'in_progress' || status === 'pending');
+    !isRejected && (status === 'in_progress' || status === 'pending' || hasPendingPermission);
   const isCompleted = status === 'completed';
   const isFailed = status === 'failed' || isRejected;
 
@@ -142,12 +143,6 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
 /**
  * Shows the user's permission selection.
  */
-const OPTION_LABELS: Record<string, string> = {
-  allow_once: 'Allowed once',
-  allow_always: 'Allowed always',
-  reject_once: 'Rejected',
-};
-
 function PermissionLabel({
   toolCall
 }: {
@@ -156,8 +151,13 @@ function PermissionLabel({
   if (toolCall.permission_status !== 'resolved' || !toolCall.selected_option_id) {
     return null;
   }
-  const label = OPTION_LABELS[toolCall.selected_option_id] || toolCall.selected_option_id;
-  return <span className="jp-jupyter-ai-acp-client-permission-label"> — {label}</span>;
+  const title = toolCall.permission_options?.find(
+    opt => opt.option_id === toolCall.selected_option_id
+  )?.title;
+  if (!title) {
+    return null;
+  }
+  return <span className="jp-jupyter-ai-acp-client-permission-label"> — {title}</span>;
 }
 
 /**
@@ -197,7 +197,7 @@ function PermissionButtons({
       {toolCall.permission_options.map((opt: IPermissionOption) => (
         <button
           key={opt.option_id}
-          className={`jp-jupyter-ai-acp-client-permission-btn jp-jupyter-ai-acp-client-permission-btn--${opt.option_id}`}
+          className={`jp-jupyter-ai-acp-client-permission-btn jp-jupyter-ai-acp-client-permission-btn--${opt.description || opt.option_id}`}
           onClick={() => handleClick(opt.option_id)}
           disabled={submitting}
           title={opt.description}

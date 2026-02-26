@@ -53,7 +53,7 @@ from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
-from .permission_manager import PermissionManager, PERMISSION_OPTIONS
+from .permission_manager import PermissionManager
 
 import traceback as tb_mod
 
@@ -282,10 +282,6 @@ class JaiAcpClient(Client):
     ) -> RequestPermissionResponse:
         """
         Handles `session/request_permission` requests from the ACP agent.
-
-        Creates a Future, serializes the 3 standard permission options into
-        the tool call state for the frontend to render, then awaits the user's
-        decision via the REST endpoint.
         """
         persona = self._personas_by_session.get(session_id)
         try:
@@ -294,17 +290,32 @@ class JaiAcpClient(Client):
                     [loc.path for loc in tool_call.locations] if tool_call.locations else None
                 )
                 persona.log.info(
-                    f"request_permission: session={session_id} tool_call_id={tool_call.tool_call_id}"
+                    f"request_permission: CALLED session={session_id} "
+                    f"tool_call_id={tool_call.tool_call_id} "
+                    f"options_count={len(options)} "
+                    f"options={[{'id': o.option_id, 'name': o.name, 'kind': o.kind} for o in options]} "
+                    f"persona_class={persona.__class__.__name__}"
                 )
 
             # Create a Future via PermissionManager
             future = self._permission_manager.create_request(session_id, tool_call.tool_call_id)
 
-            # Set the 3 standard options + pending status on the tool call state,
+            # Convert agent-provided options to dicts for the frontend
+            permission_options = [
+                {"option_id": opt.option_id, "title": opt.name, "description": opt.kind or ""}
+                for opt in options
+            ]
+
+            if persona:
+                persona.log.info(
+                    f"request_permission: {len(options)} agent options -> {len(permission_options)} permission_options"
+                )
+
+            # Set the permission options + pending status on the tool call state,
             # then flush to Yjs so the frontend renders the buttons.
             session_state = self._tool_call_manager._ensure_session(session_id)
             tc = session_state.tool_calls.get(tool_call.tool_call_id)
-            tc.permission_options = list(PERMISSION_OPTIONS)
+            tc.permission_options = permission_options
             tc.permission_status = "pending"
             tc.session_id = session_id
 

@@ -9,13 +9,6 @@ import asyncio
 from typing import Optional
 
 
-PERMISSION_OPTIONS = [
-    {"option_id": "allow_once", "title": "Allow Once", "description": ""},
-    {"option_id": "allow_always", "title": "Allow Always", "description": ""},
-    {"option_id": "reject_once", "title": "Reject Once", "description": ""},
-]
-
-
 class PermissionManager:
     """
     Manages pending permission requests using asyncio Futures.
