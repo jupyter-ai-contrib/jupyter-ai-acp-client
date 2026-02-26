@@ -78,9 +78,12 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
     (kind
       ? `${kind.charAt(0).toUpperCase()}${kind.slice(1)}...`
       : 'Working...');
+  const selectedOpt = toolCall.permission_options?.find(
+    opt => opt.option_id === toolCall.selected_option_id
+  );
   const isRejected =
     toolCall.permission_status === 'resolved' &&
-    toolCall.selected_option_id?.startsWith('reject');
+    !!selectedOpt?.description?.includes('reject');
   const hasPendingPermission = toolCall.permission_status === 'pending';
   const isInProgress =
     !isRejected && (status === 'in_progress' || status === 'pending' || hasPendingPermission);
@@ -95,7 +98,9 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
       : isFailed
         ? '\u2717'
         : '\u2022';
-  const cssClass = `jp-jupyter-ai-acp-client-tool-call jp-jupyter-ai-acp-client-tool-call-${status || 'in_progress'}`;
+  // Force 'failed' class when rejected
+  const effectiveStatus = isRejected ? 'failed' : (status || 'in_progress');
+  const cssClass = `jp-jupyter-ai-acp-client-tool-call jp-jupyter-ai-acp-client-tool-call-${effectiveStatus}`;
 
   // Progressive disclosure: completed/failed tool calls with metadata get expandable details
   const detailsLines =

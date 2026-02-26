@@ -155,6 +155,15 @@ class JaiAcpClient(Client):
         assert session_id in self._personas_by_session
         lock = self._prompt_locks_by_session.setdefault(session_id, asyncio.Lock())
 
+        # Auto-reject any pending permission requests
+        rejected = self._permission_manager.reject_all_pending(session_id)
+        if rejected:
+            persona = self._personas_by_session.get(session_id)
+            if persona:
+                persona.log.info(
+                    f"prompt_and_reply: auto-rejected {rejected} pending permission(s) for session {session_id}"
+                )
+
         async with lock:
             conn = await self.get_connection()
             persona = self._personas_by_session[session_id]
@@ -297,14 +306,16 @@ class JaiAcpClient(Client):
                     f"persona_class={persona.__class__.__name__}"
                 )
 
-            # Create a Future via PermissionManager
-            future = self._permission_manager.create_request(session_id, tool_call.tool_call_id)
-
             # Convert agent-provided options to dicts for the frontend
             permission_options = [
                 {"option_id": opt.option_id, "title": opt.name, "description": opt.kind or ""}
                 for opt in options
             ]
+
+            # Create a Future via PermissionManager
+            future = self._permission_manager.create_request(
+                session_id, tool_call.tool_call_id, options=permission_options
+            )
 
             if persona:
                 persona.log.info(
