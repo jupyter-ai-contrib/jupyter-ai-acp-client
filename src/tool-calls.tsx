@@ -142,28 +142,12 @@ function ToolCallLine({
     );
   }
 
-  // Completed/failed with diffs: collapsible diff
-  if (hasDiffs && (isCompleted || isFailed)) {
-    return (
-      <details className={cssClass}>
-        <summary>
-          <span className="jp-jupyter-ai-acp-client-tool-call-icon">
-            {icon}
-          </span>{' '}
-          {displayTitle}
-          <PermissionLabel toolCall={toolCall} />
-        </summary>
-        <DiffView diffs={toolCall.diffs!} onOpenFile={onOpenFile} />
-      </details>
-    );
-  }
-
-  // Progressive disclosure: completed/failed tool calls with metadata get expandable details
+  // Completed/failed with expandable content (diffs or metadata)
   const detailsLines =
-    isCompleted || isFailed ? buildDetailsLines(toolCall) : [];
-  const showDetails = detailsLines.length > 0;
+    !hasDiffs && (isCompleted || isFailed) ? buildDetailsLines(toolCall) : [];
+  const hasExpandableContent = hasDiffs || detailsLines.length > 0;
 
-  if (showDetails) {
+  if ((isCompleted || isFailed) && hasExpandableContent) {
     return (
       <details className={cssClass}>
         <summary>
@@ -173,9 +157,13 @@ function ToolCallLine({
           {displayTitle}
           <PermissionLabel toolCall={toolCall} />
         </summary>
-        <div className="jp-jupyter-ai-acp-client-tool-call-detail">
-          {detailsLines.join('\n')}
-        </div>
+        {hasDiffs ? (
+          <DiffView diffs={toolCall.diffs!} onOpenFile={onOpenFile} />
+        ) : (
+          <div className="jp-jupyter-ai-acp-client-tool-call-detail">
+            {detailsLines.join('\n')}
+          </div>
+        )}
       </details>
     );
   }
