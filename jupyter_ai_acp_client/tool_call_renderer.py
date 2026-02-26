@@ -6,10 +6,19 @@ state from ACP ToolCallStart/ToolCallProgress events, and serializing them
 for Yjs transport as part of chat messages.
 """
 
+from dataclasses import dataclass
 from typing import Optional, Any, Literal
 
 from pydantic import BaseModel
-from acp.schema import PermissionOption
+from acp.schema import PermissionOption, FileEditToolCallContent
+
+
+@dataclass
+class ToolCallDiff:
+    """A single file diff from an ACP tool call."""
+    path: str
+    new_text: str
+    old_text: Optional[str] = None
 
 
 class ToolCallState(BaseModel):
@@ -24,6 +33,19 @@ class ToolCallState(BaseModel):
     permission_status: Optional[Literal['pending', 'resolved']] = None
     selected_option_id: Optional[str] = None
     session_id: Optional[str] = None
+    diffs: Optional[list[ToolCallDiff]] = None
+
+
+def extract_diffs(content: Any) -> Optional[list[ToolCallDiff]]:
+    """Extract FileEditToolCallContent items from an ACP content list."""
+    if not content:
+        return None
+    diffs = [
+        ToolCallDiff(path=item.path, new_text=item.new_text, old_text=item.old_text)
+        for item in content
+        if isinstance(item, FileEditToolCallContent)
+    ]
+    return diffs or None
 
 
 def _generate_title(kind: Optional[str], locations: Optional[list[str]] = None) -> str:
@@ -64,6 +86,7 @@ def update_tool_call_from_start(
     title: str,
     kind: Optional[str] = None,
     locations: Optional[list[str]] = None,
+    diffs: Optional[list[ToolCallDiff]] = None,
 ) -> None:
     """
     Apply a ToolCallStart event to the tool calls dict.
@@ -84,6 +107,7 @@ def update_tool_call_from_start(
         kind=kind,
         status="in_progress",
         locations=locations,
+        diffs=diffs,
     )
 
 
@@ -95,6 +119,7 @@ def update_tool_call_from_progress(
     status: Optional[str] = None,
     raw_output: Optional[Any] = None,
     locations: Optional[list[str]] = None,
+    diffs: Optional[list[ToolCallDiff]] = None,
 ) -> None:
     """
     Apply a ToolCallProgress event to the tool calls dict.
@@ -116,6 +141,7 @@ def update_tool_call_from_progress(
             status=status or "in_progress",
             raw_output=raw_output,
             locations=locations,
+            diffs=diffs,
         )
         return
 
@@ -130,3 +156,5 @@ def update_tool_call_from_progress(
         tc.raw_output = raw_output
     if locations is not None:
         tc.locations = locations
+    if diffs is not None:
+        tc.diffs = diffs

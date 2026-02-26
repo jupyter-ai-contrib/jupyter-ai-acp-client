@@ -53,6 +53,7 @@ from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
+from .tool_call_renderer import extract_diffs
 from .permission_manager import PermissionManager
 
 import traceback as tb_mod
@@ -338,6 +339,12 @@ class JaiAcpClient(Client):
             tc.permission_options = permission_options
             tc.permission_status = "pending"
             tc.session_id = session_id
+
+            # Extract diffs from tool_call.content — agents may send
+            # FileEditToolCallContent here rather than on ToolCallStart
+            diffs = extract_diffs(tool_call.content)
+            if diffs:
+                tc.diffs = diffs
 
             self._tool_call_manager.get_or_create_message(session_id, persona)
             self._tool_call_manager._flush_to_message(session_id, persona)  # Yjs sync and re-renders with the buttons
