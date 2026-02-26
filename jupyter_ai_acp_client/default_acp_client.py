@@ -53,6 +53,7 @@ from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
+from .tool_call_renderer import extract_diffs
 from .permission_manager import PermissionManager
 
 import traceback as tb_mod
@@ -329,6 +330,17 @@ class JaiAcpClient(Client):
             tc.permission_options = permission_options
             tc.permission_status = "pending"
             tc.session_id = session_id
+
+            # Extract diffs from tool_call.content — agents may send
+            # FileEditToolCallContent here rather than on ToolCallStart
+            diffs = extract_diffs(tool_call.content)
+            if diffs:
+                tc.diffs = diffs
+            if persona:
+                persona.log.info(
+                    f"request_permission: diffs={len(diffs) if diffs else 0}"
+                    f" content_types={[type(c).__name__ for c in tool_call.content] if tool_call.content else None}"
+                )
 
             if persona:
                 self._tool_call_manager.get_or_create_message(session_id, persona)

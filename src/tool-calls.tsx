@@ -5,6 +5,7 @@ import {
   MessagePreambleProps
 } from '@jupyter/chat';
 import { submitPermissionDecision } from './request';
+import { DiffView } from './diff-view';
 
 /**
  * Preamble component that renders tool call status lines above message body.
@@ -106,6 +107,42 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
   // Force 'failed' class when rejected
   const effectiveStatus = isRejected ? 'failed' : status || 'in_progress';
   const cssClass = `jp-jupyter-ai-acp-client-tool-call jp-jupyter-ai-acp-client-tool-call-${effectiveStatus}`;
+
+  const hasDiffs = !!toolCall.diffs?.length;
+
+  // Pending permission with diffs: collapsible diff + permission buttons outside
+  if (hasDiffs && hasPendingPermission) {
+    return (
+      <div className={cssClass}>
+        <details>
+          <summary>
+            <span className="jp-jupyter-ai-acp-client-tool-call-icon">
+              {icon}
+            </span>{' '}
+            <em>{displayTitle}</em>
+          </summary>
+          <DiffView diffs={toolCall.diffs!} />
+        </details>
+        <PermissionButtons toolCall={toolCall} />
+      </div>
+    );
+  }
+
+  // Completed/failed with diffs: collapsible diff
+  if (hasDiffs && (isCompleted || isFailed)) {
+    return (
+      <details className={cssClass}>
+        <summary>
+          <span className="jp-jupyter-ai-acp-client-tool-call-icon">
+            {icon}
+          </span>{' '}
+          {displayTitle}
+          <PermissionLabel toolCall={toolCall} />
+        </summary>
+        <DiffView diffs={toolCall.diffs!} />
+      </details>
+    );
+  }
 
   // Progressive disclosure: completed/failed tool calls with metadata get expandable details
   const detailsLines =
