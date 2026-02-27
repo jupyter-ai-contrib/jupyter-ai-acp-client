@@ -2,6 +2,7 @@ from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
 import asyncio
 import sys
+from asyncio import Task
 from asyncio.subprocess import Process
 from typing import Awaitable, ClassVar
 from acp import NewSessionResponse
@@ -11,6 +12,14 @@ from .default_acp_client import JaiAcpClient
 
 
 class BaseAcpPersona(BasePersona):
+    _before_subprocess_future: ClassVar[Task[None] | None] = None
+    """
+    The task that blocks the agent subprocess from starting until resolved.
+
+    By default this resolves immediately. Developers may define this task in
+    `self.before_agent_subprocess()` - see method documentation for details.
+    """
+
     _subprocess_future: ClassVar[Awaitable[Process] | None] = None
     """
     The task that yields the agent subprocess once complete. This is a class
@@ -50,6 +59,10 @@ class BaseAcpPersona(BasePersona):
 
         # Ensure each subclass has its own subprocess and client by checking if the
         # class variable is defined directly on this class (not inherited)
+        if '_before_subprocess_future' not in self.__class__.__dict__ or self.__class__._before_subprocess_future is None:
+            self.__class__._before_subprocess_future = self.event_loop.create_task(
+                self.before_agent_subprocess()
+            )
         if '_subprocess_future' not in self.__class__.__dict__ or self.__class__._subprocess_future is None:
             self.__class__._subprocess_future = self.event_loop.create_task(
                 self._init_agent_subprocess()
@@ -64,7 +77,21 @@ class BaseAcpPersona(BasePersona):
         )
         self._acp_slash_commands = []
 
+    async def before_agent_subprocess(self) -> None:
+        """
+        Defines a task that blocks the ACP agent subprocess from starting until
+        resolved. This is useful for when the ACP agent subprocess cannot be
+        started until certain requirements are met (e.g. Kiro).
+
+        The `BaseAcpPersona` does not implement this method by default.
+        Subclasses are expected to provide a custom implementation of this
+        method if required. 
+        """
+        return None
+
     async def _init_agent_subprocess(self) -> Process:
+        # Wait until user is authenticated
+        await self._before_subprocess_future
         process = await asyncio.create_subprocess_exec(
             *self._executable,
             stdin=asyncio.subprocess.PIPE,
@@ -114,6 +141,22 @@ class BaseAcpPersona(BasePersona):
         session = await self._client_session_future
         return session.session_id
     
+    async def is_authed(self) -> bool:
+        """
+        Returns whether the client is authenticated to use this agent. Returns
+        `True` by default. Subclasses should override this if possible.
+        """
+        return True
+    
+    async def handle_no_auth(self, message: Message) -> None:
+        """
+        Method called when the persona receives a message while the user is not
+        authenticated. This method should return a canned response to the chat
+        asking the user to log in. Subclasses may override this method to
+        customize the help message sent.
+        """
+        self.send_message("You are not authenticated. Please log in.")
+    
     async def process_message(self, message: Message) -> None:
         """
         A default implementation for the `BasePersona.process_message()` method
@@ -121,6 +164,11 @@ class BaseAcpPersona(BasePersona):
 
         This method may be overriden by child classes.
         """
+        # If not authenticated, return early
+        if not await self.is_authed():
+            await self.handle_no_auth(message)
+            return
+
         client = await self.get_client()
         session_id = await self.get_session_id()
 
