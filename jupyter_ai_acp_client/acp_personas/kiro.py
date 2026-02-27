@@ -89,7 +89,10 @@ class KiroAcpPersona(BaseAcpPersona):
             system_prompt="unused"
         )
     
-    async def ensure_auth(self) -> None:
+    async def before_agent_subprocess(self) -> None:
+        # The Kiro ACP agent subprocess fails to start if the user is not signed
+        # in. Therefore we must implement this method to wait until the user is
+        # signed in. The ACP agent server does not start until this is complete.
         failed_auth_check = False
         while True:
             # If authenticated with Kiro, return
@@ -111,6 +114,13 @@ class KiroAcpPersona(BaseAcpPersona):
         # now signed in.
         if failed_auth_check:
             self.send_message("Thanks for signing in! I'm ready to help.")
+    
+    async def is_authed(self):
+        # In Kiro, the user remains signed in even if they sign out while the
+        # ACP agent server is running. Therefore we can just return the status
+        # of the `before_agent_subprocess()` task to check if the user is
+        # authenticated.
+        return self._before_subprocess_future.done()
     
     async def handle_no_auth(self, message: Message) -> None:
         # Return canned reply

@@ -12,9 +12,12 @@ from .default_acp_client import JaiAcpClient
 
 
 class BaseAcpPersona(BasePersona):
-    _auth_future: ClassVar[Task[None] | None] = None
+    _before_subprocess_future: ClassVar[Task[None] | None] = None
     """
-    The future that resolves only once the user is authenticated.
+    The task that blocks the agent subprocess from starting until resolved.
+
+    By default this resolves immediately. Developers may define this task in
+    `self.before_agent_subprocess()` - see method documentation for details.
     """
 
     _subprocess_future: ClassVar[Awaitable[Process] | None] = None
@@ -56,9 +59,9 @@ class BaseAcpPersona(BasePersona):
 
         # Ensure each subclass has its own subprocess and client by checking if the
         # class variable is defined directly on this class (not inherited)
-        if '_auth_future' not in self.__class__.__dict__ or self.__class__._auth_future is None:
-            self.__class__._auth_future = self.event_loop.create_task(
-                self.ensure_auth()
+        if '_before_subprocess_future' not in self.__class__.__dict__ or self.__class__._before_subprocess_future is None:
+            self.__class__._before_subprocess_future = self.event_loop.create_task(
+                self.before_agent_subprocess()
             )
         if '_subprocess_future' not in self.__class__.__dict__ or self.__class__._subprocess_future is None:
             self.__class__._subprocess_future = self.event_loop.create_task(
@@ -74,26 +77,21 @@ class BaseAcpPersona(BasePersona):
         )
         self._acp_slash_commands = []
 
-    async def ensure_auth(self) -> None:
+    async def before_agent_subprocess(self) -> None:
         """
-        Defines a task that resolves only once the client is authenticated with
-        this agent. While this task is pending, the ACP agent subprocess is not
-        started, and any messages sent to this persona return a canned response
-        defined in `self.handle_no_auth()`.
+        Defines a task that blocks the ACP agent subprocess from starting until
+        resolved. This is useful for when the ACP agent subprocess cannot be
+        started until certain requirements are met (e.g. Kiro).
 
         The `BaseAcpPersona` does not implement this method by default.
         Subclasses are expected to provide a custom implementation of this
-        method if auth is required prior to usage. 
+        method if required. 
         """
-        self.log.info(
-            f"No auth method is defined in '{self.__class__.__name__}'."
-            " To require auth, implement the `ensure_auth()` method."
-        )
         return None
 
     async def _init_agent_subprocess(self) -> Process:
         # Wait until user is authenticated
-        await self._auth_future
+        await self._before_subprocess_future
         process = await asyncio.create_subprocess_exec(
             *self._executable,
             stdin=asyncio.subprocess.PIPE,
@@ -143,14 +141,12 @@ class BaseAcpPersona(BasePersona):
         session = await self._client_session_future
         return session.session_id
     
-    def is_authed(self) -> bool:
+    async def is_authed(self) -> bool:
         """
-        Returns whether the client is authenticated to use this agent. Helper
-        alias for `self.__class__._auth_future.done()`.
+        Returns whether the client is authenticated to use this agent. Returns
+        `True` by default. Subclasses should override this if possible.
         """
-        if getattr(self.__class__, '_auth_future', None) is None:
-            return False
-        return self.__class__._auth_future.done()
+        return True
     
     async def handle_no_auth(self, message: Message) -> None:
         """
@@ -169,7 +165,7 @@ class BaseAcpPersona(BasePersona):
         This method may be overriden by child classes.
         """
         # If not authenticated, return early
-        if not self.is_authed():
+        if not await self.is_authed():
             await self.handle_no_auth(message)
             return
 
