@@ -90,19 +90,27 @@ class KiroAcpPersona(BaseAcpPersona):
         )
     
     async def ensure_auth(self) -> None:
-        self.log.info("[Kiro] User is not signed in.")
+        failed_auth_check = False
         while True:
             # If authenticated with Kiro, return
             if await self._check_kiro_auth():
                 break
 
-            # Otherwise, check every 2 seconds
+            # Reaching here := user is not signed in
+            if not failed_auth_check:
+                self.log.info("[Kiro] User is not signed in.")
+                failed_auth_check = True
+
+            # Re-check every 2 seconds
             await asyncio.sleep(2)
         
         # Reaching this point := user is authenticated
-        # Send a message letting them know
         self.log.info("[Kiro] User is signed in.")
-        self.send_message("Thanks for signing in! I'm ready to help.")
+
+        # If initially signed out, send a message letting the user know they are
+        # now signed in.
+        if failed_auth_check:
+            self.send_message("Thanks for signing in! I'm ready to help.")
     
     async def handle_no_auth(self, message: Message) -> None:
         # Return canned reply
