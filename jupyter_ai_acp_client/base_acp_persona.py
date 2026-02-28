@@ -1,5 +1,5 @@
 from jupyter_ai_persona_manager import BasePersona
-from jupyterlab_chat.models import Message
+from jupyterlab_chat.models import FileAttachment, Message, NotebookAttachment
 import asyncio
 import sys
 from asyncio.subprocess import Process
@@ -124,11 +124,30 @@ class BaseAcpPersona(BasePersona):
         client = await self.get_client()
         session_id = await self.get_session_id()
 
-        # TODO: add attachments!
         prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
+
+        attachments = None
+        if message.attachments:
+            all_attachments = self.ychat.get_attachments()
+            resolved = []
+            for aid in message.attachments:
+                if aid not in all_attachments:
+                    continue
+                raw = all_attachments[aid]
+                if isinstance(raw, (FileAttachment, NotebookAttachment)):
+                    resolved.append(raw)
+                elif isinstance(raw, dict):
+                    if raw.get("type") == "notebook":
+                        resolved.append(NotebookAttachment(**raw))
+                    else:
+                        resolved.append(FileAttachment(**raw))
+            if resolved:
+                attachments = resolved
+
         await client.prompt_and_reply(
             session_id=session_id,
             prompt=prompt,
+            attachments=attachments,
         )
     
     @property
