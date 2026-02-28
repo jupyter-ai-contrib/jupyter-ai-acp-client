@@ -43,7 +43,11 @@ def _reconstruct_attachment(
                     cell_selection_raw = cell_raw.get("selection")
                     cell_selection = None
                     if cell_selection_raw is not None:
-                        cell_selection = AttachmentSelection(**cell_selection_raw)
+                        cell_selection = AttachmentSelection(
+                            start=tuple(cell_selection_raw["start"]),
+                            end=tuple(cell_selection_raw["end"]),
+                            content=cell_selection_raw.get("content"),
+                        )
                     reconstructed_cells.append(
                         NotebookAttachmentCell(
                             id=cell_raw["id"],
@@ -60,14 +64,18 @@ def _reconstruct_attachment(
             selection_raw = raw.get("selection")
             selection = None
             if selection_raw is not None:
-                selection = AttachmentSelection(**selection_raw)
+                selection = AttachmentSelection(
+                    start=tuple(selection_raw["start"]),
+                    end=tuple(selection_raw["end"]),
+                    content=selection_raw.get("content"),
+                )
             return FileAttachment(
                 value=raw["value"],
                 type=raw.get("type", "file"),
                 mimetype=raw.get("mimetype"),
                 selection=selection,
             )
-    except TypeError as e:
+    except (TypeError, KeyError) as e:
         log.warning(
             f"Skipping attachment '{aid}': failed to reconstruct from raw dict: {e}"
         )
@@ -206,12 +214,9 @@ class BaseAcpPersona(BasePersona):
                 if aid not in all_attachments:
                     continue
                 raw = all_attachments[aid]
-                if isinstance(raw, (FileAttachment, NotebookAttachment)):
-                    resolved.append(raw)
-                elif isinstance(raw, dict):
-                    attachment = _reconstruct_attachment(aid, raw, self.log)
-                    if attachment is not None:
-                        resolved.append(attachment)
+                attachment = _reconstruct_attachment(aid, raw, self.log)
+                if attachment is not None:
+                    resolved.append(attachment)
             if resolved:
                 attachments = resolved
 

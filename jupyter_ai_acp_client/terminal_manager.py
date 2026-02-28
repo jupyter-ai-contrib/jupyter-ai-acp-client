@@ -138,11 +138,8 @@ class TerminalManager:
                 else:
                     expected_len = 1
 
-                # Check if the sequence is complete in the original data
-                remaining_in_truncated = 1
-                if remaining_in_truncated < expected_len:
-                    # Incomplete sequence, remove the lead byte
-                    truncated = truncated[:-1]
+                # Incomplete sequence, remove the lead byte
+                truncated = truncated[:-1]
 
         return truncated
 

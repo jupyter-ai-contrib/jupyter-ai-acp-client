@@ -172,8 +172,9 @@ class JaiAcpClient(Client):
                         content_blocks.append(
                             ResourceContentBlock(
                                 uri=attachment.value,
-                                name=Path(attachment.value).name,
+                                name=Path(attachment.value).name or attachment.value or "<attachment>",
                                 type="resource_link",
+                                mime_type=getattr(attachment, "mimetype", None),
                             )
                         )
                 response = await conn.prompt(

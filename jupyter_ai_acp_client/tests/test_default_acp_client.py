@@ -116,3 +116,54 @@ class TestPromptAndReplyContentBlocks:
 
         prompt_blocks = mock_conn.prompt.call_args.kwargs["prompt"]
         assert len(prompt_blocks) == 1
+
+    async def test_empty_attachment_value_uses_fallback_name(self):
+        """M-1: When attachment.value is empty, name falls back to '<attachment>'."""
+        mock_conn = AsyncMock()
+        mock_conn.prompt = AsyncMock(return_value=MagicMock())
+        client = make_client()
+        attachment = FileAttachment(value="", type="file")
+
+        with patch.object(client, "get_connection", AsyncMock(return_value=mock_conn)):
+            await client.prompt_and_reply(
+                SESSION_ID, "attach this", attachments=[attachment]
+            )
+
+        prompt_blocks = mock_conn.prompt.call_args.kwargs["prompt"]
+        resource_block = prompt_blocks[1]
+        assert isinstance(resource_block, ResourceContentBlock)
+        assert resource_block.name == "<attachment>"
+
+    async def test_file_attachment_mimetype_forwarded(self):
+        """M-2: FileAttachment.mimetype is forwarded to ResourceContentBlock.mime_type."""
+        mock_conn = AsyncMock()
+        mock_conn.prompt = AsyncMock(return_value=MagicMock())
+        client = make_client()
+        attachment = FileAttachment(value="script.py", type="file", mimetype="text/x-python")
+
+        with patch.object(client, "get_connection", AsyncMock(return_value=mock_conn)):
+            await client.prompt_and_reply(
+                SESSION_ID, "review", attachments=[attachment]
+            )
+
+        prompt_blocks = mock_conn.prompt.call_args.kwargs["prompt"]
+        resource_block = prompt_blocks[1]
+        assert isinstance(resource_block, ResourceContentBlock)
+        assert resource_block.mime_type == "text/x-python"
+
+    async def test_file_attachment_none_mimetype_forwarded(self):
+        """M-2: When FileAttachment.mimetype is None, ResourceContentBlock.mime_type is also None."""
+        mock_conn = AsyncMock()
+        mock_conn.prompt = AsyncMock(return_value=MagicMock())
+        client = make_client()
+        attachment = FileAttachment(value="data.csv", type="file", mimetype=None)
+
+        with patch.object(client, "get_connection", AsyncMock(return_value=mock_conn)):
+            await client.prompt_and_reply(
+                SESSION_ID, "analyze", attachments=[attachment]
+            )
+
+        prompt_blocks = mock_conn.prompt.call_args.kwargs["prompt"]
+        resource_block = prompt_blocks[1]
+        assert isinstance(resource_block, ResourceContentBlock)
+        assert resource_block.mime_type is None

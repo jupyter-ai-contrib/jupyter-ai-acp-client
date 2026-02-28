@@ -16,12 +16,6 @@ class JaiAcpClientExtension(ExtensionApp):
 
     def initialize_settings(self):
         """Initialize router settings and event listeners."""
-        # # Ensure 'jupyter-ai' dictionary is in `self.settings`, which gets
-        # # copied to `self.serverapp.web_app.settings` after this method returns
-        # if 'jupyter-ai' not in self.settings:
-        #     self.settings['jupyter-ai'] = {}
-
-        # self.settings['jupyter-ai']['acp-client']
         return
 
     async def stop_extension(self):
