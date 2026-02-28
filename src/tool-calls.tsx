@@ -1,5 +1,11 @@
 import React from 'react';
-import { IToolCall, MessagePreambleProps } from '@jupyter/chat';
+import {
+  IToolCall,
+  IPermissionOption,
+  MessagePreambleProps
+} from '@jupyter/chat';
+import { submitPermissionDecision } from './request';
+import clsx from 'clsx';
 
 /**
  * Preamble component that renders tool call status lines above message body.
@@ -77,9 +83,18 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
     (kind
       ? `${kind.charAt(0).toUpperCase()}${kind.slice(1)}...`
       : 'Working...');
-  const isInProgress = status === 'in_progress' || status === 'pending';
+  const selectedOpt = toolCall.permission_options?.find(
+    opt => opt.option_id === toolCall.selected_option_id
+  );
+  const isRejected =
+    toolCall.permission_status === 'resolved' &&
+    !!selectedOpt?.kind?.includes('reject');
+  const hasPendingPermission = toolCall.permission_status === 'pending';
+  const isInProgress =
+    !isRejected &&
+    (status === 'in_progress' || status === 'pending' || hasPendingPermission);
   const isCompleted = status === 'completed';
-  const isFailed = status === 'failed';
+  const isFailed = status === 'failed' || isRejected;
 
   // Unicode text glyphs — consistent across OS/browser
   const icon = isInProgress
@@ -89,8 +104,13 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
       : isFailed
         ? '\u2717'
         : '\u2022';
-  const cssClass = `jp-jupyter-ai-acp-client-tool-call jp-jupyter-ai-acp-client-tool-call-${status || 'in_progress'}`;
+  // Force 'failed' class when rejected
+  const effectiveStatus = isRejected ? 'failed' : status || 'in_progress';
 
+  const cssClass = clsx(
+    'jp-jupyter-ai-acp-client-tool-call',
+    `jp-jupyter-ai-acp-client-tool-call-${effectiveStatus}`
+  );
   // Progressive disclosure: completed/failed tool calls with metadata get expandable details
   const detailsLines =
     isCompleted || isFailed ? buildDetailsLines(toolCall) : [];
@@ -104,6 +124,7 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
             {icon}
           </span>{' '}
           {displayTitle}
+          <PermissionLabel toolCall={toolCall} />
         </summary>
         <div className="jp-jupyter-ai-acp-client-tool-call-detail">
           {detailsLines.join('\n')}
@@ -118,6 +139,7 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
       <div className={cssClass}>
         <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span>{' '}
         <em>{displayTitle}</em>
+        <PermissionButtons toolCall={toolCall} />
       </div>
     );
   }
@@ -127,6 +149,90 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
     <div className={cssClass}>
       <span className="jp-jupyter-ai-acp-client-tool-call-icon">{icon}</span>{' '}
       {displayTitle}
+      <PermissionLabel toolCall={toolCall} />
+    </div>
+  );
+}
+
+/**
+ * Shows the user's permission selection.
+ */
+function PermissionLabel({
+  toolCall
+}: {
+  toolCall: IToolCall;
+}): JSX.Element | null {
+  if (
+    toolCall.permission_status !== 'resolved' ||
+    !toolCall.selected_option_id
+  ) {
+    return null;
+  }
+  const selectedName = toolCall.permission_options?.find(
+    opt => opt.option_id === toolCall.selected_option_id
+  )?.name;
+  if (!selectedName) {
+    return null;
+  }
+  return (
+    <span className="jp-jupyter-ai-acp-client-permission-label">
+      {' '}
+      — {selectedName}
+    </span>
+  );
+}
+
+/**
+ * Renders the permission buttons.
+ */
+function PermissionButtons({
+  toolCall
+}: {
+  toolCall: IToolCall;
+}): JSX.Element | null {
+  const [submitting, setSubmitting] = React.useState(false);
+
+  if (
+    !toolCall.permission_options?.length ||
+    toolCall.permission_status !== 'pending' ||
+    !toolCall.session_id
+  ) {
+    return null;
+  }
+
+  const handleClick = async (optionId: string) => {
+    setSubmitting(true);
+    try {
+      await submitPermissionDecision(
+        toolCall.session_id!,
+        toolCall.tool_call_id,
+        optionId
+      );
+    } catch (err) {
+      console.error('Failed to submit permission decision:', err);
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="jp-jupyter-ai-acp-client-permission-buttons">
+      <span className="jp-jupyter-ai-acp-client-permission-tree">└─</span>
+      <span>Allow?</span>
+      {toolCall.permission_options.map((opt: IPermissionOption) => (
+        <button
+          key={opt.option_id}
+          className={clsx(
+            'jp-jupyter-ai-acp-client-permission-btn',
+            opt.kind &&
+              `jp-jupyter-ai-acp-client-permission-btn-${opt.kind.replace(/_/g, '-')}`
+          )}
+          onClick={() => handleClick(opt.option_id)}
+          disabled={submitting}
+          title={opt.kind}
+        >
+          {opt.name}
+        </button>
+      ))}
     </div>
   );
 }

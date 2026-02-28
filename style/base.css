@@ -70,3 +70,55 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* Permission approval buttons */
+
+.jp-jupyter-ai-acp-client-permission-buttons {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0;
+  align-items: center;
+}
+
+.jp-jupyter-ai-acp-client-permission-tree {
+  color: var(--jp-ui-font-color2);
+  font-family: monospace;
+}
+
+.jp-jupyter-ai-acp-client-permission-btn {
+  padding: 2px 6px;
+  font-size: var(--jp-ui-font-size1);
+  font-family: var(--jp-ui-font-family);
+  border-radius: 3px;
+  border: 1px solid var(--jp-border-color1);
+  cursor: pointer;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-jupyter-ai-acp-client-permission-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.jp-jupyter-ai-acp-client-permission-btn:hover:not(:disabled) {
+  background: var(--jp-layout-color2);
+}
+
+.jp-jupyter-ai-acp-client-permission-btn-allow-once,
+.jp-jupyter-ai-acp-client-permission-btn-allow-always {
+  border-color: var(--jp-success-color1, #388e3c);
+  color: var(--jp-success-color1, #388e3c);
+}
+
+.jp-jupyter-ai-acp-client-permission-btn-reject-once {
+  border-color: var(--jp-error-color1, #d32f2f);
+  color: var(--jp-error-color1, #d32f2f);
+}
+
+/* Permission selection label */
+
+.jp-jupyter-ai-acp-client-permission-label {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}

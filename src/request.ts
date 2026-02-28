@@ -74,3 +74,21 @@ export async function getAcpSlashCommands(
 
   return response.commands;
 }
+/**
+ * Send the user's permission decision to the backend.
+ */
+export async function submitPermissionDecision(
+  sessionId: string,
+  toolCallId: string,
+  optionId: string
+): Promise<void> {
+  await requestAPI('/permissions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session_id: sessionId,
+      tool_call_id: toolCallId,
+      option_id: optionId
+    })
+  });
+}

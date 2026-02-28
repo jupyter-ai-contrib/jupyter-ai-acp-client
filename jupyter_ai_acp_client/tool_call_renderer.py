@@ -1,17 +1,18 @@
 """
 Tool call state tracking and serialization for the ACP tool call UI.
 
-This module provides pure functions and dataclasses for managing tool call
+This module provides pure functions and Pydantic models for managing tool call
 state from ACP ToolCallStart/ToolCallProgress events, and serializing them
 for Yjs transport as part of chat messages.
 """
 
-from dataclasses import dataclass, asdict
-from typing import Optional, Any
+from typing import Optional, Any, Literal
+
+from pydantic import BaseModel
+from acp.schema import PermissionOption
 
 
-@dataclass
-class ToolCallState:
+class ToolCallState(BaseModel):
     """Tracks the state of a single tool call."""
     tool_call_id: str
     title: str
@@ -19,6 +20,10 @@ class ToolCallState:
     status: Optional[str] = None
     raw_output: Optional[Any] = None
     locations: Optional[list[str]] = None
+    permission_options: Optional[list[PermissionOption]] = None
+    permission_status: Optional[Literal['pending', 'resolved']] = None
+    selected_option_id: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 def _generate_title(kind: Optional[str], locations: Optional[list[str]] = None) -> str:
@@ -125,19 +130,3 @@ def update_tool_call_from_progress(
         tc.raw_output = raw_output
     if locations is not None:
         tc.locations = locations
-
-
-def serialize_tool_calls(tool_calls: dict[str, ToolCallState]) -> list[dict]:
-    """
-    Serialize tool calls dict to a list of plain dicts for Yjs transport.
-
-    Returns a list of dicts with only non-None values, suitable for JSON
-    serialization and storage in Yjs shared documents.
-    """
-    result = []
-    for tc in tool_calls.values():
-        d = asdict(tc)
-        # Remove None values for cleaner serialization
-        d = {k: v for k, v in d.items() if v is not None}
-        result.append(d)
-    return result
