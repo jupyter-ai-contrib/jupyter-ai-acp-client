@@ -43,7 +43,11 @@ class ExampleAgent(Agent):
         self._conn = conn
 
     async def _send_agent_message(self, session_id: str, content: Any) -> None:
-        update = content if isinstance(content, AgentMessageChunk) else update_agent_message(content)
+        update = (
+            content
+            if isinstance(content, AgentMessageChunk)
+            else update_agent_message(content)
+        )
         await self._conn.session_update(session_id, update)
 
     async def initialize(
@@ -57,15 +61,22 @@ class ExampleAgent(Agent):
         return InitializeResponse(
             protocol_version=PROTOCOL_VERSION,
             agent_capabilities=AgentCapabilities(),
-            agent_info=Implementation(name="example-agent", title="Example Agent", version="0.1.0"),
+            agent_info=Implementation(
+                name="example-agent", title="Example Agent", version="0.1.0"
+            ),
         )
 
-    async def authenticate(self, method_id: str, **kwargs: Any) -> AuthenticateResponse | None:
+    async def authenticate(
+        self, method_id: str, **kwargs: Any
+    ) -> AuthenticateResponse | None:
         logging.info("Received authenticate request %s", method_id)
         return AuthenticateResponse()
 
     async def new_session(
-        self, cwd: str, mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio], **kwargs: Any
+        self,
+        cwd: str,
+        mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio],
+        **kwargs: Any,
     ) -> NewSessionResponse:
         logging.info("Received new session request")
         session_id = str(self._next_session_id)
@@ -74,13 +85,19 @@ class ExampleAgent(Agent):
         return NewSessionResponse(session_id=session_id, modes=None)
 
     async def load_session(
-        self, cwd: str, mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio], session_id: str, **kwargs: Any
+        self,
+        cwd: str,
+        mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio],
+        session_id: str,
+        **kwargs: Any,
     ) -> LoadSessionResponse | None:
         logging.info("Received load session request %s", session_id)
         self._sessions.add(session_id)
         return LoadSessionResponse()
 
-    async def set_session_mode(self, mode_id: str, session_id: str, **kwargs: Any) -> SetSessionModeResponse | None:
+    async def set_session_mode(
+        self, mode_id: str, session_id: str, **kwargs: Any
+    ) -> SetSessionModeResponse | None:
         logging.info("Received set session mode request %s -> %s", session_id, mode_id)
         return SetSessionModeResponse()
 

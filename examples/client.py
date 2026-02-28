@@ -47,7 +47,11 @@ from acp.schema import (
 
 class ExampleClient(Client):
     async def request_permission(
-        self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any
+        self,
+        options: list[PermissionOption],
+        session_id: str,
+        tool_call: ToolCall,
+        **kwargs: Any,
     ) -> RequestPermissionResponse:
         raise RequestError.method_not_found("session/request_permission")
 
@@ -57,7 +61,12 @@ class ExampleClient(Client):
         raise RequestError.method_not_found("fs/write_text_file")
 
     async def read_text_file(
-        self, path: str, session_id: str, limit: int | None = None, line: int | None = None, **kwargs: Any
+        self,
+        path: str,
+        session_id: str,
+        limit: int | None = None,
+        line: int | None = None,
+        **kwargs: Any,
     ) -> ReadTextFileResponse:
         raise RequestError.method_not_found("fs/read_text_file")
 
@@ -73,7 +82,9 @@ class ExampleClient(Client):
     ) -> CreateTerminalResponse:
         raise RequestError.method_not_found("terminal/create")
 
-    async def terminal_output(self, session_id: str, terminal_id: str, **kwargs: Any) -> TerminalOutputResponse:
+    async def terminal_output(
+        self, session_id: str, terminal_id: str, **kwargs: Any
+    ) -> TerminalOutputResponse:
         raise RequestError.method_not_found("terminal/output")
 
     async def release_terminal(
@@ -162,7 +173,9 @@ async def main(argv: list[str]) -> int:
     logging.basicConfig(level=logging.INFO)
 
     if len(argv) < 2:
-        print("Usage: python examples/client.py AGENT_PROGRAM [ARGS...]", file=sys.stderr)
+        print(
+            "Usage: python examples/client.py AGENT_PROGRAM [ARGS...]", file=sys.stderr
+        )
         return 2
 
     program = argv[1]
@@ -193,7 +206,9 @@ async def main(argv: list[str]) -> int:
     await conn.initialize(
         protocol_version=PROTOCOL_VERSION,
         client_capabilities=ClientCapabilities(),
-        client_info=Implementation(name="example-client", title="Example Client", version="0.1.0"),
+        client_info=Implementation(
+            name="example-client", title="Example Client", version="0.1.0"
+        ),
     )
     session = await conn.new_session(mcp_servers=[], cwd=os.getcwd())
 

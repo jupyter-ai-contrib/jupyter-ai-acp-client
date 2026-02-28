@@ -306,7 +306,10 @@ class TestShortenTitle:
         assert _shorten_title("/Users/foo/bar/baz.py") == "baz.py"
 
     def test_mixed_words_and_paths(self):
-        assert _shorten_title("Editing /a/b/c.py with changes") == "Editing c.py with changes"
+        assert (
+            _shorten_title("Editing /a/b/c.py with changes")
+            == "Editing c.py with changes"
+        )
 
 
 class TestShortenTitleIntegration:
@@ -401,25 +404,31 @@ class TestShortenTitleIntegration:
 
         # ToolCallStart #1: generic title, no locations
         update_tool_call_from_start(
-            tool_calls, tool_call_id="tc-1",
-            title="Read File", kind="read",
+            tool_calls,
+            tool_call_id="tc-1",
+            title="Read File",
+            kind="read",
         )
         assert tool_calls["tc-1"].title == "Read File"
         assert tool_calls["tc-1"].status == "in_progress"
 
         # ToolCallStart #2: full path, with locations
         update_tool_call_from_start(
-            tool_calls, tool_call_id="tc-1",
+            tool_calls,
+            tool_call_id="tc-1",
             title="Read /Users/aieroshe/Documents/project/justfile",
             kind="read",
             locations=["/Users/aieroshe/Documents/project/justfile"],
         )
         assert tool_calls["tc-1"].title == "Read justfile"
-        assert tool_calls["tc-1"].locations == ["/Users/aieroshe/Documents/project/justfile"]
+        assert tool_calls["tc-1"].locations == [
+            "/Users/aieroshe/Documents/project/justfile"
+        ]
 
         # ToolCallProgress: completed, no title change
         update_tool_call_from_progress(
-            tool_calls, tool_call_id="tc-1",
+            tool_calls,
+            tool_call_id="tc-1",
             status="completed",
         )
         assert tool_calls["tc-1"].title == "Read justfile"
@@ -434,7 +443,10 @@ class TestShortenTitleIntegration:
 
 class TestGenerateTitle:
     def test_kind_with_locations(self):
-        assert _generate_title("read", ["/Users/foo/project/justfile"]) == "Reading justfile"
+        assert (
+            _generate_title("read", ["/Users/foo/project/justfile"])
+            == "Reading justfile"
+        )
 
     def test_kind_without_locations(self):
         assert _generate_title("read") == "Reading..."
@@ -455,4 +467,7 @@ class TestGenerateTitle:
         assert _generate_title("read", ["justfile"]) == "Reading justfile"
 
     def test_multiple_locations_uses_first(self):
-        assert _generate_title("read", ["/a/b/first.py", "/a/b/second.py"]) == "Reading first.py"
+        assert (
+            _generate_title("read", ["/a/b/first.py", "/a/b/second.py"])
+            == "Reading first.py"
+        )

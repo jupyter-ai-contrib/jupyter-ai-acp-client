@@ -165,7 +165,9 @@ class TestSerialize:
     def test_returns_serialized_tool_calls_after_handle_start(self):
         mgr = ToolCallManager()
         persona = make_persona()
-        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1", "Reading file.py", "read"), persona)
+        mgr.handle_start(
+            SESSION_ID, make_tool_call_start("tc-1", "Reading file.py", "read"), persona
+        )
 
         result = mgr.serialize(SESSION_ID)
 
@@ -180,7 +182,9 @@ class TestHandleStart:
         persona = make_persona()
         mgr.reset(SESSION_ID)
 
-        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1", "Reading", "read"), persona)
+        mgr.handle_start(
+            SESSION_ID, make_tool_call_start("tc-1", "Reading", "read"), persona
+        )
 
         assert "tc-1" in mgr._sessions[SESSION_ID].tool_calls
         assert mgr._sessions[SESSION_ID].tool_calls["tc-1"].status == "in_progress"
@@ -279,7 +283,9 @@ class TestHandleProgress:
         mgr.reset(SESSION_ID)
 
         mgr.handle_progress(
-            SESSION_ID, make_tool_call_progress("tc-orphan", status="completed"), persona
+            SESSION_ID,
+            make_tool_call_progress("tc-orphan", status="completed"),
+            persona,
         )
 
         assert "tc-orphan" in mgr._sessions[SESSION_ID].tool_calls
@@ -333,7 +339,9 @@ class TestHandleProgress:
         mgr.reset(SESSION_ID)
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
 
-        update = make_tool_call_progress("tc-1", status="in_progress", raw_output="partial")
+        update = make_tool_call_progress(
+            "tc-1", status="in_progress", raw_output="partial"
+        )
         mgr.handle_progress(SESSION_ID, update, persona)
 
         tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
@@ -363,8 +371,12 @@ class TestFullFlow:
         persona = make_persona("msg-1")
         mgr.reset(SESSION_ID)
 
-        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1", "Reading file.py", "read"), persona)
-        mgr.handle_progress(SESSION_ID, make_tool_call_progress("tc-1", status="completed"), persona)
+        mgr.handle_start(
+            SESSION_ID, make_tool_call_start("tc-1", "Reading file.py", "read"), persona
+        )
+        mgr.handle_progress(
+            SESSION_ID, make_tool_call_progress("tc-1", status="completed"), persona
+        )
 
         result = mgr.serialize(SESSION_ID)
         assert len(result) == 1
@@ -378,8 +390,14 @@ class TestFullFlow:
         mgr.reset(SESSION_ID)
 
         for i in range(3):
-            mgr.handle_start(SESSION_ID, make_tool_call_start(f"tc-{i}", f"Task {i}"), persona)
-            mgr.handle_progress(SESSION_ID, make_tool_call_progress(f"tc-{i}", status="completed"), persona)
+            mgr.handle_start(
+                SESSION_ID, make_tool_call_start(f"tc-{i}", f"Task {i}"), persona
+            )
+            mgr.handle_progress(
+                SESSION_ID,
+                make_tool_call_progress(f"tc-{i}", status="completed"),
+                persona,
+            )
 
         result = mgr.serialize(SESSION_ID)
         assert len(result) == 3

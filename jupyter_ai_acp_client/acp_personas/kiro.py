@@ -16,10 +16,7 @@ if shutil.which("kiro-cli") is None:
 # Raise `PersonaRequirementsUnmet` if `kiro-cli<1.25.0`
 try:
     result = subprocess.run(
-        ["kiro-cli", "--version"],
-        capture_output=True,
-        text=True,
-        timeout=5
+        ["kiro-cli", "--version"], capture_output=True, text=True, timeout=5
     )
 
     # Check for non-zero exit code
@@ -35,7 +32,7 @@ try:
         raise PersonaRequirementsUnmet(error_msg)
 
     # Extract semver from stdout using regex
-    version_match = re.search(r'(\d+\.\d+\.\d+)', result.stdout)
+    version_match = re.search(r"(\d+\.\d+\.\d+)", result.stdout)
     if not version_match:
         raise PersonaRequirementsUnmet(
             "Could not extract version number from kiro-cli --version output."
@@ -43,7 +40,7 @@ try:
         )
 
     version_str = version_match.group(1)
-    version_parts = [int(x) for x in version_str.split('.')]
+    version_parts = [int(x) for x in version_str.split(".")]
 
     # Check if version >= 1.25.0
     required_version = (1, 25, 0)
@@ -63,24 +60,26 @@ except subprocess.TimeoutExpired:
 except FileNotFoundError:
     # This shouldn't happen since we checked with shutil.which, but handle it anyway
     raise PersonaRequirementsUnmet(
-        "kiro-cli command not found."
-        " Please ensure kiro-cli is properly installed."
+        "kiro-cli command not found." " Please ensure kiro-cli is properly installed."
     )
+
 
 class KiroAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["kiro-cli", "acp"]
         super().__init__(*args, executable=executable, **kwargs)
-    
+
     @property
     def defaults(self) -> PersonaDefaults:
-        avatar_path = str(os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "static", "kiro.svg")
-        ))
+        avatar_path = str(
+            os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "static", "kiro.svg")
+            )
+        )
 
         return PersonaDefaults(
             name="Kiro",
             description="Kiro in Jupyter AI!",
             avatar_path=avatar_path,
-            system_prompt="unused"
+            system_prompt="unused",
         )

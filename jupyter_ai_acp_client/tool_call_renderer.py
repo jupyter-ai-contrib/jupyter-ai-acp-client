@@ -13,6 +13,7 @@ from typing import Optional, Any
 @dataclass
 class ToolCallState:
     """Tracks the state of a single tool call."""
+
     tool_call_id: str
     title: str
     kind: Optional[str] = None

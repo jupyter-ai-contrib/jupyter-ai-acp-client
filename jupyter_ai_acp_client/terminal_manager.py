@@ -138,11 +138,8 @@ class TerminalManager:
                 else:
                     expected_len = 1
 
-                # Check if the sequence is complete in the original data
-                remaining_in_truncated = 1
-                if remaining_in_truncated < expected_len:
-                    # Incomplete sequence, remove the lead byte
-                    truncated = truncated[:-1]
+                # Incomplete sequence, remove the lead byte
+                truncated = truncated[:-1]
 
         return truncated
 
@@ -203,9 +200,7 @@ class TerminalManager:
                 {"command": f"permission denied: {command}"}
             )
         except OSError as e:
-            raise RequestError.internal_error(
-                {"command": command, "error": str(e)}
-            )
+            raise RequestError.internal_error({"command": command, "error": str(e)})
 
         terminal_id = str(uuid.uuid4())
         info = TerminalInfo(
@@ -324,7 +319,8 @@ class TerminalManager:
         Should be called when a session ends.
         """
         terminal_ids = [
-            tid for tid, info in self._terminals.items()
+            tid
+            for tid, info in self._terminals.items()
             if info.session_id == session_id
         ]
         for terminal_id in terminal_ids:

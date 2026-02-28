@@ -42,7 +42,10 @@ class EchoAgent(Agent):
         return InitializeResponse(protocol_version=protocol_version)
 
     async def new_session(
-        self, cwd: str, mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio], **kwargs: Any
+        self,
+        cwd: str,
+        mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio],
+        **kwargs: Any,
     ) -> NewSessionResponse:
         return NewSessionResponse(session_id=uuid4().hex)
 
@@ -59,12 +62,18 @@ class EchoAgent(Agent):
         **kwargs: Any,
     ) -> PromptResponse:
         for block in prompt:
-            text = block.get("text", "") if isinstance(block, dict) else getattr(block, "text", "")
+            text = (
+                block.get("text", "")
+                if isinstance(block, dict)
+                else getattr(block, "text", "")
+            )
             chunk = update_agent_message(text_block(text))
             chunk.field_meta = {"echo": True}
             chunk.content.field_meta = {"echo": True}
 
-            await self._conn.session_update(session_id=session_id, update=chunk, source="echo_agent")
+            await self._conn.session_update(
+                session_id=session_id, update=chunk, source="echo_agent"
+            )
         return PromptResponse(stop_reason="end_turn")
 
 
