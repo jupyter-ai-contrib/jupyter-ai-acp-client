@@ -9,12 +9,14 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
 
+from acp.schema import PermissionOption
+
 
 @dataclass
 class PendingRequest:
     """A pending permission request with its Future and agent-provided options."""
     future: asyncio.Future[str]
-    options: list[dict] = field(default_factory=list)
+    options: list[PermissionOption] = field(default_factory=list)
 
 
 class PermissionManager:
@@ -33,7 +35,7 @@ class PermissionManager:
         self,
         session_id: str,
         tool_call_id: str,
-        options: list[dict] | None = None,
+        options: list[PermissionOption] | None = None,
     ) -> asyncio.Future[str]:
         """
         Create a pending permission request.
@@ -61,10 +63,6 @@ class PermissionManager:
         """Remove a pending permission request."""
         self._pending.pop((session_id, tool_call_id), None)
 
-    def has_pending(self, session_id: str) -> bool:
-        """Check if any pending permission exists for a session."""
-        return any(sid == session_id for sid, _ in self._pending)
-
     def reject_all_pending(self, session_id: str) -> int:
         """
         Auto-reject all pending permission requests for a session.
@@ -80,12 +78,11 @@ class PermissionManager:
         return rejected
 
     @staticmethod
-    def _find_reject_option_id(options: list[dict]) -> str:
+    def _find_reject_option_id(options: list[PermissionOption]) -> str:
         """
         Find the reject option_id from the options list.
         """
         for opt in options:
-            desc = opt.get("description", "")
-            if "reject" in desc:
-                return opt["option_id"]
+            if opt.kind and "reject" in opt.kind:
+                return opt.option_id
         return "reject_once"

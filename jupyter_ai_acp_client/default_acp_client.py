@@ -286,6 +286,10 @@ class JaiAcpClient(Client):
         """
         return self._permission_manager.resolve(session_id, tool_call_id, option_id)
 
+    def list_sessions(self) -> list[str]:
+        """Returns the list of active session IDs managed by this client."""
+        return list(self._personas_by_session.keys())
+
     async def request_permission(
         self, options: list[PermissionOption], session_id: str, tool_call: ToolCall, **kwargs: Any
     ) -> RequestPermissionResponse:
@@ -293,34 +297,29 @@ class JaiAcpClient(Client):
         Handles `session/request_permission` requests from the ACP agent.
         """
         persona = self._personas_by_session.get(session_id)
+        if persona is None:
+            raise RuntimeError(
+                f"request_permission called without an initialized session: {session_id}"
+            )
+
         try:
-            if persona:
-                locations_paths = (
-                    [loc.path for loc in tool_call.locations] if tool_call.locations else None
-                )
-                persona.log.info(
-                    f"request_permission: CALLED session={session_id} "
-                    f"tool_call_id={tool_call.tool_call_id} "
-                    f"options_count={len(options)} "
-                    f"options={[{'id': o.option_id, 'name': o.name, 'kind': o.kind} for o in options]} "
-                    f"persona_class={persona.__class__.__name__}"
-                )
+            persona.log.info(
+                f"request_permission: CALLED session={session_id} "
+                f"tool_call_id={tool_call.tool_call_id} "
+                f"options_count={len(options)} "
+                f"options={[{'id': o.option_id, 'name': o.name, 'kind': o.kind} for o in options]} "
+                f"persona_class={persona.__class__.__name__}"
+            )
 
-            # Convert agent-provided options to dicts for the frontend
-            permission_options = [
-                {"option_id": opt.option_id, "title": opt.name, "description": opt.kind or ""}
-                for opt in options
-            ]
+            permission_options = list(options)
 
-            # Create a Future via PermissionManager
             future = self._permission_manager.create_request(
                 session_id, tool_call.tool_call_id, options=permission_options
             )
 
-            if persona:
-                persona.log.info(
-                    f"request_permission: {len(options)} agent options -> {len(permission_options)} permission_options"
-                )
+            persona.log.info(
+                f"request_permission: {len(permission_options)} permission_options"
+            )
 
             # Set the permission options + pending status on the tool call state,
             # then flush to Yjs so the frontend renders the buttons.
@@ -330,9 +329,8 @@ class JaiAcpClient(Client):
             tc.permission_status = "pending"
             tc.session_id = session_id
 
-            if persona:
-                self._tool_call_manager.get_or_create_message(session_id, persona)
-                self._tool_call_manager._flush_to_message(session_id, persona) #Yjs sync and re-renders with the buttons
+            self._tool_call_manager.get_or_create_message(session_id, persona)
+            self._tool_call_manager._flush_to_message(session_id, persona)  # Yjs sync and re-renders with the buttons
 
             # Suspend until the user clicks a permission button
             selected_option_id = await future
@@ -340,18 +338,13 @@ class JaiAcpClient(Client):
 
             tc.permission_status = "resolved"
             tc.selected_option_id = selected_option_id
-            if persona:
-                self._tool_call_manager._flush_to_message(session_id, persona)
+            self._tool_call_manager._flush_to_message(session_id, persona)
 
             return RequestPermissionResponse(
                 outcome=AllowedOutcome(option_id=selected_option_id, outcome='selected')
             )
         except Exception as e:
-            if persona:
-                persona.log.error(f"request_permission FAILED: {e}\n{tb_mod.format_exc()}")
-            else:
-                import logging
-                logging.error(f"request_permission FAILED: {e}\n{tb_mod.format_exc()}")
+            persona.log.error(f"request_permission FAILED: {e}\n{tb_mod.format_exc()}")
             raise
 
     async def write_text_file(
@@ -487,3 +480,4 @@ class JaiAcpClient(Client):
 
     async def ext_notification(self, method: str, params: dict) -> None:
         raise RequestError.method_not_found(method)
+

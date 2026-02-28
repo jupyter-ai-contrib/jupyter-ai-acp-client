@@ -87,7 +87,7 @@ class PermissionHandler(APIHandler):
     can resume.
     """
 
-    def _find_client_for_session(self, session_id: str):
+    async def _find_client_for_session(self, session_id: str):
         """
         Iterate all persona managers → personas to find the JaiAcpClient
         that has a pending permission for the given session_id.
@@ -101,28 +101,21 @@ class PermissionHandler(APIHandler):
             .get("jupyter-ai", {})
             .get("persona-managers", {})
         )
-        logger.info(f"_find_client_for_session: looking for session_id={session_id}, "
+        logger.debug(f"_find_client_for_session: looking for session_id={session_id}, "
                      f"persona_managers count={len(persona_managers)}")
         for room_id, pm in persona_managers.items():
-            logger.info(f"  checking room={room_id}, personas={list(pm.personas.keys())}")
+            logger.debug(f"  checking room={room_id}, personas={list(pm.personas.keys())}")
             for persona_id, persona in pm.personas.items():
                 if not isinstance(persona, BaseAcpPersona):
-                    logger.info(f"    {persona_id}: not BaseAcpPersona, skipping")
+                    logger.debug(f"    {persona_id}: not BaseAcpPersona, skipping")
                     continue
-                client_future = persona.__class__._client_future
-                if client_future is None:
-                    logger.info(f"    {persona_id}: _client_future is None")
-                    continue
-                if not client_future.done():
-                    logger.info(f"    {persona_id}: _client_future not done yet")
-                    continue
-                client = client_future.result()
-                known_sessions = list(client._personas_by_session.keys())
-                logger.info(f"    {persona_id}: known_sessions={known_sessions}")
-                if session_id in client._personas_by_session:
-                    logger.info(f"    FOUND client for session {session_id}")
+                client = await persona.get_client()
+                known_sessions = client.list_sessions()
+                logger.debug(f"    {persona_id}: known_sessions={known_sessions}")
+                if session_id in known_sessions:
+                    logger.debug(f"    FOUND client for session {session_id}")
                     return client
-        logger.info(f"_find_client_for_session: no client found for session_id={session_id}")
+        logger.debug(f"_find_client_for_session: no client found for session_id={session_id}")
         return None
 
     @tornado.web.authenticated
@@ -135,7 +128,7 @@ class PermissionHandler(APIHandler):
         if not all([session_id, tool_call_id, option_id]):
             raise tornado.web.HTTPError(400, "Missing required fields: session_id, tool_call_id, option_id")
 
-        client = self._find_client_for_session(session_id)
+        client = await self._find_client_for_session(session_id)
         if not client:
             raise tornado.web.HTTPError(404, "No pending permission request found for this session")
 

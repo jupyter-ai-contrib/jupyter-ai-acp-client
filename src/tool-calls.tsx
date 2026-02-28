@@ -5,6 +5,7 @@ import {
   MessagePreambleProps
 } from '@jupyter/chat';
 import { submitPermissionDecision } from './request';
+import clsx from 'clsx';
 
 /**
  * Preamble component that renders tool call status lines above message body.
@@ -87,7 +88,7 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
   );
   const isRejected =
     toolCall.permission_status === 'resolved' &&
-    !!selectedOpt?.description?.includes('reject');
+    !!selectedOpt?.kind?.includes('reject');
   const hasPendingPermission = toolCall.permission_status === 'pending';
   const isInProgress =
     !isRejected &&
@@ -105,8 +106,11 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
         : '\u2022';
   // Force 'failed' class when rejected
   const effectiveStatus = isRejected ? 'failed' : status || 'in_progress';
-  const cssClass = `jp-jupyter-ai-acp-client-tool-call jp-jupyter-ai-acp-client-tool-call-${effectiveStatus}`;
 
+  const cssClass = clsx(
+    'jp-jupyter-ai-acp-client-tool-call',
+    `jp-jupyter-ai-acp-client-tool-call-${effectiveStatus}`
+  );
   // Progressive disclosure: completed/failed tool calls with metadata get expandable details
   const detailsLines =
     isCompleted || isFailed ? buildDetailsLines(toolCall) : [];
@@ -164,16 +168,16 @@ function PermissionLabel({
   ) {
     return null;
   }
-  const title = toolCall.permission_options?.find(
+  const selectedName = toolCall.permission_options?.find(
     opt => opt.option_id === toolCall.selected_option_id
-  )?.title;
-  if (!title) {
+  )?.name;
+  if (!selectedName) {
     return null;
   }
   return (
     <span className="jp-jupyter-ai-acp-client-permission-label">
       {' '}
-      — {title}
+      — {selectedName}
     </span>
   );
 }
@@ -217,12 +221,16 @@ function PermissionButtons({
       {toolCall.permission_options.map((opt: IPermissionOption) => (
         <button
           key={opt.option_id}
-          className={`jp-jupyter-ai-acp-client-permission-btn${opt.description ? ` jp-jupyter-ai-acp-client-permission-btn-${opt.description.replace(/_/g, '-')}` : ''}`}
+          className={clsx(
+            'jp-jupyter-ai-acp-client-permission-btn',
+            opt.kind &&
+              `jp-jupyter-ai-acp-client-permission-btn-${opt.kind.replace(/_/g, '-')}`
+          )}
           onClick={() => handleClick(opt.option_id)}
           disabled={submitting}
-          title={opt.description}
+          title={opt.kind}
         >
-          {opt.title}
+          {opt.name}
         </button>
       ))}
     </div>

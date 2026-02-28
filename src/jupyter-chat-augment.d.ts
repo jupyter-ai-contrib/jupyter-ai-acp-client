@@ -40,7 +40,7 @@ declare module '@jupyter/chat' {
      */
     locations?: string[];
     /**
-     * Permission options
+     * Permission options from the ACP agent.
      */
     permission_options?: IPermissionOption[];
     /**
@@ -56,11 +56,11 @@ declare module '@jupyter/chat' {
      */
     session_id?: string;
   }
-  
+
   export interface IPermissionOption {
     option_id: string;
-    title: string;
-    description?: string;
+    name: string;
+    kind?: string;
   }
 
   export interface IMessageMetadata {

@@ -7,7 +7,6 @@ from jupyterlab_chat.models import NewMessage
 
 from .tool_call_renderer import (
     ToolCallState,
-    serialize_tool_calls,
     update_tool_call_from_progress,
     update_tool_call_from_start,
 )
@@ -82,7 +81,10 @@ class ToolCallManager:
         session = self._sessions.get(session_id)
         if session is None:
             return []
-        return serialize_tool_calls(session.tool_calls)
+        return [
+            tc.model_dump(exclude_none=True)
+            for tc in session.tool_calls.values()
+        ]
 
     def handle_start(
         self, session_id: str, update: ToolCallStart, persona: BasePersona
@@ -152,10 +154,9 @@ class ToolCallManager:
 
         msg = persona.ychat.get_message(session.message_id)
         if msg:
-            serialized = serialize_tool_calls(session.tool_calls)
-            persona.log.info(
-                f"flush_to_message: message={session.message_id}"
-                f" count={len(session.tool_calls)} payload={serialized}"
-            )
+            serialized = [
+                tc.model_dump(exclude_none=True)
+                for tc in session.tool_calls.values()
+            ]
             msg.metadata = {"tool_calls": serialized}
             persona.ychat.update_message(msg, trigger_actions=[])
