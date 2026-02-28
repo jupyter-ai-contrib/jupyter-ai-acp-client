@@ -1,13 +1,77 @@
 from jupyter_ai_persona_manager import BasePersona
-from jupyterlab_chat.models import FileAttachment, Message, NotebookAttachment
+from jupyterlab_chat.models import (
+    AttachmentSelection,
+    FileAttachment,
+    Message,
+    NotebookAttachment,
+    NotebookAttachmentCell,
+)
 import asyncio
+import logging
 import sys
 from asyncio.subprocess import Process
-from typing import Awaitable, ClassVar
+from typing import Awaitable, ClassVar, Union
 from acp import NewSessionResponse
 from acp.schema import AvailableCommand
 
 from .default_acp_client import JaiAcpClient
+
+
+def _reconstruct_attachment(
+    aid: str,
+    raw: dict,
+    log: logging.Logger,
+) -> Union[FileAttachment, NotebookAttachment, None]:
+    """
+    Reconstruct a typed FileAttachment or NotebookAttachment from a plain dict.
+
+    dataclasses.asdict() (used by pycrdt's to_py()) converts nested dataclasses
+    to plain dicts recursively. This helper reverses that conversion for the
+    nested fields before calling the top-level dataclass constructor.
+
+    Returns None on failure (schema drift, unexpected keys, missing required
+    fields), allowing the caller to skip the attachment gracefully.
+    """
+    try:
+        attachment_type = raw.get("type")
+        if attachment_type == "notebook":
+            cells = raw.get("cells")
+            reconstructed_cells = None
+            if cells is not None:
+                reconstructed_cells = []
+                for cell_raw in cells:
+                    cell_selection_raw = cell_raw.get("selection")
+                    cell_selection = None
+                    if cell_selection_raw is not None:
+                        cell_selection = AttachmentSelection(**cell_selection_raw)
+                    reconstructed_cells.append(
+                        NotebookAttachmentCell(
+                            id=cell_raw["id"],
+                            input_type=cell_raw["input_type"],
+                            selection=cell_selection,
+                        )
+                    )
+            return NotebookAttachment(
+                value=raw["value"],
+                type=raw.get("type", "notebook"),
+                cells=reconstructed_cells,
+            )
+        else:
+            selection_raw = raw.get("selection")
+            selection = None
+            if selection_raw is not None:
+                selection = AttachmentSelection(**selection_raw)
+            return FileAttachment(
+                value=raw["value"],
+                type=raw.get("type", "file"),
+                mimetype=raw.get("mimetype"),
+                selection=selection,
+            )
+    except TypeError as e:
+        log.warning(
+            f"Skipping attachment '{aid}': failed to reconstruct from raw dict: {e}"
+        )
+        return None
 
 
 class BaseAcpPersona(BasePersona):
@@ -137,10 +201,9 @@ class BaseAcpPersona(BasePersona):
                 if isinstance(raw, (FileAttachment, NotebookAttachment)):
                     resolved.append(raw)
                 elif isinstance(raw, dict):
-                    if raw.get("type") == "notebook":
-                        resolved.append(NotebookAttachment(**raw))
-                    else:
-                        resolved.append(FileAttachment(**raw))
+                    attachment = _reconstruct_attachment(aid, raw, self.log)
+                    if attachment is not None:
+                        resolved.append(attachment)
             if resolved:
                 attachments = resolved
 
