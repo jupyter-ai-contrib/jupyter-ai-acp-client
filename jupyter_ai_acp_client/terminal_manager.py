@@ -1,7 +1,10 @@
 """Terminal manager for ACP client terminal operations."""
 
 import asyncio
+import logging
 import os
+import shlex
+import signal as signal_module
 import uuid
 from asyncio.subprocess import Process
 from dataclasses import dataclass, field
@@ -17,6 +20,47 @@ from acp.schema import (
     TerminalOutputResponse,
     WaitForTerminalExitResponse,
 )
+
+log = logging.getLogger(__name__)
+
+# Default cap when the agent does not specify an output byte limit.
+# 10 MiB keeps memory bounded while being generous for most commands.
+DEFAULT_OUTPUT_BYTE_LIMIT: int = 10 * 1024 * 1024
+
+# Hard ceiling on concurrent terminals per manager instance.
+MAX_TERMINALS: int = 50
+
+# Environment variable names that must never be overridden by agents.
+# These enable library-injection attacks, code injection, or alter
+# security-sensitive loader/interpreter behaviour.
+# Sources: elttam.com/blog/env/, JupyterHub Issue #1654, Kibana CVE-2019-7609.
+_DENIED_ENV_VARS: frozenset[str] = frozenset({
+    # Native library injection
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LD_AUDIT",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FRAMEWORK_PATH",
+    # Python code injection
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PYTHONHOME",
+    # Node.js code injection
+    "NODE_OPTIONS",
+    # Shell startup injection
+    "BASH_ENV",
+    "ENV",
+})
+
+
+def _log_output_task_exception(task: asyncio.Task) -> None:
+    """Done callback for output reader tasks — logs unhandled exceptions."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        log.error("Terminal output reader failed", exc_info=exc)
 
 
 @dataclass
@@ -50,6 +94,10 @@ class TerminalManager:
         self._event_loop = event_loop
         self._terminals: dict[str, TerminalInfo] = {}
 
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
     def _validate_terminal(self, terminal_id: str, session_id: str) -> TerminalInfo:
         """
         Validate terminal exists and belongs to the session.
@@ -65,12 +113,62 @@ class TerminalManager:
             )
         return info
 
+    @staticmethod
+    def _set_exit_status(info: TerminalInfo, returncode: int | None) -> None:
+        """
+        Populate *exit_code* and *exit_signal* from a raw ``returncode``.
+
+        On POSIX, a negative return code ``-N`` means the process was
+        terminated by signal *N*.  The ACP schema constrains ``exit_code``
+        to ``>= 0`` (Pydantic ``ge=0``), so we translate negative values
+        into a human-readable signal name on ``exit_signal`` and leave
+        ``exit_code`` as ``None``.
+        """
+        if returncode is None:
+            info.exit_code = None
+            info.exit_signal = None
+        elif returncode < 0:
+            info.exit_code = None
+            try:
+                info.exit_signal = signal_module.Signals(abs(returncode)).name
+            except ValueError:
+                info.exit_signal = f"SIG{abs(returncode)}"
+        else:
+            info.exit_code = returncode
+            info.exit_signal = None
+
+    @staticmethod
+    def _trim_front_at_char_boundary(buf: bytearray, limit: int) -> None:
+        """
+        Remove the oldest bytes so that *buf* is at most *limit* bytes,
+        preserving valid UTF-8 by skipping forward past any orphaned
+        continuation bytes at the new start.
+
+        Operates **in-place** on *buf*.
+        """
+        excess = len(buf) - limit
+        if excess <= 0:
+            return
+
+        # Trim the front
+        del buf[:excess]
+
+        # The first byte(s) might now be UTF-8 continuation bytes
+        # (10xxxxxx = 0x80..0xBF).  Skip forward to the next start byte.
+        skip = 0
+        while skip < len(buf) and (buf[skip] & 0xC0) == 0x80:
+            skip += 1
+
+        if skip:
+            del buf[:skip]
+
     async def _read_terminal_output(self, terminal_id: str) -> None:
         """
         Background task to continuously read terminal output.
 
-        Reads from stdout and respects output_byte_limit with character
-        boundary truncation as required by the ACP protocol.
+        Reads from stdout and respects output_byte_limit by keeping the
+        **most recent** output (tail retention) and trimming the front,
+        as required by the ACP protocol.
         """
         info = self._terminals.get(terminal_id)
         if info is None or info.process.stdout is None:
@@ -82,69 +180,38 @@ class TerminalManager:
                 if not chunk:
                     break
 
-                # Check if we need to truncate
-                if info.output_byte_limit is not None:
-                    current_len = len(info.output_buffer)
-                    if current_len >= info.output_byte_limit:
-                        # Already at limit, mark as truncated but don't add more
-                        info.truncated = True
-                        continue
-
-                    remaining = info.output_byte_limit - current_len
-                    if len(chunk) > remaining:
-                        # Need to truncate - ensure we truncate at character boundary
-                        chunk = self._truncate_at_char_boundary(chunk, remaining)
-                        info.truncated = True
-
                 info.output_buffer.extend(chunk)
+
+                # Enforce byte limit via tail retention (trim the front).
+                if (
+                    info.output_byte_limit is not None
+                    and len(info.output_buffer) > info.output_byte_limit
+                ):
+                    info.truncated = True
+                    self._trim_front_at_char_boundary(
+                        info.output_buffer, info.output_byte_limit
+                    )
 
             # Process has finished, capture exit status
             exit_code = await info.process.wait()
-            info.exit_code = exit_code
+            self._set_exit_status(info, exit_code)
 
         except asyncio.CancelledError:
-            pass
+            raise
+        except Exception:
+            log.exception(
+                "Unexpected error reading output for terminal %s", terminal_id
+            )
+            # Best-effort: capture exit status even on reader failure.
+            try:
+                exit_code = await info.process.wait()
+                self._set_exit_status(info, exit_code)
+            except Exception:
+                pass
 
-    def _truncate_at_char_boundary(self, data: bytes, max_bytes: int) -> bytes:
-        """
-        Truncate bytes at a valid UTF-8 character boundary.
-
-        The ACP protocol requires truncation at character boundaries to
-        maintain valid string output.
-        """
-        if max_bytes <= 0:
-            return b""
-
-        truncated = data[:max_bytes]
-
-        # Walk back from the end to find a valid UTF-8 boundary
-        # UTF-8 continuation bytes start with 10xxxxxx (0x80-0xBF)
-        while truncated and (truncated[-1] & 0xC0) == 0x80:
-            truncated = truncated[:-1]
-
-        # If we're at a lead byte of a multi-byte sequence that got cut off,
-        # remove it too
-        if truncated:
-            last_byte = truncated[-1]
-            # Check if it's a multi-byte lead byte (11xxxxxx)
-            if last_byte >= 0xC0:
-                # Count expected continuation bytes
-                if last_byte >= 0xF0:
-                    expected_len = 4
-                elif last_byte >= 0xE0:
-                    expected_len = 3
-                elif last_byte >= 0xC0:
-                    expected_len = 2
-                else:
-                    expected_len = 1
-
-                # Check if the sequence is complete in the original data
-                remaining_in_truncated = 1
-                if remaining_in_truncated < expected_len:
-                    # Incomplete sequence, remove the lead byte
-                    truncated = truncated[:-1]
-
-        return truncated
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     async def create_terminal(
         self,
@@ -161,6 +228,17 @@ class TerminalManager:
 
         Returns immediately with a terminal_id; the command runs in the background.
         """
+        # Enforce terminal count limit
+        if len(self._terminals) >= MAX_TERMINALS:
+            raise RequestError.invalid_request(
+                {
+                    "terminal_id": (
+                        f"terminal limit reached ({MAX_TERMINALS}); "
+                        "release existing terminals first"
+                    )
+                }
+            )
+
         # Validate command
         if not command or not command.strip():
             raise RequestError.invalid_params({"command": "command cannot be empty"})
@@ -181,18 +259,49 @@ class TerminalManager:
         if env:
             env_dict = os.environ.copy()
             for e in env:
+                upper_name = e.name.upper()
+                if upper_name in _DENIED_ENV_VARS or e.name in _DENIED_ENV_VARS:
+                    raise RequestError.invalid_params(
+                        {"env": f"setting {e.name!r} is not allowed"}
+                    )
                 env_dict[e.name] = e.value
 
-        # Build command arguments
-        cmd_args = [command] + (args or [])
+        # Apply default output byte limit when the agent omits it.
+        # output_byte_limit=0 means "retain nothing" and is honoured as-is.
+        effective_byte_limit = (
+            output_byte_limit
+            if output_byte_limit is not None
+            else DEFAULT_OUTPUT_BYTE_LIMIT
+        )
+
+        # Build command arguments.
+        # ACP spec defines `command` as the executable and `args` as argv[1:], but
+        # agents commonly send shell-style strings (e.g. 'ls -la'). When explicit
+        # args are provided, use them as-is. Otherwise split the command string so
+        # 'ls -la' becomes ['ls', '-la'] rather than ['ls -la'] (which fails with
+        # FileNotFoundError since no executable is literally named 'ls -la').
+        if args:
+            cmd_args = [command] + args
+        else:
+            try:
+                cmd_args = shlex.split(command)
+            except ValueError as e:
+                raise RequestError.invalid_params(
+                    {"command": f"could not parse command: {e}"}
+                )
+
+        if not cmd_args:
+            raise RequestError.invalid_params({"command": "command cannot be empty"})
 
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd_args,
                 cwd=cwd,
                 env=env_dict,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
+                start_new_session=True,  # New process group for clean kill
             )
         except FileNotFoundError:
             raise RequestError.invalid_params(
@@ -203,22 +312,23 @@ class TerminalManager:
                 {"command": f"permission denied: {command}"}
             )
         except OSError as e:
-            raise RequestError.internal_error(
-                {"command": command, "error": str(e)}
-            )
+            raise RequestError.internal_error({"command": command, "error": str(e)})
 
         terminal_id = str(uuid.uuid4())
         info = TerminalInfo(
             process=process,
             session_id=session_id,
-            output_byte_limit=output_byte_limit,
+            output_byte_limit=effective_byte_limit,
         )
         self._terminals[terminal_id] = info
 
-        # Start background task to read output
+        # Start background task to read output. Register a done callback so that
+        # any unexpected exception (e.g. OSError from a broken pipe) is logged
+        # immediately rather than silently discarded.
         info._output_task = self._event_loop.create_task(
             self._read_terminal_output(terminal_id)
         )
+        info._output_task.add_done_callback(_log_output_task_exception)
 
         return CreateTerminalResponse(terminal_id=terminal_id)
 
@@ -235,9 +345,12 @@ class TerminalManager:
 
         output = info.output_buffer.decode("utf-8", errors="replace")
 
-        # Build exit_status if process has finished
+        # Build exit_status if process has finished.
+        # Use process.returncode directly to avoid a race where the
+        # background reader has not yet populated info.exit_code.
         exit_status = None
         if info.process.returncode is not None:
+            self._set_exit_status(info, info.process.returncode)
             exit_status = TerminalExitStatus(
                 exit_code=info.exit_code,
                 signal=info.exit_signal,
@@ -261,7 +374,7 @@ class TerminalManager:
 
         # Wait for the process to complete
         exit_code = await info.process.wait()
-        info.exit_code = exit_code
+        self._set_exit_status(info, exit_code)
 
         return WaitForTerminalExitResponse(
             exit_code=info.exit_code,
@@ -281,11 +394,15 @@ class TerminalManager:
         info = self._validate_terminal(terminal_id, session_id)
 
         if info.process.returncode is None:
-            # Process is still running, kill it
-            info.process.kill()
+            # Kill the entire process group so child processes are cleaned up.
+            try:
+                os.killpg(os.getpgid(info.process.pid), signal_module.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                # Process already exited or is inaccessible — fall back to
+                # direct kill which is a no-op if already dead.
+                info.process.kill()
             exit_code = await info.process.wait()
-            info.exit_code = exit_code
-            info.exit_signal = "SIGKILL"
+            self._set_exit_status(info, exit_code)
 
         return KillTerminalCommandResponse()
 
@@ -301,7 +418,10 @@ class TerminalManager:
 
         # Kill process if still running
         if info.process.returncode is None:
-            info.process.kill()
+            try:
+                os.killpg(os.getpgid(info.process.pid), signal_module.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                info.process.kill()
             await info.process.wait()
 
         # Cancel the output reading task if it's still running
@@ -324,11 +444,17 @@ class TerminalManager:
         Should be called when a session ends.
         """
         terminal_ids = [
-            tid for tid, info in self._terminals.items()
+            tid
+            for tid, info in self._terminals.items()
             if info.session_id == session_id
         ]
         for terminal_id in terminal_ids:
             try:
                 await self.release_terminal(session_id, terminal_id)
             except Exception:
-                pass  # Best effort cleanup
+                log.warning(
+                    "Failed to release terminal %s for session %s",
+                    terminal_id,
+                    session_id,
+                    exc_info=True,
+                )

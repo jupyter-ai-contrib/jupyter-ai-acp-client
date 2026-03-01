@@ -42,6 +42,14 @@ class ToolCallManager:
         """
         self._sessions[session_id] = SessionState()
 
+    def cleanup(self, session_id: str) -> None:
+        """
+        Remove all state for a completed session.
+
+        Should be called when a session ends to prevent unbounded memory growth.
+        """
+        self._sessions.pop(session_id, None)
+
     def get_message_id(self, session_id: str) -> Optional[str]:
         """
         Return the current message ID for a session, or None if no message

@@ -152,16 +152,40 @@ class BaseAcpPersona(BasePersona):
 
     def shutdown(self):
         # TODO: allow shutdown() to be async
+        if getattr(self, '_shutting_down', False):
+            return
+        self._shutting_down = True
         self.event_loop.create_task(self._shutdown())
 
     async def _shutdown(self):
         self.log.info(f"Closing ACP agent and client for '{self.__class__.__name__}'.")
         client = await self.get_client()
-        conn = await client.get_connection()
-        await conn.close()
-        subprocess = await self.get_agent_subprocess()
         try:
+            session = await self._client_session_future
+            await client.end_session(session.session_id)
+        except Exception:
+            self.log.exception(
+                f"Failed to clean up session resources during shutdown"
+                f" for '{self.__class__.__name__}'."
+            )
+        try:
+            conn = await client.get_connection()
+            await conn.close()
+        except Exception:
+            self.log.warning(
+                "Failed to close connection during shutdown for '%s'.",
+                self.__class__.__name__,
+                exc_info=True,
+            )
+        try:
+            subprocess = await self.get_agent_subprocess()
             subprocess.kill()
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError, OSError):
             pass
+        except Exception:
+            self.log.warning(
+                "Failed to kill subprocess during shutdown for '%s'.",
+                self.__class__.__name__,
+                exc_info=True,
+            )
         self.log.info(f"Completed closed ACP agent and client for '{self.__class__.__name__}'.")

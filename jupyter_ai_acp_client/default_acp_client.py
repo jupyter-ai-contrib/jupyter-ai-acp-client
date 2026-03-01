@@ -1,8 +1,11 @@
 import asyncio
+import logging
 import os
 from pathlib import Path
 from typing import Any, Awaitable
 from time import time
+
+log = logging.getLogger(__name__)
 
 from acp import (
     PROTOCOL_VERSION,
@@ -209,7 +212,9 @@ class JaiAcpClient(Client):
         else:
             text = "<content>"
 
-        persona = self._personas_by_session[session_id]
+        persona = self._personas_by_session.get(session_id)
+        if persona is None:
+            return
         message_id = self._tool_call_manager.get_or_create_message(session_id, persona)
         serialized_tool_calls = self._tool_call_manager.serialize(session_id)
         persona.log.info(f"agent_message_chunk: {len(text)} chars, tool_calls={len(serialized_tool_calls)}")
@@ -413,6 +418,25 @@ class JaiAcpClient(Client):
             terminal_id=terminal_id,
             **kwargs,
         )
+
+    async def end_session(self, session_id: str) -> None:
+        """
+        Clean up all resources for a completed session.
+
+        Releases all terminals, clears tool call state, and removes the
+        session from the persona and lock registries.
+        """
+        try:
+            await self._terminal_manager.cleanup_session(session_id)
+        except Exception:
+            log.warning(
+                "Failed to cleanup terminals for session %s",
+                session_id,
+                exc_info=True,
+            )
+        self._tool_call_manager.cleanup(session_id)
+        self._personas_by_session.pop(session_id, None)
+        self._prompt_locks_by_session.pop(session_id, None)
 
     async def ext_method(self, method: str, params: dict) -> dict:
         raise RequestError.method_not_found(method)
