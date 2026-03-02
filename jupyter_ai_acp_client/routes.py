@@ -119,6 +119,8 @@ class PermissionHandler(APIHandler):
     @tornado.web.authenticated
     async def post(self):
         body = self.get_json_body()
+        if body is None:
+            raise tornado.web.HTTPError(400, "Request body required")
         session_id = body.get("session_id")
         tool_call_id = body.get("tool_call_id")
         option_id = body.get("option_id")

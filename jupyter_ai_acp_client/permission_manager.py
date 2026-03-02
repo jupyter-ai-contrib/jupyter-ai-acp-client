@@ -96,4 +96,7 @@ class PermissionManager:
         for opt in options:
             if opt.kind and "reject_once" in opt.kind:
                 return opt.option_id
-        return "reject_once"
+        raise ValueError(
+            "No option with kind 'reject_once' found in permission options. "
+            "Cannot auto-reject without a valid reject option."
+        )
