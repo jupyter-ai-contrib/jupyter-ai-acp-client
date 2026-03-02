@@ -45,6 +45,7 @@ class PermissionManager:
         future: asyncio.Future[str] = self._loop.create_future()
         self._pending[key] = PendingRequest(future=future, options=options or [])
         self._session_index.setdefault(session_id, set()).add(key)
+        future.add_done_callback(lambda _: self.cleanup(session_id, tool_call_id))
         return future
 
     def resolve(self, session_id: str, tool_call_id: str, option_id: str) -> bool:

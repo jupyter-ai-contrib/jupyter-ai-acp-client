@@ -344,8 +344,7 @@ class JaiAcpClient(Client):
 
             # Suspend until the user clicks a permission button
             selected_option_id = await future
-            self._permission_manager.cleanup(session_id, tool_call.tool_call_id)
-
+            
             tc.permission_status = "resolved"
             tc.selected_option_id = selected_option_id
             self._tool_call_manager._flush_to_message(session_id, persona)
