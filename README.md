@@ -51,12 +51,11 @@ class ClaudeAcpPersona(BaseAcpPersona):
         )
 ```
 
-Currently, this package provides 3 personas:
+Currently, this package provides 2 personas:
 
-1. `@Test-ACP` (a test persona that echoes responses)
-2. `@Claude-ACP`
+1. `@Claude-ACP`
    - requires `claude-code-acp`, installed via `npm install -g @zed-industries/claude-code-acp`
-3. `@Kiro`
+2. `@Kiro`
    - requires `kiro-cli`, installed from https://kiro.dev
 
 ## Dependencies
