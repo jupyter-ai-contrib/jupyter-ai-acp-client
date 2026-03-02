@@ -55,7 +55,6 @@ class ClaudeAcpPersona(BaseAcpPersona):
             if "Authentication required" in str(e):
                 self.log.info("[Claude] User is not logged in.")
                 await self.handle_no_auth(message)
-                pass
             else:
                 raise e
 

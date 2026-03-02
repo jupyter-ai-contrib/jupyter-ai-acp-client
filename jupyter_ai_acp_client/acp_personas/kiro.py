@@ -136,7 +136,6 @@ class KiroAcpPersona(BaseAcpPersona):
         """
         Helper method that checks if the client is authenticated with Kiro.
         """
-        import asyncio
         process = await asyncio.create_subprocess_exec(
             "kiro-cli", "whoami",
             stdout=asyncio.subprocess.DEVNULL,
