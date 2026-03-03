@@ -6,6 +6,7 @@ import {
 } from '@jupyter/chat';
 import { submitPermissionDecision } from './request';
 import clsx from 'clsx';
+import { DiffView } from './diff-view';
 
 /**
  * Preamble component that renders tool call status lines above message body.
@@ -14,15 +15,23 @@ import clsx from 'clsx';
 export function ToolCallsComponent(
   props: MessagePreambleProps
 ): JSX.Element | null {
-  const { message } = props;
+  const { message, model } = props;
   if (!message.metadata?.tool_calls?.length) {
     return null;
   }
 
+  const onOpenFile = (path: string) => {
+    model.documentManager?.openOrReveal(path);
+  };
+
   return (
     <div className="jp-jupyter-ai-acp-client-tool-calls">
       {(message.metadata?.tool_calls ?? []).map((tc: IToolCall) => (
-        <ToolCallLine key={tc.tool_call_id} toolCall={tc} />
+        <ToolCallLine
+          key={tc.tool_call_id}
+          toolCall={tc}
+          onOpenFile={onOpenFile}
+        />
       ))}
     </div>
   );
@@ -76,7 +85,13 @@ function buildDetailsLines(toolCall: IToolCall): string[] {
 /**
  * Renders a single tool call line with status icon and optional expandable output.
  */
-function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
+function ToolCallLine({
+  toolCall,
+  onOpenFile
+}: {
+  toolCall: IToolCall;
+  onOpenFile?: (path: string) => void;
+}): JSX.Element {
   const { title, status, kind } = toolCall;
   const displayTitle =
     title ||
@@ -111,12 +126,33 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
     'jp-jupyter-ai-acp-client-tool-call',
     `jp-jupyter-ai-acp-client-tool-call-${effectiveStatus}`
   );
-  // Progressive disclosure: completed/failed tool calls with metadata get expandable details
-  const detailsLines =
-    isCompleted || isFailed ? buildDetailsLines(toolCall) : [];
-  const showDetails = detailsLines.length > 0;
 
-  if (showDetails) {
+  const hasDiffs = !!toolCall.diffs?.length;
+
+  // Pending permission with diffs: expanded diff + permission buttons outside
+  if (hasDiffs && hasPendingPermission) {
+    return (
+      <div className={cssClass}>
+        <details open>
+          <summary>
+            <span className="jp-jupyter-ai-acp-client-tool-call-icon">
+              {icon}
+            </span>{' '}
+            <em>{displayTitle}</em>
+          </summary>
+          <DiffView diffs={toolCall.diffs!} onOpenFile={onOpenFile} />
+        </details>
+        <PermissionButtons toolCall={toolCall} />
+      </div>
+    );
+  }
+
+  // Completed/failed with expandable content (diffs or metadata)
+  const detailsLines =
+    !hasDiffs && (isCompleted || isFailed) ? buildDetailsLines(toolCall) : [];
+  const hasExpandableContent = hasDiffs || detailsLines.length > 0;
+
+  if ((isCompleted || isFailed) && hasExpandableContent) {
     return (
       <details className={cssClass}>
         <summary>
@@ -126,9 +162,13 @@ function ToolCallLine({ toolCall }: { toolCall: IToolCall }): JSX.Element {
           {displayTitle}
           <PermissionLabel toolCall={toolCall} />
         </summary>
-        <div className="jp-jupyter-ai-acp-client-tool-call-detail">
-          {detailsLines.join('\n')}
-        </div>
+        {hasDiffs ? (
+          <DiffView diffs={toolCall.diffs!} onOpenFile={onOpenFile} />
+        ) : (
+          <div className="jp-jupyter-ai-acp-client-tool-call-detail">
+            {detailsLines.join('\n')}
+          </div>
+        )}
       </details>
     );
   }

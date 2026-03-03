@@ -3,6 +3,12 @@
 export {};
 
 declare module '@jupyter/chat' {
+  export interface IToolCallDiff {
+    path: string;
+    new_text: string;
+    old_text?: string;
+  }
+
   export interface IToolCall {
     /**
      * Unique identifier for this tool call, used to correlate events
@@ -55,6 +61,10 @@ declare module '@jupyter/chat' {
      * The ACP session ID this tool call belongs to.
      */
     session_id?: string;
+    /**
+     * File diffs from ACP FileEditToolCallContent.
+     */
+    diffs?: IToolCallDiff[];
   }
 
   export interface IPermissionOption {
