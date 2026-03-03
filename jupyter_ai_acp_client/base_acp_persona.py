@@ -97,6 +97,7 @@ class BaseAcpPersona(BasePersona):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=sys.stderr,
+            limit=50 * 1024 * 1024,
         )
         self.log.info(f"Spawned ACP agent subprocess for '{self.__class__.__name__}'.")
         return process
