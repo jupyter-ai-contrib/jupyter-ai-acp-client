@@ -5,19 +5,17 @@ import { structuredPatch } from 'diff';
 /** Maximum number of diff lines shown before truncation. */
 const MAX_DIFF_LINES = 20;
 
-/** A single flattened diff line with its styling and line number metadata. */
+/** A single flattened diff line with its styling metadata. */
 interface IDiffLineInfo {
   cls: string;
   prefix: string;
   text: string;
   key: string;
-  oldLineNum: number | null;
-  newLineNum: number | null;
 }
 
 /**
- * Renders a single file diff block with filename header, dual line number
- * gutters, line-level highlighting, and click-to-expand truncation.
+ * Renders a single file diff block with filename header, line-level
+ * highlighting, and click-to-expand truncation.
  */
 function DiffBlock({
   diff,
@@ -41,8 +39,6 @@ function DiffBlock({
   // Flatten hunks into renderable lines
   const allLines: IDiffLineInfo[] = [];
   for (const hunk of patch.hunks) {
-    let oldLine = hunk.oldStart;
-    let newLine = hunk.newStart;
     hunk.lines
       .filter(line => !line.startsWith('\\'))
       .forEach((line, j) => {
@@ -58,16 +54,8 @@ function DiffBlock({
               : 'jp-jupyter-ai-acp-client-diff-context',
           prefix,
           text,
-          key: `${hunk.oldStart}-${j}`,
-          oldLineNum: isAdded ? null : oldLine,
-          newLineNum: isRemoved ? null : newLine
+          key: `${hunk.oldStart}-${j}`
         });
-        if (!isAdded) {
-          oldLine++;
-        }
-        if (!isRemoved) {
-          newLine++;
-        }
       });
   }
 
@@ -91,12 +79,6 @@ function DiffBlock({
             key={line.key}
             className={`jp-jupyter-ai-acp-client-diff-line ${line.cls}`}
           >
-            <span className="jp-jupyter-ai-acp-client-diff-gutter">
-              {line.oldLineNum ?? ' '}
-            </span>
-            <span className="jp-jupyter-ai-acp-client-diff-gutter">
-              {line.newLineNum ?? ' '}
-            </span>
             <span className="jp-jupyter-ai-acp-client-diff-line-text">
               {line.prefix} {line.text}
             </span>
