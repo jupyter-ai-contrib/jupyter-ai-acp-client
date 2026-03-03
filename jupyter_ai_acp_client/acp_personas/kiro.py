@@ -152,7 +152,7 @@ class KiroAcpPersona(BaseAcpPersona):
         """
         try:
             from jupyterlab_commands_toolkit.tools import execute_command
-        except:
+        except Exception:
             return False
 
         response = await execute_command("terminal:create-new")
