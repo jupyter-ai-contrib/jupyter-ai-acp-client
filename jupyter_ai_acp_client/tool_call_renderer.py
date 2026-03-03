@@ -7,10 +7,10 @@ for Yjs transport as part of chat messages.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Any, Literal
+from typing import Optional, Any, Literal, List, Union
 
 from pydantic import BaseModel
-from acp.schema import PermissionOption, FileEditToolCallContent
+from acp.schema import PermissionOption, ContentToolCallContent, FileEditToolCallContent, TerminalToolCallContent
 
 
 @dataclass
@@ -36,7 +36,9 @@ class ToolCallState(BaseModel):
     diffs: Optional[list[ToolCallDiff]] = None
 
 
-def extract_diffs(content: Any) -> Optional[list[ToolCallDiff]]:
+def extract_diffs(
+    content: Optional[List[Union[ContentToolCallContent, FileEditToolCallContent, TerminalToolCallContent]]]
+) -> Optional[list[ToolCallDiff]]:
     """Extract FileEditToolCallContent items from an ACP content list."""
     if not content:
         return None
