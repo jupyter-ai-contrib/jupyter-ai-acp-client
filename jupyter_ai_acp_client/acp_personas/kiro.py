@@ -115,7 +115,7 @@ class KiroAcpPersona(BaseAcpPersona):
         if failed_auth_check:
             self.send_message("Thanks for signing in! I'm ready to help.")
     
-    async def is_authed(self):
+    async def is_authed(self) -> bool:
         # In Kiro, the user remains signed in even if they sign out while the
         # ACP agent server is running. Therefore we can just return the status
         # of the `before_agent_subprocess()` task to check if the user is

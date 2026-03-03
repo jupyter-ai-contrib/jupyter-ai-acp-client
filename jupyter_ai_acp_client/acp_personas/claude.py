@@ -59,7 +59,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
                 raise e
 
 
-    async def handle_no_auth(self, message: Message):
+    async def handle_no_auth(self, message: Message) -> None:
         # Claude supports several authentication options so we just send a
         # canned response and let the user choose for themselves.
         self.send_message(
