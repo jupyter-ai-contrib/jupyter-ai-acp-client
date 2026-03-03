@@ -345,7 +345,7 @@ class TestSerializeToolCalls:
                 diffs=[ToolCallDiff(path="/a/b.py", new_text="new", old_text="old")],
             )
         }
-        result = serialize_tool_calls(tool_calls)
+        result = _serialize(tool_calls)
         assert result[0]["diffs"] == [
             {"path": "/a/b.py", "new_text": "new", "old_text": "old"}
         ]
@@ -359,7 +359,7 @@ class TestSerializeToolCalls:
                 diffs=None,
             )
         }
-        result = serialize_tool_calls(tool_calls)
+        result = _serialize(tool_calls)
         assert "diffs" not in result[0]
 
 
@@ -542,7 +542,7 @@ class TestShortenTitleIntegration:
         assert tool_calls["tc-1"].status == "completed"
 
         # Serialize — diffs should be included for frontend
-        result = serialize_tool_calls(tool_calls)
+        result = _serialize(tool_calls)
         assert result[0]["diffs"] == [
             {"path": "/a/b.py", "new_text": "new code", "old_text": "old code"}
         ]
