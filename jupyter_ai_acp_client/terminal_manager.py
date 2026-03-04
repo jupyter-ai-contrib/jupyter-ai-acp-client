@@ -259,8 +259,7 @@ class TerminalManager:
         if env:
             env_dict = os.environ.copy()
             for e in env:
-                upper_name = e.name.upper()
-                if upper_name in _DENIED_ENV_VARS or e.name in _DENIED_ENV_VARS:
+                if e.name.upper() in _DENIED_ENV_VARS:
                     raise RequestError.invalid_params(
                         {"env": f"setting {e.name!r} is not allowed"}
                     )

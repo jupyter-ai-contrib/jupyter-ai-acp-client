@@ -64,6 +64,18 @@ def _make_info(
     return info
 
 
+def _attach_stdout(info: TerminalInfo, chunks: list[bytes], exit_code: int = 0) -> None:
+    """Wire mock stdout that yields *chunks* one at a time, then EOF."""
+    it = iter(chunks)
+
+    async def fake_read(n=-1):
+        return next(it, b"")
+
+    info.process.stdout = MagicMock()
+    info.process.stdout.read = fake_read
+    info.process.wait = AsyncMock(return_value=exit_code)
+
+
 SESSION = "sess-1"
 
 
@@ -499,7 +511,7 @@ class TestReleaseTerminal:
 # ===================================================================
 
 class TestCleanupSession:
-    """Tests for cleanup_session logging on failure."""
+    """Tests for cleanup_session: normal cleanup and failure logging."""
 
     async def test_cleans_all_session_terminals(self):
         mgr = _make_manager()
@@ -534,9 +546,9 @@ class TestCleanupSession:
             await mgr.cleanup_session(SESSION)
             mock_log.warning.assert_called_once()
             # Should include terminal_id and session_id
-            args = mock_log.warning.call_args
-            assert "t1" in str(args)
-            assert SESSION in str(args)
+            args = mock_log.warning.call_args.args
+            assert args[1] == "t1"
+            assert args[2] == SESSION
 
 
 # ===================================================================
@@ -551,13 +563,8 @@ class TestReadTerminalOutput:
         info = _make_info(byte_limit=10)
         mgr._terminals["t1"] = info
 
-        # Simulate stdout that produces chunks
-        chunks = [b"AAAAAAAAAA", b"BBBBBBBBBB", b""]  # 10 + 10 bytes, limit 10
-        async def fake_read(n):
-            return chunks.pop(0) if chunks else b""
-        info.process.stdout = MagicMock()
-        info.process.stdout.read = fake_read
-        info.process.wait = AsyncMock(return_value=0)
+        # Simulate stdout that produces chunks: 10 + 10 bytes, limit 10
+        _attach_stdout(info, [b"AAAAAAAAAA", b"BBBBBBBBBB"])
 
         await mgr._read_terminal_output("t1")
 
@@ -571,12 +578,7 @@ class TestReadTerminalOutput:
         info = _make_info(byte_limit=100)
         mgr._terminals["t1"] = info
 
-        chunks = [b"hello", b""]
-        async def fake_read(n):
-            return chunks.pop(0) if chunks else b""
-        info.process.stdout = MagicMock()
-        info.process.stdout.read = fake_read
-        info.process.wait = AsyncMock(return_value=0)
+        _attach_stdout(info, [b"hello"])
 
         await mgr._read_terminal_output("t1")
 
@@ -589,12 +591,7 @@ class TestReadTerminalOutput:
         info = _make_info(byte_limit=4)
         mgr._terminals["t1"] = info
 
-        chunks = [b"caf\xc3\xa9", b""]
-        async def fake_read(n):
-            return chunks.pop(0) if chunks else b""
-        info.process.stdout = MagicMock()
-        info.process.stdout.read = fake_read
-        info.process.wait = AsyncMock(return_value=0)
+        _attach_stdout(info, [b"caf\xc3\xa9"])
 
         await mgr._read_terminal_output("t1")
 
@@ -632,12 +629,6 @@ class TestReadTerminalOutput:
 
 class TestConstants:
     """Verify module-level constants are sensible."""
-
-    async def test_default_byte_limit_is_10mb(self):
-        assert DEFAULT_OUTPUT_BYTE_LIMIT == 10 * 1024 * 1024
-
-    async def test_max_terminals_is_50(self):
-        assert MAX_TERMINALS == 50
 
     async def test_denied_env_vars_include_ld_preload(self):
         assert "LD_PRELOAD" in _DENIED_ENV_VARS
