@@ -150,7 +150,7 @@ class KiroAcpPersona(BaseAcpPersona):
         return process.returncode == 0
     
     async def _should_use_device_flow(self) -> bool:
-        """Check if device flow should be used on Linux. Based on Kiro CLI remote detection."""
+        """Check if device flow should be used on Linux."""
         try:
             if platform.system() != 'Linux':
                 return False
@@ -158,10 +158,14 @@ class KiroAcpPersona(BaseAcpPersona):
             # Check SSH
             if any(var in os.environ for var in ['SSH_CLIENT', 'SSH_CONNECTION', 'SSH_TTY']):
                 return True
-
-            with open('/proc/sys/kernel/osrelease', 'r') as f:
-                if any(x in f.read().lower() for x in ['microsoft', 'wsl']):
-                    return not shutil.which('wslview')
+            
+            # Check WSL
+            try:
+                with open('/proc/sys/kernel/osrelease', 'r') as f:
+                    if any(x in f.read().lower() for x in ['microsoft', 'wsl']):
+                        return not shutil.which('wslview')
+            except:
+                pass
             
             # Check xdg-open
             return not shutil.which('xdg-open')
