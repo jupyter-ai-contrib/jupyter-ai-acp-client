@@ -1,5 +1,6 @@
 import asyncio
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -123,8 +124,12 @@ class KiroAcpPersona(BaseAcpPersona):
         return self._before_subprocess_future.done()
     
     async def handle_no_auth(self, message: Message) -> None:
-        # Return canned reply
-        self.send_message("You're not signed in to Kiro yet. Please run `kiro-cli login` in a terminal to sign in.")
+        # Determine which command to show
+        use_device_flow = await self._should_use_device_flow()
+        command = "kiro-cli login --use-device-flow" if use_device_flow else "kiro-cli login"
+        
+        # Return canned reply with appropriate command
+        self.send_message(f"You're not signed in to Kiro yet. Please run `{command}` in a terminal to sign in.")
 
         # Open the terminal to help the user login
         if not self._terminal_opened:
@@ -143,6 +148,26 @@ class KiroAcpPersona(BaseAcpPersona):
         )
         await process.wait()
         return process.returncode == 0
+    
+    async def _should_use_device_flow(self) -> bool:
+        """Check if device flow should be used on Linux. Based on Kiro CLI remote detection."""
+        try:
+            if platform.system() != 'Linux':
+                return False
+            
+            # Check SSH
+            if any(var in os.environ for var in ['SSH_CLIENT', 'SSH_CONNECTION', 'SSH_TTY']):
+                return True
+
+            with open('/proc/sys/kernel/osrelease', 'r') as f:
+                if any(x in f.read().lower() for x in ['microsoft', 'wsl']):
+                    return not shutil.which('wslview')
+            
+            # Check xdg-open
+            return not shutil.which('xdg-open')
+        except Exception as e:
+            self.log.warning(f"[Kiro] Error detecting device flow requirement: {e}")
+            return False
     
     async def _open_kiro_login_terminal(self) -> bool:
         """
