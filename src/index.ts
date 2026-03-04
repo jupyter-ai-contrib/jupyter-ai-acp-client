@@ -167,7 +167,7 @@ export const toolbarPlugin: JupyterFrontEndPlugin<IInputToolbarRegistryFactory> 
           // Add our stop button (position 90 = just before Send at 100)
           registry.addItem('stop', {
             element: AcpStopButton,
-            position: 90
+            position: 10
           });
           return registry;
         }

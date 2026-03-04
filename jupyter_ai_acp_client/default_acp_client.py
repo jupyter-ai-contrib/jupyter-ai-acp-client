@@ -99,7 +99,7 @@ class JaiAcpClient(Client):
         self._tool_call_manager = ToolCallManager()
         self._permission_manager = PermissionManager(event_loop)
         super().__init__(*args, **kwargs)
-        self._cancel_requested: bool = False
+        self._cancel_requested: dict[str, bool] = {}
 
 
     async def _init_connection(self) -> ClientSideConnection:
@@ -167,7 +167,7 @@ class JaiAcpClient(Client):
                 )
 
         async with lock:
-            self._cancel_requested = False
+            self._cancel_requested[session_id] = False
             conn = await self.get_connection()
             persona = self._personas_by_session[session_id]
 
@@ -189,7 +189,7 @@ class JaiAcpClient(Client):
                 )
 
                 # If cancelled, message already finalized by stop_streaming()
-                if self._cancel_requested:
+                if self._cancel_requested.get(session_id, False):
                     return response
 
                 # Trigger find_mentions on the final message
@@ -272,7 +272,7 @@ class JaiAcpClient(Client):
             return
 
         # Skip message/tool events when cancellation has been requested
-        if self._cancel_requested:
+        if self._cancel_requested.get(session_id, False):
             return
 
         if persona is None:
@@ -510,18 +510,19 @@ class JaiAcpClient(Client):
     async def stop_streaming(self, session_id: str) -> None:
         """Cancel an in-progress prompt for the given session."""
         persona = self._personas_by_session.get(session_id)
-        if not persona:
-            return
+        if persona is None:
+            raise RuntimeError(
+                f"stop_streaming called without an initialized session: {session_id}"
+            )
 
-        self._cancel_requested = True
+        self._cancel_requested[session_id] = True
 
         # Notify the ACP agent to stop
         try:
             conn = await self.get_connection()
             await conn.cancel(session_id)
         except Exception:
-            if persona:
-                persona.log.warning(f"stop_streaming: failed to send cancel for session {session_id}")
+            persona.log.warning(f"stop_streaming: failed to send cancel for session {session_id}")
 
         # Finalize the partial message as-is
         message_id = self._tool_call_manager.get_message_id(session_id)
@@ -532,5 +533,8 @@ class JaiAcpClient(Client):
 
         # Reset awareness
         persona.awareness.set_local_state_field("isWriting", False)
+
+
+
 
 

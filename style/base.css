@@ -212,7 +212,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   color: var(--jp-ui-font-color2);
 }
 
-/* Stop streaming button (POC) */
+/* Stop streaming button */
 .jp-jupyter-ai-acp-client-stopButton {
   display: inline-flex;
   align-items: center;
