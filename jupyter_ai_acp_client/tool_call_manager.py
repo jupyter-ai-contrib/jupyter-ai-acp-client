@@ -7,7 +7,7 @@ from jupyterlab_chat.models import NewMessage
 
 from .tool_call_renderer import (
     ToolCallState,
-    serialize_tool_calls,
+    extract_diffs,
     update_tool_call_from_progress,
     update_tool_call_from_start,
 )
@@ -82,7 +82,10 @@ class ToolCallManager:
         session = self._sessions.get(session_id)
         if session is None:
             return []
-        return serialize_tool_calls(session.tool_calls)
+        return [
+            tc.model_dump(exclude_none=True)
+            for tc in session.tool_calls.values()
+        ]
 
     def handle_start(
         self, session_id: str, update: ToolCallStart, persona: BasePersona
@@ -93,9 +96,11 @@ class ToolCallManager:
         locations_paths = (
             [loc.path for loc in update.locations] if update.locations else None
         )
+        diffs = extract_diffs(update.content)
         persona.log.info(
             f"tool_call_start: id={update.tool_call_id} title={update.title!r}"
             f" kind={kind_str} locations={locations_paths}"
+            f" diffs={len(diffs) if diffs else 0}"
         )
         update_tool_call_from_start(
             session.tool_calls,
@@ -103,6 +108,7 @@ class ToolCallManager:
             title=update.title,
             kind=kind_str,
             locations=locations_paths,
+            diffs=diffs,
         )
 
         self.get_or_create_message(session_id, persona)
@@ -126,9 +132,11 @@ class ToolCallManager:
         locations_paths = (
             [loc.path for loc in update.locations] if update.locations else None
         )
+        diffs = extract_diffs(update.content)
         persona.log.info(
             f"tool_call_progress: id={update.tool_call_id} title={update.title!r}"
             f" status={status_str} locations={locations_paths}"
+            f" diffs={len(diffs) if diffs else 0}"
         )
         update_tool_call_from_progress(
             session.tool_calls,
@@ -138,6 +146,7 @@ class ToolCallManager:
             status=status_str,
             raw_output=raw_output,
             locations=locations_paths,
+            diffs=diffs,
         )
 
         # Message should exist from the preceding ToolCallStart, but create if missing
@@ -152,10 +161,9 @@ class ToolCallManager:
 
         msg = persona.ychat.get_message(session.message_id)
         if msg:
-            serialized = serialize_tool_calls(session.tool_calls)
-            persona.log.info(
-                f"flush_to_message: message={session.message_id}"
-                f" count={len(session.tool_calls)} payload={serialized}"
-            )
+            serialized = [
+                tc.model_dump(exclude_none=True)
+                for tc in session.tool_calls.values()
+            ]
             msg.metadata = {"tool_calls": serialized}
             persona.ychat.update_message(msg, trigger_actions=[])

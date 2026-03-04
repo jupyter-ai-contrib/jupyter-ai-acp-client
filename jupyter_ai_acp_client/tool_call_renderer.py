@@ -1,17 +1,27 @@
 """
 Tool call state tracking and serialization for the ACP tool call UI.
 
-This module provides pure functions and dataclasses for managing tool call
+This module provides pure functions and Pydantic models for managing tool call
 state from ACP ToolCallStart/ToolCallProgress events, and serializing them
 for Yjs transport as part of chat messages.
 """
 
-from dataclasses import dataclass, asdict
-from typing import Optional, Any
+from dataclasses import dataclass
+from typing import Optional, Any, Literal, List, Union
+
+from pydantic import BaseModel
+from acp.schema import PermissionOption, ContentToolCallContent, FileEditToolCallContent, TerminalToolCallContent
 
 
 @dataclass
-class ToolCallState:
+class ToolCallDiff:
+    """A single file diff from an ACP tool call."""
+    path: str
+    new_text: str
+    old_text: Optional[str] = None
+
+
+class ToolCallState(BaseModel):
     """Tracks the state of a single tool call."""
     tool_call_id: str
     title: str
@@ -19,6 +29,25 @@ class ToolCallState:
     status: Optional[str] = None
     raw_output: Optional[Any] = None
     locations: Optional[list[str]] = None
+    permission_options: Optional[list[PermissionOption]] = None
+    permission_status: Optional[Literal['pending', 'resolved']] = None
+    selected_option_id: Optional[str] = None
+    session_id: Optional[str] = None
+    diffs: Optional[list[ToolCallDiff]] = None
+
+
+def extract_diffs(
+    content: Optional[List[Union[ContentToolCallContent, FileEditToolCallContent, TerminalToolCallContent]]]
+) -> Optional[list[ToolCallDiff]]:
+    """Extract FileEditToolCallContent items from an ACP content list."""
+    if not content:
+        return None
+    diffs = [
+        ToolCallDiff(path=item.path, new_text=item.new_text, old_text=item.old_text)
+        for item in content
+        if isinstance(item, FileEditToolCallContent)
+    ]
+    return diffs or None
 
 
 def _generate_title(kind: Optional[str], locations: Optional[list[str]] = None) -> str:
@@ -59,6 +88,7 @@ def update_tool_call_from_start(
     title: str,
     kind: Optional[str] = None,
     locations: Optional[list[str]] = None,
+    diffs: Optional[list[ToolCallDiff]] = None,
 ) -> None:
     """
     Apply a ToolCallStart event to the tool calls dict.
@@ -79,6 +109,7 @@ def update_tool_call_from_start(
         kind=kind,
         status="in_progress",
         locations=locations,
+        diffs=diffs,
     )
 
 
@@ -90,6 +121,7 @@ def update_tool_call_from_progress(
     status: Optional[str] = None,
     raw_output: Optional[Any] = None,
     locations: Optional[list[str]] = None,
+    diffs: Optional[list[ToolCallDiff]] = None,
 ) -> None:
     """
     Apply a ToolCallProgress event to the tool calls dict.
@@ -111,6 +143,7 @@ def update_tool_call_from_progress(
             status=status or "in_progress",
             raw_output=raw_output,
             locations=locations,
+            diffs=diffs,
         )
         return
 
@@ -125,19 +158,5 @@ def update_tool_call_from_progress(
         tc.raw_output = raw_output
     if locations is not None:
         tc.locations = locations
-
-
-def serialize_tool_calls(tool_calls: dict[str, ToolCallState]) -> list[dict]:
-    """
-    Serialize tool calls dict to a list of plain dicts for Yjs transport.
-
-    Returns a list of dicts with only non-None values, suitable for JSON
-    serialization and storage in Yjs shared documents.
-    """
-    result = []
-    for tc in tool_calls.values():
-        d = asdict(tc)
-        # Remove None values for cleaner serialization
-        d = {k: v for k, v in d.items() if v is not None}
-        result.append(d)
-    return result
+    if diffs is not None:
+        tc.diffs = diffs
