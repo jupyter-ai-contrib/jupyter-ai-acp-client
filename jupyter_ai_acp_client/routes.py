@@ -44,6 +44,7 @@ class AcpSlashCommandsHandler(APIHandler):
         if not persona_manager:
             raise tornado.web.HTTPError(404, f"Chat not initialized: {chat_path}")
 
+        persona = None
         if persona_mention_name:
             for p in persona_manager.personas.values():
                 if p.as_user().mention_name == persona_mention_name:

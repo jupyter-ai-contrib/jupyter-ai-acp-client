@@ -9,7 +9,6 @@ from acp import (
     Client,
     RequestError,
     connect_to_agent,
-    text_block,
 )
 from acp.core import ClientSideConnection
 from acp.schema import (
@@ -47,7 +46,7 @@ from acp.schema import (
     AllowedOutcome
 )
 from jupyter_ai_persona_manager import BasePersona, McpServerStdio
-from jupyterlab_chat.models import Message, NewMessage
+from jupyterlab_chat.models import Message
 from jupyterlab_chat.utils import find_mentions
 from asyncio.subprocess import Process
 
@@ -144,11 +143,22 @@ class JaiAcpClient(Client):
         self._personas_by_session[session.session_id] = persona
         return session
 
-    async def prompt_and_reply(self, session_id: str, prompt: str, attachments: list[dict] | None = None) -> PromptResponse:
+    async def prompt_and_reply(
+        self,
+        session_id: str,
+        prompt: str,
+        attachments: list[dict] | None = None,
+        root_dir: str | None = None,
+    ) -> PromptResponse:
         """
         A helper method that sends a prompt with an optional list of attachments
         to the assigned ACP server. This method writes back to the chat by
         handling all events in session_update().
+
+        Attachments are plain dicts from ``YChat.get_attachments()``, keyed by
+        ``value`` (relative path), ``type`` (``"file"`` or ``"notebook"``), and
+        optionally ``mimetype``.  When *root_dir* is provided the relative path
+        is resolved to an absolute ``file://`` URI.
 
         Uses a per-session lock to serialize concurrent calls, preventing
         state corruption if multiple messages arrive before the first completes.
@@ -178,12 +188,49 @@ class JaiAcpClient(Client):
             persona.awareness.set_local_state_field("isWriting", True)
 
             try:
+                # Build content blocks: text prompt + optional attachment resources
+                content_blocks: list[TextContentBlock | ResourceContentBlock] = [
+                    TextContentBlock(text=prompt, type="text"),
+                ]
+                if attachments:
+                    for att in attachments:
+                        att_value = att.get("value", "")
+                        att_type = att.get("type", "file")
+
+                        # Resolve to absolute file:// URI when root_dir is available
+                        if root_dir and att_value:
+                            abs_path = (Path(root_dir) / att_value).resolve()
+                            root_resolved = Path(root_dir).resolve()
+                            if not abs_path.is_relative_to(root_resolved):
+                                persona.log.warning(
+                                    "Attachment path %r escapes root_dir %r",
+                                    att_value,
+                                    root_dir,
+                                )
+                                uri = att_value
+                            else:
+                                uri = abs_path.as_uri()
+                        else:
+                            uri = att_value
+
+                        # Determine MIME type: explicit value or notebook default
+                        mime_type = att.get("mimetype")
+                        if mime_type is None and att_type == "notebook":
+                            mime_type = "application/x-ipynb+json"
+
+                        content_blocks.append(
+                            ResourceContentBlock(
+                                uri=uri,
+                                name=Path(att_value).name if att_value else "<attachment>",
+                                type="resource_link",
+                                mime_type=mime_type,
+                            )
+                        )
+
                 # Call the model and await — session_update() handles all events
                 response = await conn.prompt(
-                    prompt=[
-                        TextContentBlock(text=prompt, type="text"),
-                    ],
-                    session_id=session_id
+                    prompt=content_blocks,
+                    session_id=session_id,
                 )
 
                 # Trigger find_mentions on the final message
