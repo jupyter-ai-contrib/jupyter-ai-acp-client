@@ -193,6 +193,10 @@ class JaiAcpClient(Client):
         This method is idempotent: concurrent calls for the same session will
         wait for the first load to complete rather than issuing duplicate
         requests.
+
+        TODO: call `session/resume` if supported by the ACP agent, once the
+        below RFD is approved.
+        - https://agentclientprotocol.com/rfds/session-resume
         """
         # If session is already being loaded, wait for it to finish
         if self._is_session_loading(session_id):
