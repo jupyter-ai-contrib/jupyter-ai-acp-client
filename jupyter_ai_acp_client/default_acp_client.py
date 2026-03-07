@@ -31,6 +31,7 @@ from acp.schema import (
     InitializeResponse,
     Implementation,
     KillTerminalCommandResponse,
+    LoadSessionResponse,
     NewSessionResponse,
     PermissionOption,
     PromptResponse,
@@ -122,36 +123,64 @@ class JaiAcpClient(Client):
         conn, _ = await self._connection_future
         return conn
 
-    async def get_agent_capabilities(self) -> AgentCapabilities | None:
+    async def get_agent_capabilities(self) -> AgentCapabilities:
         _, init_response = await self._connection_future
+        # the ACP SDK annotates that this type may be `None`, but that is not
+        # true. the Pydantic model they define sets an empty `AgentCapabilities`
+        # object as a default if this is not included in the response from the
+        # agent. See `acp.schema:InitializeResponse`.
         return init_response.agent_capabilities
 
-    async def create_session(self, persona: BasePersona) -> NewSessionResponse:
-        """
-        Create an ACP agent session through this client scoped to a
-        `BasePersona` instance.
-        """
-        conn = await self.get_connection()
+    async def _get_mcp_servers(self, persona: BasePersona) -> list[AcpMcpServerHttp | AcpMcpServerHttp]:
+        agent_capabilities = await self.get_agent_capabilities()
 
-        # read MCP settings from persona
-        mcp_settings = persona.get_mcp_settings()
-
-        # Parse MCP servers from `.jupyter/mcp_settings.json`.
+        # Parse stdio and HTTP MCP servers from `.jupyter/mcp_settings.json` and
+        # pass them to the ACP agent.
+        #
         # We need to cast each from the PersonaManager model to the ACP model
         # here. The models are the exact same, but we still need to do this to
         # avoid a Pydantic error. 
+        mcp_settings = persona.get_mcp_settings()
         mcp_servers: list[AcpMcpServerStdio | AcpMcpServerHttp] = []
         if mcp_settings:
             for mcp_server in mcp_settings.mcp_servers:
                 if isinstance(mcp_server, McpServerStdio):
                     mcp_servers.append(AcpMcpServerStdio(**mcp_server.model_dump()))
-                else:
+                # only append HTTP MCP servers if support is indicated in the
+                # agent capabilities returned on session init
+                elif agent_capabilities.mcp_capabilities.http:
                     mcp_servers.append(AcpMcpServerHttp(**mcp_server.model_dump()))
 
-        # TODO: change this to Jupyter preferred dir
+    async def create_session(self, persona: BasePersona) -> NewSessionResponse:
+        """
+        Create an ACP agent session through this client scoped to a
+        `BasePersona` instance. Sends a `session/new` JSON-RPC message to the
+        ACP agent.
+        """
+        conn = await self.get_connection()
+        mcp_servers = await self._get_mcp_servers(persona)
+
+        # TODO: change this to chat parent dir
         session = await conn.new_session(mcp_servers=mcp_servers, cwd=os.getcwd())
         self._personas_by_session[session.session_id] = persona
         return session
+    
+    async def load_session(self, persona: BasePersona, session_id: str) -> LoadSessionResponse:
+        """
+        Load an existing ACP agent session through this client scoped to a
+        `BasePersona` instance. Sends a `session/load` JSON-RPC message to the
+        ACP agent.
+        """
+        conn = await self.get_connection()
+        mcp_servers = await self._get_mcp_servers(persona)
+        response = await conn.load_session(
+            # TODO: change this to chat parent dir
+            cwd=os.getcwd(),
+            mcp_servers=mcp_servers,
+            session_id=session_id,
+        )
+        self._personas_by_session[session_id] = persona
+        return response
 
     async def prompt_and_reply(
         self,

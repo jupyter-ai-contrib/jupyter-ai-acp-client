@@ -4,7 +4,7 @@ from asyncio import Task
 from asyncio.subprocess import Process
 from typing import Awaitable, ClassVar
 
-from acp import NewSessionResponse
+from acp import NewSessionResponse, LoadSessionResponse
 from acp.schema import AvailableCommand
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
@@ -40,12 +40,12 @@ class BaseAcpPersona(BasePersona):
     Developers should always use `self.get_client()`.
     """
 
-    _client_session_future: Awaitable[NewSessionResponse]
+    _client_session_future: Awaitable[NewSessionResponse | LoadSessionResponse]
     """
     The future that yields the ACP client session info. Each instance of an ACP
     persona has a unique session ID, i.e. each chat reserves a unique session.
 
-    Developers should always call `self.get_session()` or `self.get_session_id()`.
+    Developers should always call `self.get_session_response()` or `self.get_session_id()`.
     """
 
     _acp_slash_commands: list[AvailableCommand]
@@ -110,15 +110,57 @@ class BaseAcpPersona(BasePersona):
         self.log.info("Initialized ACP client for '%s'.", self.__class__.__name__)
         return client
     
-    async def _init_client_session(self) -> NewSessionResponse:
-        client = await self.get_client()
-        session = await client.create_session(persona=self)
-        self.log.info(
-            "Initialized new ACP client session for '%s' with ID '%s'.",
-            self.__class__.__name__,
-            session.session_id,
+    def _get_existing_sessions(self) -> dict[str, str]:
+        """
+        Returns a dictionary of existing ACP session IDs within this instance's
+        assigned chat, keyed by persona ID (obtained via `self.id`). Each chat
+        may contain 1 session per ACP persona.
+
+        Obtained from the `ychat._ydoc["metadata"]` shared type internally.
+        """
+        sessions = self.ychat.get_metadata().get("acp_session_ids", {})
+        return sessions
+    
+    def _record_new_session(self, new_session_id: str) -> None:
+        """
+        Adds a new ACP session ID into this chat's metadata. Always use this
+        method to avoid deleting other clients' sessions.
+
+        Updates the `ychat._ydoc["metadata"]` shared type internally.
+        """
+        existing_session_ids = self._get_existing_sessions()
+        self.ychat.set_metadata(
+            "acp_session_ids", {**existing_session_ids, self.id: new_session_id}
         )
-        return session
+
+    async def _init_client_session(self) -> NewSessionResponse | LoadSessionResponse:
+        # get client
+        client = await self.get_client()
+
+        # check for an existing session ID
+        existing_session_id = self._get_existing_sessions().get(self.id, None)
+        supports_session_load = (await client.get_agent_capabilities()).load_session
+
+        if existing_session_id and supports_session_load:
+            # load existing session if one exists and the agent indicates it
+            # supports loading sessions in its agent capabilities
+            response = await client.load_session(persona=self, session_id=existing_session_id)
+            self.log.info(
+                "Loaded existing ACP client session for '%s' with ID '%s'.",
+                self.__class__.__name__,
+                existing_session_id,
+            )
+            return response
+        else:
+            # otherwise create new session and add it to the metadata
+            response = await client.create_session(persona=self)
+            self.log.info(
+                "Initialized new ACP client session for '%s' with ID '%s'.",
+                self.__class__.__name__,
+                response.session_id,
+            )
+            self._record_new_session(response.session_id)
+            return response
 
     async def get_agent_subprocess(self) -> asyncio.subprocess.Process:
         """
@@ -132,18 +174,22 @@ class BaseAcpPersona(BasePersona):
         """
         return await self.__class__._client_future
     
-    async def get_session(self) -> NewSessionResponse:
+    async def get_session_response(self) -> NewSessionResponse | LoadSessionResponse:
         """
-        Safely returns the ACP client session for this chat.
+        Safely returns the ACP session response for this chat.
         """
         return await self._client_session_future
     
     async def get_session_id(self) -> str:
         """
-        Safely returns the ACP client ID assigned to this chat.
+        Safely returns the ACP session ID assigned to this chat.
         """
-        session = await self._client_session_future
-        return session.session_id
+        await self._client_session_future
+        # session ID should always be stored in chat metadata after client
+        # session was created or loaded.
+        session_ids =  self._get_existing_sessions()
+        assert self.id in session_ids
+        return session_ids[self.id]
     
     async def is_authed(self) -> bool:
         """
@@ -231,8 +277,8 @@ class BaseAcpPersona(BasePersona):
         self.log.info("Closing ACP agent and client for '%s'.", self.__class__.__name__)
         client = await self.get_client()
         try:
-            session = await self._client_session_future
-            await client.end_session(session.session_id)
+            session_id = await self.get_session_id()
+            await client.end_session(session_id)
         except Exception:
             self.log.warning(
                 "Failed to clean up session resources during shutdown for '%s'.",
