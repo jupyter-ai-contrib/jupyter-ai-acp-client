@@ -15,6 +15,7 @@ from acp import (
 )
 from acp.core import ClientSideConnection
 from acp.schema import (
+    AgentCapabilities,
     AgentMessageChunk,
     AgentPlanUpdate,
     AgentThoughtChunk,
@@ -27,6 +28,7 @@ from acp.schema import (
     EnvVariable,
     FileSystemCapability,
     ImageContentBlock,
+    InitializeResponse,
     Implementation,
     KillTerminalCommandResponse,
     NewSessionResponse,
@@ -68,7 +70,7 @@ class JaiAcpClient(Client):
     """
 
     agent_subprocess: Process
-    _connection_future: Awaitable[ClientSideConnection]
+    _connection_future: Awaitable[tuple[ClientSideConnection, InitializeResponse]]
     event_loop: asyncio.AbstractEventLoop
     _personas_by_session: dict[str, BasePersona]
     _terminal_manager: TerminalManager
@@ -103,10 +105,10 @@ class JaiAcpClient(Client):
         super().__init__(*args, **kwargs)
 
 
-    async def _init_connection(self) -> ClientSideConnection:
+    async def _init_connection(self) -> tuple[ClientSideConnection, InitializeResponse]:
         proc = self.agent_subprocess
         conn = connect_to_agent(self, proc.stdin, proc.stdout)
-        await conn.initialize(
+        init_response = await conn.initialize(
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=ClientCapabilities(
                 fs=FileSystemCapability(read_text_file=True, write_text_file=True),
@@ -114,10 +116,15 @@ class JaiAcpClient(Client):
             ),
             client_info=Implementation(name="Jupyter AI", title="Jupyter AI ACP Client", version="0.1.0"),
         )
-        return conn
+        return conn, init_response
 
     async def get_connection(self) -> ClientSideConnection:
-        return await self._connection_future
+        conn, _ = await self._connection_future
+        return conn
+
+    async def get_agent_capabilities(self) -> AgentCapabilities | None:
+        _, init_response = await self._connection_future
+        return init_response.agent_capabilities
 
     async def create_session(self, persona: BasePersona) -> NewSessionResponse:
         """
