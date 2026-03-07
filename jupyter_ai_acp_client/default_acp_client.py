@@ -77,6 +77,10 @@ class JaiAcpClient(Client):
     _terminal_manager: TerminalManager
     _tool_call_manager: ToolCallManager
     _prompt_locks_by_session: dict[str, asyncio.Lock]
+    _loading_sessions: set[str]
+    """
+    The set of all sessions currently being loaded by the client.
+    """
 
     def __init__(
             self,
@@ -103,6 +107,7 @@ class JaiAcpClient(Client):
         self._terminal_manager = TerminalManager(event_loop)
         self._tool_call_manager = ToolCallManager()
         self._permission_manager = PermissionManager(event_loop)
+        self._loading_sessions = set()
         super().__init__(*args, **kwargs)
 
 
@@ -173,16 +178,28 @@ class JaiAcpClient(Client):
         `BasePersona` instance. Sends a `session/load` JSON-RPC message to the
         ACP agent.
         """
-        conn = await self.get_connection()
-        mcp_servers = await self._get_mcp_servers(persona)
-        response = await conn.load_session(
-            # TODO: change this to chat parent dir
-            cwd=os.getcwd(),
-            mcp_servers=mcp_servers,
-            session_id=session_id,
-        )
-        self._personas_by_session[session_id] = persona
-        return response
+        # Return early if session is already being loaded
+        if session_id in self._loading_sessions:
+            raise RuntimeError(f"Session '{session_id}' is already being loaded.")
+
+        try:
+            # Mark session as loading
+            self._loading_sessions.add(session_id)
+            # Load session and return response
+            conn = await self.get_connection()
+            mcp_servers = await self._get_mcp_servers(persona)
+            response = await conn.load_session(
+                # TODO: change this to chat parent dir
+                cwd=os.getcwd(),
+                mcp_servers=mcp_servers,
+                session_id=session_id,
+            )
+            # On success, record persona for the session and return response
+            self._personas_by_session[session_id] = persona
+            return response
+        finally:
+            # Mark session as not loading on return, regardless of error
+            self._loading_sessions.discard(session_id)
 
     async def prompt_and_reply(
         self,
@@ -344,6 +361,11 @@ class JaiAcpClient(Client):
         Handles `session/update` requests from the ACP agent. All event types
         are handled directly here — tool calls, text chunks, and slash commands.
         """
+        # ignore `session/update` messages received while a session is being
+        # loaded, since chat history is persisted on disk in Jupyter AI.
+        if session_id in self._loading_sessions:
+            return
+
         persona = self._personas_by_session.get(session_id)
         if persona:
             persona.log.info(f"session_update: {type(update).__name__} for session {session_id}")
