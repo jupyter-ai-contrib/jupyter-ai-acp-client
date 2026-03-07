@@ -15,6 +15,7 @@ def _make_client_and_persona():
     """Create a minimal mock JaiAcpClient with a persona wired for testing."""
     client = object.__new__(JaiAcpClient)
     client._prompt_locks_by_session = {}
+    client._cancel_requested = {}
     client._permission_manager = MagicMock()
 
     # Mock connection
