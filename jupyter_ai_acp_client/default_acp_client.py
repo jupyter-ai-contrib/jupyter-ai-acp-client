@@ -128,7 +128,9 @@ class JaiAcpClient(Client):
         # the ACP SDK annotates that this type may be `None`, but that is not
         # true. the Pydantic model they define sets an empty `AgentCapabilities`
         # object as a default if this is not included in the response from the
-        # agent. See `acp.schema:InitializeResponse`.
+        # agent.
+        #
+        # See: https://github.com/agentclientprotocol/python-sdk/pull/78
         return init_response.agent_capabilities
 
     async def _get_mcp_servers(self, persona: BasePersona) -> list[AcpMcpServerHttp | AcpMcpServerHttp]:
