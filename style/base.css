@@ -211,3 +211,26 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 .jp-jupyter-ai-acp-client-diff-context {
   color: var(--jp-ui-font-color2);
 }
+
+/* Stop streaming button */
+.jp-jupyter-ai-acp-client-stopButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size1);
+  cursor: pointer;
+}
+
+.jp-jupyter-ai-acp-client-stopButton:hover {
+  background: var(--jp-layout-color3);
+}
+
+.jp-jupyter-ai-acp-client-stopButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

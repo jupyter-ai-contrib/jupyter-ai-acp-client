@@ -92,3 +92,20 @@ export async function submitPermissionDecision(
     })
   });
 }
+
+export async function stopStreaming(
+  chatPath: string,
+  personaMentionName: string | null = null
+): Promise<void> {
+  try {
+    if (personaMentionName === null) {
+      await requestAPI(`/stop?chat_path=${chatPath}`, { method: 'POST' });
+    } else {
+      await requestAPI(`/stop/${personaMentionName}?chat_path=${chatPath}`, {
+        method: 'POST'
+      });
+    }
+  } catch (e) {
+    console.warn('Error stopping stream: ', e);
+  }
+}

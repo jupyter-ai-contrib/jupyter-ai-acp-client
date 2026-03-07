@@ -116,6 +116,9 @@
         },
         "extension": true,
         "outputDir": "jupyter_ai_acp_client/labextension",
+        "disabledExtensions": [
+            "jupyterlab-chat-extension:inputToolbarFactory"
+        ],
         "sharedPackages": {
             "@jupyter/chat": {
                 "bundled": false,

@@ -8,12 +8,15 @@ import {
   IChatCommandRegistry,
   IInputModel,
   IMessagePreambleRegistry,
+  IInputToolbarRegistryFactory,
+  InputToolbarRegistry,
   ChatCommand
 } from '@jupyter/chat';
 
 import { ToolCallsComponent } from './tool-calls';
 
 import { getAcpSlashCommands } from './request';
+import { AcpStopButton } from './stop-button';
 
 const SLASH_COMMAND_PROVIDER_ID =
   '@jupyter-ai/acp-client:slash-command-provider';
@@ -146,4 +149,33 @@ export const slashCommandPlugin: JupyterFrontEndPlugin<void> = {
   }
 };
 
-export default slashCommandPlugin;
+/**
+ * Plugin that provides a custom input toolbar factory with the ACP stop button.
+ * The chat panel picks this up and uses it to build the toolbar for each chat.
+ */
+export const toolbarPlugin: JupyterFrontEndPlugin<IInputToolbarRegistryFactory> =
+  {
+    id: '@jupyter-ai/acp-client:toolbar',
+    description:
+      'Provides a chat input toolbar with ACP stop streaming button.',
+    autoStart: true,
+    provides: IInputToolbarRegistryFactory,
+    activate: (): IInputToolbarRegistryFactory => {
+      return {
+        create: () => {
+          // Start with the default toolbar (Send, Attach, Cancel, SaveEdit)
+          const registry = InputToolbarRegistry.defaultToolbarRegistry();
+          // Add our stop button (position 90 = just before Send at 100)
+          registry.addItem('stop', {
+            element: AcpStopButton,
+            position: 10
+          });
+          return registry;
+        }
+      };
+    }
+  };
+
+export default [slashCommandPlugin, toolbarPlugin];
+
+export { stopStreaming } from './request';
