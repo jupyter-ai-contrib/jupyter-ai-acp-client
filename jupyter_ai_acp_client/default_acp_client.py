@@ -77,9 +77,12 @@ class JaiAcpClient(Client):
     _terminal_manager: TerminalManager
     _tool_call_manager: ToolCallManager
     _prompt_locks_by_session: dict[str, asyncio.Lock]
-    _loading_sessions: set[str]
+    _session_load_events: dict[str, asyncio.Event]
     """
-    The set of all sessions currently being loaded by the client.
+    Maps session IDs currently being loaded to an event that is set when
+    loading completes (successfully or not). Outside of `load_session()`,
+    prefer `_is_session_loading()` and `_until_session_loaded()` over
+    accessing this dict directly.
     """
 
     def __init__(
@@ -107,7 +110,7 @@ class JaiAcpClient(Client):
         self._terminal_manager = TerminalManager(event_loop)
         self._tool_call_manager = ToolCallManager()
         self._permission_manager = PermissionManager(event_loop)
-        self._loading_sessions = set()
+        self._session_load_events: dict[str, asyncio.Event] = {}
         super().__init__(*args, **kwargs)
 
 
@@ -172,19 +175,33 @@ class JaiAcpClient(Client):
         self._personas_by_session[session.session_id] = persona
         return session
     
+    def _is_session_loading(self, session_id: str) -> bool:
+        event = self._session_load_events.get(session_id)
+        return event is not None and not event.is_set()
+
+    async def _until_session_loaded(self, session_id: str) -> None:
+        event = self._session_load_events.get(session_id)
+        if event:
+            await event.wait()
+
     async def load_session(self, persona: BasePersona, session_id: str) -> LoadSessionResponse:
         """
         Load an existing ACP agent session through this client scoped to a
         `BasePersona` instance. Sends a `session/load` JSON-RPC message to the
         ACP agent.
+
+        This method is idempotent: concurrent calls for the same session will
+        wait for the first load to complete rather than issuing duplicate
+        requests.
         """
-        # Return early if session is already being loaded
-        if session_id in self._loading_sessions:
-            raise RuntimeError(f"Session '{session_id}' is already being loaded.")
+        # If session is already being loaded, wait for it to finish
+        if self._is_session_loading(session_id):
+            await self._until_session_loaded(session_id)
+            return
 
         try:
             # Mark session as loading
-            self._loading_sessions.add(session_id)
+            self._session_load_events[session_id] = asyncio.Event()
             # Load session and return response
             conn = await self.get_connection()
             mcp_servers = await self._get_mcp_servers(persona)
@@ -198,8 +215,10 @@ class JaiAcpClient(Client):
             self._personas_by_session[session_id] = persona
             return response
         finally:
-            # Mark session as not loading on return, regardless of error
-            self._loading_sessions.discard(session_id)
+            # Signal waiters that loading is complete, regardless of error
+            event = self._session_load_events.get(session_id)
+            if event:
+                event.set()
 
     async def prompt_and_reply(
         self,
@@ -363,7 +382,7 @@ class JaiAcpClient(Client):
         """
         # ignore `session/update` messages received while a session is being
         # loaded, since chat history is persisted on disk in Jupyter AI.
-        if session_id in self._loading_sessions:
+        if self._is_session_loading(session_id):
             return
 
         persona = self._personas_by_session.get(session_id)
