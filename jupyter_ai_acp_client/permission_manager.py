@@ -73,9 +73,9 @@ class PermissionManager:
                 del self._session_index[session_id]
 
 
-    def reject_all_pending(self, session_id: str) -> int:
+    def cancel_all_pending(self, session_id: str) -> int:
         """
-        Auto-reject all pending permission requests for a session.
+        Auto-cancel all pending permission requests for a session.
         """
         #keys belonging to specific session
         keys = self._session_index.pop(session_id, set())
@@ -83,20 +83,6 @@ class PermissionManager:
         for key in keys:
             req = self._pending.pop(key, None)
             if req is not None and not req.future.done():
-                reject_id = self._find_reject_option_id(req.options)
-                req.future.set_result(reject_id)
+                req.future.set_result(None)
                 rejected += 1
         return rejected
-
-    @staticmethod
-    def _find_reject_option_id(options: list[PermissionOption]) -> str:
-        """
-        Find the reject option_id from the options list.
-        """
-        for opt in options:
-            if opt.kind and "reject_once" in opt.kind:
-                return opt.option_id
-        raise ValueError(
-            "No option with kind 'reject_once' found in permission options. "
-            "Cannot auto-reject without a valid reject option."
-        )

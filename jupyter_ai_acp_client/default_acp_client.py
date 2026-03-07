@@ -46,7 +46,8 @@ from acp.schema import (
     WriteTextFileResponse,
     McpServerStdio as AcpMcpServerStdio,
     HttpMcpServer as AcpMcpServerHttp,
-    AllowedOutcome
+    AllowedOutcome,
+    DeniedOutcome
 )
 from jupyter_ai_persona_manager import BasePersona, McpServerStdio
 from jupyterlab_chat.models import Message
@@ -169,15 +170,7 @@ class JaiAcpClient(Client):
         """
         assert session_id in self._personas_by_session
         lock = self._prompt_locks_by_session.setdefault(session_id, asyncio.Lock())
-
-        # Auto-reject any pending permission requests
-        rejected = self._permission_manager.reject_all_pending(session_id)
-        if rejected:
-            persona = self._personas_by_session.get(session_id)
-            if persona:
-                persona.log.info(
-                    f"prompt_and_reply: auto-rejected {rejected} pending permission(s) for session {session_id}"
-                )
+        self._cancel_pending_work(session_id)
 
         async with lock:
             self._cancel_requested[session_id] = False
@@ -325,7 +318,10 @@ class JaiAcpClient(Client):
 
         # Skip message/tool events when cancellation has been requested
         if self._cancel_requested.get(session_id, False):
-            return
+            if isinstance(update, (ToolCallStart, ToolCallProgress)):
+                pass 
+            else:
+                return
 
         if persona is None:
             return
@@ -413,6 +409,13 @@ class JaiAcpClient(Client):
 
             # Suspend until the user clicks a permission button
             selected_option_id = await future
+
+            if selected_option_id is None:
+                tc.permission_status = "resolved"
+                self._tool_call_manager._flush_to_message(session_id, persona)
+                return RequestPermissionResponse(
+                    outcome=DeniedOutcome(outcome="cancelled")
+                )
             
             tc.permission_status = "resolved"
             tc.selected_option_id = selected_option_id
@@ -605,14 +608,29 @@ class JaiAcpClient(Client):
         # Reset awareness
         persona.awareness.set_local_state_field("isWriting", False)
 
-        rejected = self._permission_manager.reject_all_pending(session_id)
-        if rejected:
-            persona.log.info(
-                f"stop_streaming: auto-rejected {rejected} pending permission(s) for session {session_id}"
-            )
-            # Flush updated tool call state so frontend removes permission buttons
-            self._tool_call_manager._flush_to_message(session_id, persona)
+        self._cancel_pending_work(session_id)
 
+    def _cancel_pending_work(self, session_id: str) -> None:
+        """Mark non-finished tool calls as failed, reject pending permissions, and flush."""
+        persona = self._personas_by_session.get(session_id)
+
+        # Mark non-finished tool calls as failed
+        session_state = self._tool_call_manager._sessions.get(session_id)
+        if session_state:
+            for tc in session_state.tool_calls.values():
+                if tc.status not in ("completed", "failed"):
+                    tc.status = "failed"
+
+        # Cancel pending permissions
+        rejected = self._permission_manager.cancel_all_pending(session_id)
+        if rejected and persona:
+            persona.log.info(
+                f"_cancel_pending_work: auto-rejected {rejected} pending permission(s) for session {session_id}"
+            )
+
+        # Flush updated state to frontend
+        if persona:
+            self._tool_call_manager._flush_to_message(session_id, persona)
 
 
 
