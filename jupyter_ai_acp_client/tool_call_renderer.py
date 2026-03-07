@@ -152,7 +152,8 @@ def update_tool_call_from_progress(
         tc.title = _shorten_title(title)
     if kind is not None:
         tc.kind = kind
-    if status is not None:
+    # "failed" is terminal: don't let late-arriving updates overwrite it
+    if status is not None and tc.status != "failed":
         tc.status = status
     if raw_output is not None:
         tc.raw_output = raw_output

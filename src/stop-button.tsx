@@ -44,14 +44,8 @@ export function AcpStopButton(
 
     setInFlight(true);
     try {
-      // chatModel.name is the chat file path (e.g. "chat.chat")
-      const chatPath = chatModel.name;
-
-      // Find the bot writer's mention name if available
-      const botWriter = chatModel.writers.find(w => w.user.bot);
-      const personaMentionName = botWriter?.user.mention_name ?? null;
-
-      await stopStreaming(chatPath, personaMentionName);
+      // Call stop with no persona name, backend stops all personas
+      await stopStreaming(chatModel.name, null);
     } finally {
       setInFlight(false);
     }

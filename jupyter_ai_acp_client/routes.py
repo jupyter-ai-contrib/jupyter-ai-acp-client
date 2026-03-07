@@ -102,27 +102,20 @@ class StopStreamingHandler(APIHandler):
         if not persona_manager:
             raise tornado.web.HTTPError(404, f"Chat not initialized: {chat_path}")
 
-        persona = None
-        if persona_mention_name:
-            for p in persona_manager.personas.values():
-                if p.as_user().mention_name == persona_mention_name:
-                    persona = p
-                    break
-            if not persona:
-                raise tornado.web.HTTPError(404, f"Persona not found: @{persona_mention_name}")
-        else:
-            persona = persona_manager.last_mentioned_persona or persona_manager.default_persona
-
-        if not isinstance(persona, BaseAcpPersona):
-            raise tornado.web.HTTPError(409, "Persona is not an ACP persona")
-
-        client = await persona.get_client()
-        session_id = await persona.get_session_id()
-        if not session_id:
-            raise tornado.web.HTTPError(409, "No active session for this persona")
-
-        await client.stop_streaming(session_id)
-        self.finish({"status": "stopped"})
+        # Stop all ACP personas in this chat
+        stopped = []
+        for p in persona_manager.personas.values():
+            if not isinstance(p, BaseAcpPersona):
+                continue
+            try:
+                client = await p.get_client()
+                session_id = await p.get_session_id()
+                if session_id:
+                    await client.stop_streaming(session_id)
+                    stopped.append(p.as_user().mention_name)
+            except Exception:
+                pass
+        self.finish({"status": "stopped", "stopped": stopped})
 
 
 class PermissionHandler(APIHandler):

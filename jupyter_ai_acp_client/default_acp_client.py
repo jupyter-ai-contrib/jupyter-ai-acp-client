@@ -170,6 +170,9 @@ class JaiAcpClient(Client):
         """
         assert session_id in self._personas_by_session
         lock = self._prompt_locks_by_session.setdefault(session_id, asyncio.Lock())
+        # Signal cancellation before cleanup so that any in-flight session_update 
+        # callbacks are suppressed and don't overwrite the failed status.
+        self._cancel_requested[session_id] = True
         self._cancel_pending_work(session_id)
 
         async with lock:
