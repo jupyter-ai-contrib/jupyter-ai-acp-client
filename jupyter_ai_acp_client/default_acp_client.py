@@ -160,6 +160,8 @@ class JaiAcpClient(Client):
                 # agent capabilities returned on session init
                 elif agent_capabilities.mcp_capabilities.http:
                     mcp_servers.append(AcpMcpServerHttp(**mcp_server.model_dump()))
+        
+        return mcp_servers
 
     async def create_session(self, persona: BasePersona) -> NewSessionResponse:
         """
