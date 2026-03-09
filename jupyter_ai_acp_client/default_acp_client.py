@@ -141,7 +141,7 @@ class JaiAcpClient(Client):
         # See: https://github.com/agentclientprotocol/python-sdk/pull/78
         return init_response.agent_capabilities
 
-    async def _get_mcp_servers(self, persona: BasePersona) -> list[AcpMcpServerHttp | AcpMcpServerHttp]:
+    async def _get_mcp_servers(self, persona: BasePersona) -> list[AcpMcpServerStdio | AcpMcpServerHttp]:
         agent_capabilities = await self.get_agent_capabilities()
 
         # Parse stdio and HTTP MCP servers from `.jupyter/mcp_settings.json` and
