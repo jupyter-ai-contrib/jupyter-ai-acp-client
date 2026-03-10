@@ -56,7 +56,9 @@ function formatOutput(rawOutput: unknown): string {
  * clean key-value pairs; nested/complex values fall back to JSON.
  */
 function formatToolInput(input: unknown): string {
-  if (typeof input === 'string') return input;
+  if (typeof input === 'string') {
+    return input;
+  }
   if (typeof input !== 'object' || input === null || Array.isArray(input)) {
     return JSON.stringify(input, null, 2);
   }
@@ -96,7 +98,9 @@ function buildPermissionDetail(toolCall: IToolCall): string | null {
             .replace(/\.\.\.$/, '')
             .trim() || null;
     // Guard: if stripping produced nothing new, don't show.
-    if (!cmd || cmd === title) return null;
+    if (!cmd || cmd === title) {
+      return null;
+    }
     return '$ ' + cmd;
   }
 
@@ -111,7 +115,7 @@ function buildPermissionDetail(toolCall: IToolCall): string | null {
 
   // Generic fallback for unknown/MCP kinds with raw_input.
   if (
-    raw_input != null &&
+    raw_input !== null &&
     typeof raw_input === 'object' &&
     !Array.isArray(raw_input)
   ) {
@@ -133,14 +137,20 @@ function buildPermissionDetail(toolCall: IToolCall): string | null {
         : null;
 
     // Compose: purpose + params, or whichever is available.
-    if (purpose && params) return purpose + '\n' + params;
-    if (purpose) return purpose;
-    if (params) return params;
+    if (purpose && params) {
+      return purpose + '\n' + params;
+    }
+    if (purpose) {
+      return purpose;
+    }
+    if (params) {
+      return params;
+    }
     return null;
   }
 
   // Non-object raw_input (string, array, primitive) — pass through.
-  if (raw_input != null) {
+  if (raw_input !== null && raw_input !== undefined) {
     return formatToolInput(raw_input);
   }
 
