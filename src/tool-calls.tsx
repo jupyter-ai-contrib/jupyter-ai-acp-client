@@ -53,7 +53,7 @@ function formatOutput(rawOutput: unknown): string {
 
 /**
  * Format tool input for display. Flat objects (all primitive values) render as
- * clean key-value pairs; nested/complex values fall back to JSON.
+ * key-value pairs; nested/complex values fall back to JSON.
  */
 function formatToolInput(input: unknown): string {
   if (typeof input === 'string') {
@@ -76,16 +76,12 @@ function formatToolInput(input: unknown): string {
 /**
  * Compute the pre-permission detail text for a tool call, or null if nothing
  * to show beyond the title. Returns a plain string so callers can check null.
- *
- * Priority: kind-specific rendering (locations for file ops, raw_input.command
- * for execute) → key-value pairs for unknown/MCP tools → null.
  */
 function buildPermissionDetail(toolCall: IToolCall): string | null {
   const { kind, title, locations, raw_input } = toolCall;
 
   if (kind === 'execute') {
-    // Prefer raw_input.command (ACP-compliant agents); fall back to stripping
-    // "Running: " from title (Kiro-specific fallback).
+    // Prefer raw_input.command (ACP-compliant agents)
     const rawObj =
       typeof raw_input === 'object' && raw_input !== null
         ? (raw_input as Record<string, unknown>)
@@ -97,7 +93,7 @@ function buildPermissionDetail(toolCall: IToolCall): string | null {
             ?.replace(/^Running:\s*/i, '')
             .replace(/\.\.\.$/, '')
             .trim() || null;
-    // Guard: if stripping produced nothing new, don't show.
+    // If stripping produced nothing new, don't show.
     if (!cmd || cmd === title) {
       return null;
     }
@@ -121,7 +117,6 @@ function buildPermissionDetail(toolCall: IToolCall): string | null {
   ) {
     const obj = raw_input as Record<string, unknown>;
 
-    // Extract __tool_use_purpose — agent's plain-English intent for the tool call.
     const purpose =
       typeof obj.__tool_use_purpose === 'string'
         ? obj.__tool_use_purpose
@@ -136,7 +131,6 @@ function buildPermissionDetail(toolCall: IToolCall): string | null {
         ? formatToolInput(Object.fromEntries(paramEntries))
         : null;
 
-    // Compose: purpose + params, or whichever is available.
     if (purpose && params) {
       return purpose + '\n' + params;
     }
