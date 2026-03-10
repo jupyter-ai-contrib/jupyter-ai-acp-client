@@ -85,6 +85,27 @@ class TestUpdateToolCallFromStart:
         )
         assert tool_calls["tc-1"].diffs == diffs
 
+    def test_start_stores_raw_input(self):
+        tool_calls = {}
+        update_tool_call_from_start(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="Running command...",
+            kind="execute",
+            raw_input={"command": "rm foo.py"},
+        )
+        assert tool_calls["tc-1"].raw_input == {"command": "rm foo.py"}
+
+    def test_start_raw_input_none_by_default(self):
+        tool_calls = {}
+        update_tool_call_from_start(
+            tool_calls,
+            tool_call_id="tc-1",
+            title="Running command...",
+            kind="execute",
+        )
+        assert tool_calls["tc-1"].raw_input is None
+
 
 class TestUpdateToolCallFromProgress:
     def test_updates_existing_tool_call(self):
@@ -176,6 +197,39 @@ class TestUpdateToolCallFromProgress:
         assert tc.title == "Original title"
         assert tc.status == "in_progress"
 
+    def test_updates_raw_input(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Running command...",
+                kind="execute",
+                status="in_progress",
+            )
+        }
+        update_tool_call_from_progress(
+            tool_calls,
+            tool_call_id="tc-1",
+            raw_input={"command": "rm foo.py"},
+        )
+        assert tool_calls["tc-1"].raw_input == {"command": "rm foo.py"}
+
+    def test_none_raw_input_does_not_overwrite(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Running command...",
+                kind="execute",
+                status="in_progress",
+                raw_input={"command": "rm foo.py"},
+            )
+        }
+        update_tool_call_from_progress(
+            tool_calls,
+            tool_call_id="tc-1",
+            raw_input=None,
+        )
+        assert tool_calls["tc-1"].raw_input == {"command": "rm foo.py"}
+
     def test_diffs_preserved_across_progress(self):
         diffs = [ToolCallDiff(path="/a/b.py", new_text="new", old_text="old")]
         tool_calls = {
@@ -264,6 +318,31 @@ class TestSerializeToolCalls:
         }
         result = _serialize(tool_calls)
         assert result[0]["raw_output"] == "file1\nfile2\n"
+
+    def test_includes_raw_input_when_set(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Running command...",
+                kind="execute",
+                status="in_progress",
+                raw_input={"command": "rm foo.py"},
+            )
+        }
+        result = _serialize(tool_calls)
+        assert result[0]["raw_input"] == {"command": "rm foo.py"}
+
+    def test_omits_raw_input_when_none(self):
+        tool_calls = {
+            "tc-1": ToolCallState(
+                tool_call_id="tc-1",
+                title="Running command...",
+                kind="execute",
+                status="in_progress",
+            )
+        }
+        result = _serialize(tool_calls)
+        assert "raw_input" not in result[0]
 
     def test_multiple_tool_calls(self):
         tool_calls = {

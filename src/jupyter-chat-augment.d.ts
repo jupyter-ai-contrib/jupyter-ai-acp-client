@@ -62,6 +62,11 @@ declare module '@jupyter/chat' {
      */
     session_id?: string;
     /**
+     * Raw parameters sent to the tool, from the ACP agent.
+     * Used to show tool input before the user approves a permission request.
+     */
+    raw_input?: unknown;
+    /**
      * File diffs from ACP FileEditToolCallContent.
      */
     diffs?: IToolCallDiff[];

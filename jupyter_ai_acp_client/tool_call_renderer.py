@@ -27,6 +27,7 @@ class ToolCallState(BaseModel):
     title: str
     kind: Optional[str] = None
     status: Optional[str] = None
+    raw_input: Optional[Any] = None
     raw_output: Optional[Any] = None
     locations: Optional[list[str]] = None
     permission_options: Optional[list[PermissionOption]] = None
@@ -89,6 +90,7 @@ def update_tool_call_from_start(
     kind: Optional[str] = None,
     locations: Optional[list[str]] = None,
     diffs: Optional[list[ToolCallDiff]] = None,
+    raw_input: Optional[Any] = None,
 ) -> None:
     """
     Apply a ToolCallStart event to the tool calls dict.
@@ -108,6 +110,7 @@ def update_tool_call_from_start(
         title=title,
         kind=kind,
         status="in_progress",
+        raw_input=raw_input,
         locations=locations,
         diffs=diffs,
     )
@@ -119,6 +122,7 @@ def update_tool_call_from_progress(
     title: Optional[str] = None,
     kind: Optional[str] = None,
     status: Optional[str] = None,
+    raw_input: Optional[Any] = None,
     raw_output: Optional[Any] = None,
     locations: Optional[list[str]] = None,
     diffs: Optional[list[ToolCallDiff]] = None,
@@ -141,6 +145,7 @@ def update_tool_call_from_progress(
             title=resolved_title,
             kind=kind,
             status=status or "in_progress",
+            raw_input=raw_input,
             raw_output=raw_output,
             locations=locations,
             diffs=diffs,
@@ -154,6 +159,8 @@ def update_tool_call_from_progress(
         tc.kind = kind
     if status is not None:
         tc.status = status
+    if raw_input is not None:
+        tc.raw_input = raw_input
     if raw_output is not None:
         tc.raw_output = raw_output
     if locations is not None:

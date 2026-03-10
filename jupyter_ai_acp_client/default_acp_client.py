@@ -392,6 +392,13 @@ class JaiAcpClient(Client):
             tc.permission_status = "pending"
             tc.session_id = session_id
 
+            # Capture raw_input if not already set from ToolCallStart
+            if tool_call.raw_input is not None and tc.raw_input is None:
+                raw_inp = tool_call.raw_input
+                if not isinstance(raw_inp, (str, int, float, bool, list, dict)):
+                    raw_inp = str(raw_inp)
+                tc.raw_input = raw_inp
+
             # Extract diffs from tool_call.content — agents may send
             # FileEditToolCallContent here rather than on ToolCallStart
             diffs = extract_diffs(tool_call.content)

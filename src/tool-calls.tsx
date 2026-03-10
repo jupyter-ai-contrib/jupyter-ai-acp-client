@@ -51,6 +51,87 @@ function formatOutput(rawOutput: unknown): string {
   return JSON.stringify(rawOutput, null, 2);
 }
 
+/**
+ * Format tool input for display. Flat objects (all primitive values) render as
+ * clean key-value pairs; nested/complex values fall back to JSON.
+ */
+function formatToolInput(input: unknown): string {
+  if (typeof input === 'string') return input;
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return JSON.stringify(input, null, 2);
+  }
+  const entries = Object.entries(input as Record<string, unknown>);
+  const isFlat = entries.every(
+    ([, v]) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+  );
+  if (isFlat) {
+    return entries.map(([k, v]) => `${k}: ${v}`).join('\n');
+  }
+  return JSON.stringify(input, null, 2);
+}
+
+/**
+ * Compute the pre-permission detail text for a tool call, or null if nothing
+ * to show beyond the title. Returns a plain string so callers can check null.
+ *
+ * Priority: kind-specific rendering (locations for file ops, raw_input.command
+ * for execute) → key-value pairs for unknown/MCP tools → null.
+ */
+function buildPermissionDetail(toolCall: IToolCall): string | null {
+  const { kind, title, locations, raw_input } = toolCall;
+
+  if (kind === 'execute') {
+    // Prefer raw_input.command (ACP-compliant agents); fall back to stripping
+    // "Running: " from title (Kiro-specific fallback).
+    const cmd =
+      raw_input && typeof (raw_input as any).command === 'string'
+        ? (raw_input as any).command
+        : title?.replace(/^Running:\s*/i, '').replace(/\.\.\.$/, '').trim() ||
+          null;
+    // Guard: if stripping produced nothing new, don't show.
+    if (!cmd || cmd === title) return null;
+    return '$ ' + cmd;
+  }
+
+  if (
+    (kind === 'delete' || kind === 'move' || kind === 'read') &&
+    locations?.length
+  ) {
+    return kind === 'move' && locations.length >= 2
+      ? locations[0] + '  \u2192  ' + locations[1]
+      : locations.join('\n');
+  }
+
+  // Generic fallback for unknown/MCP kinds with raw_input.
+  if (raw_input != null && typeof raw_input === 'object' && !Array.isArray(raw_input)) {
+    const obj = raw_input as Record<string, unknown>;
+
+    // Extract __tool_use_purpose — agent's plain-English intent for the tool call.
+    const purpose =
+      typeof obj.__tool_use_purpose === 'string' ? obj.__tool_use_purpose : null;
+
+    // Filter remaining __-prefixed internal keys for the params display.
+    const paramEntries = Object.entries(obj).filter(([k]) => !k.startsWith('__'));
+    const params =
+      paramEntries.length > 0
+        ? formatToolInput(Object.fromEntries(paramEntries))
+        : null;
+
+    // Compose: purpose + params, or whichever is available.
+    if (purpose && params) return purpose + '\n' + params;
+    if (purpose) return purpose;
+    if (params) return params;
+    return null;
+  }
+
+  // Non-object raw_input (string, array, primitive) — pass through.
+  if (raw_input != null) {
+    return formatToolInput(raw_input);
+  }
+
+  return null;
+}
+
 /** Tool kinds where expanded view shows full file path(s) from locations. */
 const FILE_KINDS = new Set(['read', 'edit', 'delete', 'move']);
 
@@ -145,6 +226,29 @@ function ToolCallLine({
         <PermissionButtons toolCall={toolCall} />
       </div>
     );
+  }
+
+  // Pending permission without diffs: show kind-specific detail if available
+  if (!hasDiffs && hasPendingPermission) {
+    const permissionDetail = buildPermissionDetail(toolCall);
+    if (permissionDetail !== null) {
+      return (
+        <div className={cssClass}>
+          <details open>
+            <summary>
+              <span className="jp-jupyter-ai-acp-client-tool-call-icon">
+                {icon}
+              </span>{' '}
+              <em>{displayTitle}</em>
+            </summary>
+            <div className="jp-jupyter-ai-acp-client-tool-call-detail">
+              {permissionDetail}
+            </div>
+          </details>
+          <PermissionButtons toolCall={toolCall} />
+        </div>
+      );
+    }
   }
 
   // Completed/failed with expandable content (diffs or metadata)
