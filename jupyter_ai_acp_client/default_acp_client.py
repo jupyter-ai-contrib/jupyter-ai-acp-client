@@ -77,12 +77,11 @@ class JaiAcpClient(Client):
     _terminal_manager: TerminalManager
     _tool_call_manager: ToolCallManager
     _prompt_locks_by_session: dict[str, asyncio.Lock]
-    _session_load_events: dict[str, asyncio.Event]
+    _loading_sessions: dict[str, asyncio.Task[LoadSessionResponse]]
     """
-    Maps session IDs currently being loaded to an event that is set when
-    loading completes (successfully or not). Outside of `load_session()`,
-    prefer `_is_session_loading()` and `_until_session_loaded()` over
-    accessing this dict directly.
+    Maps session IDs to their in-flight or completed load tasks. Subsequent
+    calls to `load_session()` for the same session await the existing task
+    instead of issuing duplicate requests.
     """
 
     def __init__(
@@ -110,7 +109,7 @@ class JaiAcpClient(Client):
         self._terminal_manager = TerminalManager(event_loop)
         self._tool_call_manager = ToolCallManager()
         self._permission_manager = PermissionManager(event_loop)
-        self._session_load_events: dict[str, asyncio.Event] = {}
+        self._loading_sessions: dict[str, asyncio.Task[LoadSessionResponse]] = {}
         super().__init__(*args, **kwargs)
 
 
@@ -178,13 +177,8 @@ class JaiAcpClient(Client):
         return session
     
     def _is_session_loading(self, session_id: str) -> bool:
-        event = self._session_load_events.get(session_id)
-        return event is not None and not event.is_set()
-
-    async def _until_session_loaded(self, session_id: str) -> None:
-        event = self._session_load_events.get(session_id)
-        if event:
-            await event.wait()
+        task = self._loading_sessions.get(session_id)
+        return task is not None and not task.done()
 
     async def load_session(self, persona: BasePersona, session_id: str) -> LoadSessionResponse:
         """
@@ -192,39 +186,35 @@ class JaiAcpClient(Client):
         `BasePersona` instance. Sends a `session/load` JSON-RPC message to the
         ACP agent.
 
-        This method is idempotent: concurrent calls for the same session will
-        wait for the first load to complete rather than issuing duplicate
-        requests.
+        This method is idempotent: concurrent or repeated calls for the same
+        session await the original task rather than issuing duplicate requests.
 
         TODO: call `session/resume` if supported by the ACP agent, once the
         below RFD is approved.
         - https://agentclientprotocol.com/rfds/session-resume
         """
-        # If session is already being loaded, wait for it to finish
-        if self._is_session_loading(session_id):
-            await self._until_session_loaded(session_id)
-            return
+        if session_id in self._loading_sessions:
+            return await self._loading_sessions[session_id]
 
-        try:
-            # Mark session as loading
-            self._session_load_events[session_id] = asyncio.Event()
-            # Load session and return response
-            conn = await self.get_connection()
-            mcp_servers = await self._get_mcp_servers(persona)
-            response = await conn.load_session(
-                # TODO: change this to chat parent dir
-                cwd=os.getcwd(),
-                mcp_servers=mcp_servers,
-                session_id=session_id,
-            )
-            # On success, record persona for the session and return response
-            self._personas_by_session[session_id] = persona
-            return response
-        finally:
-            # Signal waiters that loading is complete, regardless of error
-            event = self._session_load_events.get(session_id)
-            if event:
-                event.set()
+        self._loading_sessions[session_id] = self.event_loop.create_task(
+            self._load_session_rpc(persona, session_id)
+        )
+        return await self._loading_sessions[session_id]
+
+    async def _load_session_rpc(self, persona: BasePersona, session_id: str) -> LoadSessionResponse:
+        """
+        Performs the actual `session/load` RPC call. Never call this method
+        directly, call `load_session()` instead.
+        """
+        conn = await self.get_connection()
+        mcp_servers = await self._get_mcp_servers(persona)
+        response = await conn.load_session(
+            cwd=os.getcwd(),
+            mcp_servers=mcp_servers,
+            session_id=session_id,
+        )
+        self._personas_by_session[session_id] = persona
+        return response
 
     async def prompt_and_reply(
         self,
@@ -646,6 +636,7 @@ class JaiAcpClient(Client):
         self._tool_call_manager.cleanup(session_id)
         self._personas_by_session.pop(session_id, None)
         self._prompt_locks_by_session.pop(session_id, None)
+        self._loading_sessions.pop(session_id, None)
 
     async def ext_method(self, method: str, params: dict) -> dict:
         raise RequestError.method_not_found(method)
