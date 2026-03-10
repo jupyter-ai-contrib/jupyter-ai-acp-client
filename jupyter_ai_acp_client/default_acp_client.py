@@ -15,6 +15,7 @@ from acp import (
 )
 from acp.core import ClientSideConnection
 from acp.schema import (
+    AgentCapabilities,
     AgentMessageChunk,
     AgentPlanUpdate,
     AgentThoughtChunk,
@@ -27,8 +28,10 @@ from acp.schema import (
     EnvVariable,
     FileSystemCapability,
     ImageContentBlock,
+    InitializeResponse,
     Implementation,
     KillTerminalCommandResponse,
+    LoadSessionResponse,
     NewSessionResponse,
     PermissionOption,
     PromptResponse,
@@ -69,12 +72,18 @@ class JaiAcpClient(Client):
     """
 
     agent_subprocess: Process
-    _connection_future: Awaitable[ClientSideConnection]
+    _connection_future: Awaitable[tuple[ClientSideConnection, InitializeResponse]]
     event_loop: asyncio.AbstractEventLoop
     _personas_by_session: dict[str, BasePersona]
     _terminal_manager: TerminalManager
     _tool_call_manager: ToolCallManager
     _prompt_locks_by_session: dict[str, asyncio.Lock]
+    _loading_sessions: dict[str, asyncio.Task[LoadSessionResponse]]
+    """
+    Maps session IDs to their in-flight or completed load tasks. Subsequent
+    calls to `load_session()` for the same session await the existing task
+    instead of issuing duplicate requests.
+    """
 
     def __init__(
             self,
@@ -101,14 +110,15 @@ class JaiAcpClient(Client):
         self._terminal_manager = TerminalManager(event_loop)
         self._tool_call_manager = ToolCallManager()
         self._permission_manager = PermissionManager(event_loop)
+        self._loading_sessions: dict[str, asyncio.Task[LoadSessionResponse]] = {}
         super().__init__(*args, **kwargs)
         self._cancel_requested: dict[str, bool] = {}
 
 
-    async def _init_connection(self) -> ClientSideConnection:
+    async def _init_connection(self) -> tuple[ClientSideConnection, InitializeResponse]:
         proc = self.agent_subprocess
         conn = connect_to_agent(self, proc.stdin, proc.stdout)
-        await conn.initialize(
+        init_response = await conn.initialize(
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=ClientCapabilities(
                 fs=FileSystemCapability(read_text_file=True, write_text_file=True),
@@ -116,37 +126,97 @@ class JaiAcpClient(Client):
             ),
             client_info=Implementation(name="Jupyter AI", title="Jupyter AI ACP Client", version="0.1.0"),
         )
-        return conn
+        return conn, init_response
 
     async def get_connection(self) -> ClientSideConnection:
-        return await self._connection_future
+        conn, _ = await self._connection_future
+        return conn
 
-    async def create_session(self, persona: BasePersona) -> NewSessionResponse:
-        """
-        Create an ACP agent session through this client scoped to a
-        `BasePersona` instance.
-        """
-        conn = await self.get_connection()
+    async def get_agent_capabilities(self) -> AgentCapabilities:
+        _, init_response = await self._connection_future
+        # the ACP SDK annotates that this type may be `None`, but that is not
+        # true. the Pydantic model they define sets an empty `AgentCapabilities`
+        # object as a default if this is not included in the response from the
+        # agent.
+        #
+        # See: https://github.com/agentclientprotocol/python-sdk/pull/78
+        return init_response.agent_capabilities
 
-        # read MCP settings from persona
-        mcp_settings = persona.get_mcp_settings()
+    async def _get_mcp_servers(self, persona: BasePersona) -> list[AcpMcpServerStdio | AcpMcpServerHttp]:
+        agent_capabilities = await self.get_agent_capabilities()
 
-        # Parse MCP servers from `.jupyter/mcp_settings.json`.
+        # Parse stdio and HTTP MCP servers from `.jupyter/mcp_settings.json` and
+        # pass them to the ACP agent.
+        #
         # We need to cast each from the PersonaManager model to the ACP model
         # here. The models are the exact same, but we still need to do this to
         # avoid a Pydantic error. 
+        mcp_settings = persona.get_mcp_settings()
         mcp_servers: list[AcpMcpServerStdio | AcpMcpServerHttp] = []
         if mcp_settings:
             for mcp_server in mcp_settings.mcp_servers:
                 if isinstance(mcp_server, McpServerStdio):
                     mcp_servers.append(AcpMcpServerStdio(**mcp_server.model_dump()))
-                else:
+                # only append HTTP MCP servers if support is indicated in the
+                # agent capabilities returned on session init
+                elif agent_capabilities.mcp_capabilities.http:
                     mcp_servers.append(AcpMcpServerHttp(**mcp_server.model_dump()))
+        
+        return mcp_servers
 
-        # TODO: change this to Jupyter preferred dir
+    async def create_session(self, persona: BasePersona) -> NewSessionResponse:
+        """
+        Create an ACP agent session through this client scoped to a
+        `BasePersona` instance. Sends a `session/new` JSON-RPC message to the
+        ACP agent.
+        """
+        conn = await self.get_connection()
+        mcp_servers = await self._get_mcp_servers(persona)
+
+        # TODO: change this to chat parent dir
         session = await conn.new_session(mcp_servers=mcp_servers, cwd=os.getcwd())
         self._personas_by_session[session.session_id] = persona
         return session
+    
+    def _is_session_loading(self, session_id: str) -> bool:
+        task = self._loading_sessions.get(session_id)
+        return task is not None and not task.done()
+
+    async def load_session(self, persona: BasePersona, session_id: str) -> LoadSessionResponse:
+        """
+        Load an existing ACP agent session through this client scoped to a
+        `BasePersona` instance. Sends a `session/load` JSON-RPC message to the
+        ACP agent.
+
+        This method is idempotent: concurrent or repeated calls for the same
+        session await the original task rather than issuing duplicate requests.
+
+        TODO: call `session/resume` if supported by the ACP agent, once the
+        below RFD is approved.
+        - https://agentclientprotocol.com/rfds/session-resume
+        """
+        if session_id in self._loading_sessions:
+            return await self._loading_sessions[session_id]
+
+        self._loading_sessions[session_id] = self.event_loop.create_task(
+            self._load_session_rpc(persona, session_id)
+        )
+        return await self._loading_sessions[session_id]
+
+    async def _load_session_rpc(self, persona: BasePersona, session_id: str) -> LoadSessionResponse:
+        """
+        Performs the actual `session/load` RPC call. Never call this method
+        directly, call `load_session()` instead.
+        """
+        conn = await self.get_connection()
+        mcp_servers = await self._get_mcp_servers(persona)
+        response = await conn.load_session(
+            cwd=os.getcwd(),
+            mcp_servers=mcp_servers,
+            session_id=session_id,
+        )
+        self._personas_by_session[session_id] = persona
+        return response
 
     async def prompt_and_reply(
         self,
@@ -308,6 +378,11 @@ class JaiAcpClient(Client):
         Handles `session/update` requests from the ACP agent. All event types
         are handled directly here — tool calls, text chunks, and slash commands.
         """
+        # ignore `session/update` messages received while a session is being
+        # loaded, since chat history is persisted on disk in Jupyter AI.
+        if self._is_session_loading(session_id):
+            return
+
         persona = self._personas_by_session.get(session_id)
         if persona:
             persona.log.info(f"session_update: {type(update).__name__} for session {session_id}")
@@ -577,6 +652,7 @@ class JaiAcpClient(Client):
         self._tool_call_manager.cleanup(session_id)
         self._personas_by_session.pop(session_id, None)
         self._prompt_locks_by_session.pop(session_id, None)
+        self._loading_sessions.pop(session_id, None)
 
     async def ext_method(self, method: str, params: dict) -> dict:
         raise RequestError.method_not_found(method)
