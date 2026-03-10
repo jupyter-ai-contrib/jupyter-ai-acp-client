@@ -7,6 +7,7 @@ from jupyterlab_chat.models import NewMessage
 
 from .tool_call_renderer import (
     ToolCallState,
+    ensure_serializable,
     extract_diffs,
     update_tool_call_from_progress,
     update_tool_call_from_start,
@@ -106,11 +107,7 @@ class ToolCallManager:
         )
         diffs = extract_diffs(update.content)
 
-        raw_input = update.raw_input
-        if raw_input is not None and not isinstance(
-            raw_input, (str, int, float, bool, list, dict)
-        ):
-            raw_input = str(raw_input)
+        raw_input = ensure_serializable(update.raw_input)
 
         persona.log.info(
             f"tool_call_start: id={update.tool_call_id} title={update.title!r}"
@@ -136,18 +133,8 @@ class ToolCallManager:
         """Handle a ToolCallProgress event."""
         session = self._ensure_session(session_id)
 
-        # Convert raw_input/raw_output to serializable values
-        raw_input = update.raw_input
-        if raw_input is not None and not isinstance(
-            raw_input, (str, int, float, bool, list, dict)
-        ):
-            raw_input = str(raw_input)
-
-        raw_output = update.raw_output
-        if raw_output is not None and not isinstance(
-            raw_output, (str, int, float, bool, list, dict)
-        ):
-            raw_output = str(raw_output)
+        raw_input = ensure_serializable(update.raw_input)
+        raw_output = ensure_serializable(update.raw_output)
 
         kind_str = update.kind if update.kind else None
         status_str = update.status if update.status else None

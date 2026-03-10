@@ -55,7 +55,7 @@ from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
-from .tool_call_renderer import extract_diffs
+from .tool_call_renderer import ensure_serializable, extract_diffs
 from .permission_manager import PermissionManager
 
 import traceback as tb_mod
@@ -394,10 +394,7 @@ class JaiAcpClient(Client):
 
             # Capture raw_input if not already set from ToolCallStart
             if tool_call.raw_input is not None and tc.raw_input is None:
-                raw_inp = tool_call.raw_input
-                if not isinstance(raw_inp, (str, int, float, bool, list, dict)):
-                    raw_inp = str(raw_inp)
-                tc.raw_input = raw_inp
+                tc.raw_input = ensure_serializable(tool_call.raw_input)
 
             # Extract diffs from tool_call.content — agents may send
             # FileEditToolCallContent here rather than on ToolCallStart

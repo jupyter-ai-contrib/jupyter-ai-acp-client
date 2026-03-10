@@ -62,7 +62,8 @@ function formatToolInput(input: unknown): string {
   }
   const entries = Object.entries(input as Record<string, unknown>);
   const isFlat = entries.every(
-    ([, v]) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+    ([, v]) =>
+      typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
   );
   if (isFlat) {
     return entries.map(([k, v]) => `${k}: ${v}`).join('\n');
@@ -83,11 +84,17 @@ function buildPermissionDetail(toolCall: IToolCall): string | null {
   if (kind === 'execute') {
     // Prefer raw_input.command (ACP-compliant agents); fall back to stripping
     // "Running: " from title (Kiro-specific fallback).
+    const rawObj =
+      typeof raw_input === 'object' && raw_input !== null
+        ? (raw_input as Record<string, unknown>)
+        : null;
     const cmd =
-      raw_input && typeof (raw_input as any).command === 'string'
-        ? (raw_input as any).command
-        : title?.replace(/^Running:\s*/i, '').replace(/\.\.\.$/, '').trim() ||
-          null;
+      rawObj && typeof rawObj.command === 'string'
+        ? rawObj.command
+        : title
+            ?.replace(/^Running:\s*/i, '')
+            .replace(/\.\.\.$/, '')
+            .trim() || null;
     // Guard: if stripping produced nothing new, don't show.
     if (!cmd || cmd === title) return null;
     return '$ ' + cmd;
@@ -103,15 +110,23 @@ function buildPermissionDetail(toolCall: IToolCall): string | null {
   }
 
   // Generic fallback for unknown/MCP kinds with raw_input.
-  if (raw_input != null && typeof raw_input === 'object' && !Array.isArray(raw_input)) {
+  if (
+    raw_input != null &&
+    typeof raw_input === 'object' &&
+    !Array.isArray(raw_input)
+  ) {
     const obj = raw_input as Record<string, unknown>;
 
     // Extract __tool_use_purpose — agent's plain-English intent for the tool call.
     const purpose =
-      typeof obj.__tool_use_purpose === 'string' ? obj.__tool_use_purpose : null;
+      typeof obj.__tool_use_purpose === 'string'
+        ? obj.__tool_use_purpose
+        : null;
 
     // Filter remaining __-prefixed internal keys for the params display.
-    const paramEntries = Object.entries(obj).filter(([k]) => !k.startsWith('__'));
+    const paramEntries = Object.entries(obj).filter(
+      ([k]) => !k.startsWith('__')
+    );
     const params =
       paramEntries.length > 0
         ? formatToolInput(Object.fromEntries(paramEntries))

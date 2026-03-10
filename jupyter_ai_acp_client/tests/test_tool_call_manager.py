@@ -17,12 +17,15 @@ def make_tool_call_start(
     title: str = "Reading file.py",
     kind: str = "read",
     locations=None,
+    raw_input=None,
 ):
     update = MagicMock()
     update.tool_call_id = tool_call_id
     update.title = title
     update.kind = kind
     update.locations = locations
+    update.raw_input = raw_input
+    update.content = None
     return update
 
 
@@ -31,6 +34,7 @@ def make_tool_call_progress(
     title: str | None = None,
     kind: str | None = None,
     status: str | None = "completed",
+    raw_input=None,
     raw_output=None,
     locations=None,
 ):
@@ -39,8 +43,10 @@ def make_tool_call_progress(
     update.title = title
     update.kind = kind
     update.status = status
+    update.raw_input = raw_input
     update.raw_output = raw_output
     update.locations = locations
+    update.content = None
     return update
 
 
@@ -239,6 +245,32 @@ class TestHandleStart:
         tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
         assert tc.kind is None
 
+    def test_raw_input_passed_through(self):
+        mgr = ToolCallManager()
+        persona = make_persona()
+        mgr.reset(SESSION_ID)
+
+        update = make_tool_call_start("tc-1", "Running command", "execute", raw_input={"command": "ls -la"})
+        mgr.handle_start(SESSION_ID, update, persona)
+
+        tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
+        assert tc.raw_input == {"command": "ls -la"}
+
+    def test_non_serializable_raw_input_is_stringified(self):
+        mgr = ToolCallManager()
+        persona = make_persona()
+        mgr.reset(SESSION_ID)
+
+        class CustomObj:
+            def __str__(self):
+                return "custom-input"
+
+        update = make_tool_call_start("tc-1", "Running command", "execute", raw_input=CustomObj())
+        mgr.handle_start(SESSION_ID, update, persona)
+
+        tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
+        assert tc.raw_input == "custom-input"
+
     def test_does_not_bleed_into_another_session(self):
         """Two concurrent sessions must be fully isolated."""
         mgr = ToolCallManager()
@@ -354,6 +386,34 @@ class TestHandleProgress:
         # receives status=None → does not overwrite existing status
         tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
         assert tc.status == "in_progress"  # unchanged from handle_start
+
+    def test_raw_input_passed_through(self):
+        mgr = ToolCallManager()
+        persona = make_persona()
+        mgr.reset(SESSION_ID)
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
+
+        update = make_tool_call_progress("tc-1", status="completed", raw_input={"command": "ls"})
+        mgr.handle_progress(SESSION_ID, update, persona)
+
+        tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
+        assert tc.raw_input == {"command": "ls"}
+
+    def test_non_serializable_raw_input_is_stringified(self):
+        mgr = ToolCallManager()
+        persona = make_persona()
+        mgr.reset(SESSION_ID)
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
+
+        class CustomObj:
+            def __str__(self):
+                return "custom-input"
+
+        update = make_tool_call_progress("tc-1", raw_input=CustomObj())
+        mgr.handle_progress(SESSION_ID, update, persona)
+
+        tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
+        assert tc.raw_input == "custom-input"
 
 
 class TestFullFlow:

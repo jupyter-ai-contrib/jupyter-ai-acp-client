@@ -13,6 +13,13 @@ from pydantic import BaseModel
 from acp.schema import PermissionOption, ContentToolCallContent, FileEditToolCallContent, TerminalToolCallContent
 
 
+def ensure_serializable(value: Optional[Any]) -> Optional[Any]:
+    """Convert non-JSON-serializable values to strings for Yjs transport."""
+    if value is not None and not isinstance(value, (str, int, float, bool, list, dict)):
+        return str(value)
+    return value
+
+
 @dataclass
 class ToolCallDiff:
     """A single file diff from an ACP tool call."""
