@@ -70,18 +70,19 @@ class ToolCallManager:
         """
         self._sessions.pop(session_id, None)
 
-    def get_message_id(self, session_id: str) -> Optional[str]:
-        """
-        Return the current message ID for a session, or None if no message
-        has been created yet.
-        """
-        session = self._sessions.get(session_id)
-        return session.current_message_id if session else None
-
     def get_all_message_ids(self, session_id: str) -> list[str]:
         """Return all message IDs created this turn, in creation order."""
         session = self._sessions.get(session_id)
         return list(session.all_message_ids) if session else []
+
+    def get_tool_call(
+        self, session_id: str, tool_call_id: str
+    ) -> Optional[ToolCallState]:
+        """Return the ToolCallState for a tool call, or None if not found."""
+        session = self._sessions.get(session_id)
+        if session is None:
+            return None
+        return session.tool_calls.get(tool_call_id)
 
     def _create_message(self, session_id: str, persona: BasePersona) -> str:
         """Create a new Yjs message and return its ID.
@@ -98,8 +99,6 @@ class ToolCallManager:
         session.current_message_id = message_id
         session.all_message_ids.append(message_id)
         persona.log.info(f"Created message {message_id} for session {session_id}")
-
-        # Update awareness to point to the message
         persona.awareness.set_local_state_field("isWriting", message_id)
 
         return message_id
@@ -137,9 +136,10 @@ class ToolCallManager:
             return
 
         msg = persona.ychat.get_message(message_id)
-        if msg:
-            msg.metadata = {"tool_calls": [tc.model_dump(exclude_none=True)]}
-            persona.ychat.update_message(msg, trigger_actions=[])
+        if not msg:
+            return
+        msg.metadata = {"tool_calls": [tc.model_dump(exclude_none=True)]}
+        persona.ychat.update_message(msg, trigger_actions=[])
 
     def handle_start(
         self, session_id: str, update: ToolCallStart, persona: BasePersona
@@ -149,7 +149,7 @@ class ToolCallManager:
         Always creates a new Yjs message for the tool call.
         """
         session = self._ensure_session(session_id)
-        kind_str = update.kind if update.kind else None
+        kind_str = update.kind or None
         locations_paths = (
             [loc.path for loc in update.locations] if update.locations else None
         )
@@ -172,7 +172,6 @@ class ToolCallManager:
             raw_input=raw_input,
         )
 
-        # Create a new message for this tool call
         message_id = self._create_message(session_id, persona)
         session.current_message_type = "tool_call"
         session.tool_call_message_ids[update.tool_call_id] = message_id
@@ -193,8 +192,8 @@ class ToolCallManager:
         raw_input = ensure_serializable(update.raw_input)
         raw_output = ensure_serializable(update.raw_output)
 
-        kind_str = update.kind if update.kind else None
-        status_str = update.status if update.status else None
+        kind_str = update.kind or None
+        status_str = update.status or None
         locations_paths = (
             [loc.path for loc in update.locations] if update.locations else None
         )

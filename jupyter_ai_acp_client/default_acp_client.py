@@ -460,8 +460,7 @@ class JaiAcpClient(Client):
 
             # Set the permission options + pending status on the tool call state,
             # then flush to Yjs so the frontend renders the buttons.
-            session_state = self._tool_call_manager._ensure_session(session_id)
-            tc = session_state.tool_calls.get(tool_call.tool_call_id)
+            tc = self._tool_call_manager.get_tool_call(session_id, tool_call.tool_call_id)
             if tc is None:
                 persona.log.warning(
                     f"request_permission: tool_call_id={tool_call.tool_call_id} not found in session {session_id}"

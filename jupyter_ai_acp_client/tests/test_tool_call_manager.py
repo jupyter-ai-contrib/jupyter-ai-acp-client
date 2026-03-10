@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from jupyter_ai_acp_client.tool_call_manager import SessionState, ToolCallManager
 
@@ -108,33 +108,39 @@ class TestReset:
         assert session.all_message_ids == []
 
 
-class TestGetMessageId:
+class TestCleanup:
+    def test_removes_session(self):
+        mgr = ToolCallManager()
+        persona = make_persona(["msg-1"])
+        mgr.handle_start(SESSION_ID, make_tool_call_start(), persona)
+        mgr.cleanup(SESSION_ID)
+        assert SESSION_ID not in mgr._sessions
+        assert mgr.get_all_message_ids(SESSION_ID) == []
+
+    def test_noop_for_unknown_session(self):
+        mgr = ToolCallManager()
+        mgr.cleanup("nonexistent")  # should not raise
+
+
+class TestGetToolCall:
+    def test_returns_tool_call_state(self):
+        mgr = ToolCallManager()
+        persona = make_persona(["msg-1"])
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1", "Reading"), persona)
+
+        tc = mgr.get_tool_call(SESSION_ID, "tc-1")
+        assert tc is not None
+        assert tc.tool_call_id == "tc-1"
+        assert tc.title == "Reading"
+
     def test_returns_none_for_unknown_session(self):
         mgr = ToolCallManager()
-        assert mgr.get_message_id(SESSION_ID) is None
+        assert mgr.get_tool_call("nonexistent", "tc-1") is None
 
-    def test_returns_none_before_message_created(self):
+    def test_returns_none_for_unknown_tool_call(self):
         mgr = ToolCallManager()
         mgr.reset(SESSION_ID)
-        assert mgr.get_message_id(SESSION_ID) is None
-
-    def test_returns_message_id_after_tool_call_start(self):
-        mgr = ToolCallManager()
-        persona = make_persona("msg-42")
-        mgr.handle_start(SESSION_ID, make_tool_call_start(), persona)
-        assert mgr.get_message_id(SESSION_ID) == "msg-42"
-
-    def test_returns_latest_message_id(self):
-        """get_message_id returns the most recently created message."""
-        mgr = ToolCallManager()
-        persona = make_persona(["msg-1", "msg-2"])
-        mgr.reset(SESSION_ID)
-
-        mgr.get_or_create_text_message(SESSION_ID, persona)
-        assert mgr.get_message_id(SESSION_ID) == "msg-1"
-
-        mgr.handle_start(SESSION_ID, make_tool_call_start(), persona)
-        assert mgr.get_message_id(SESSION_ID) == "msg-2"
+        assert mgr.get_tool_call(SESSION_ID, "nonexistent") is None
 
 
 class TestGetAllMessageIds:
@@ -344,8 +350,8 @@ class TestHandleStart:
         assert "tc-b" not in mgr._sessions[session_a].tool_calls
         assert "tc-b" in mgr._sessions[session_b].tool_calls
         assert "tc-a" not in mgr._sessions[session_b].tool_calls
-        assert mgr.get_message_id(session_a) == "msg-a"
-        assert mgr.get_message_id(session_b) == "msg-b"
+        assert mgr.get_all_message_ids(session_a) == ["msg-a"]
+        assert mgr.get_all_message_ids(session_b) == ["msg-b"]
 
 
 class TestHandleProgress:
@@ -648,7 +654,6 @@ class TestFullFlow:
 
         mgr.reset(SESSION_ID)
 
-        assert mgr.get_message_id(SESSION_ID) is None
         assert mgr.get_all_message_ids(SESSION_ID) == []
         assert mgr._sessions[SESSION_ID].tool_call_message_ids == {}
 
