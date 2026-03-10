@@ -2,6 +2,30 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## 0.0.7
+
+([Full Changelog](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/compare/v0.0.6...3fd6353740aac4e32ff0c67a81a254333d9504e2))
+
+### Enhancements made
+
+- Show tool input before approving a tool call [#45](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/45) ([@andrii-i](https://github.com/andrii-i), [@dlqqq](https://github.com/dlqqq))
+- Store and load existing ACP sessions in chats [#41](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/41) ([@dlqqq](https://github.com/dlqqq), [@andrii-i](https://github.com/andrii-i), [@knaresh](https://github.com/knaresh))
+- Stop agent streaming in chat [#36](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/36) ([@bhavana-nair](https://github.com/bhavana-nair), [@andrii-i](https://github.com/andrii-i), [@dlqqq](https://github.com/dlqqq))
+- Provide accurate Kiro login instructions in headless environments [#35](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/35) ([@joshuatowner](https://github.com/joshuatowner), [@dlqqq](https://github.com/dlqqq))
+- fix: harden terminal manager against command parsing, security, and lifecycle issues [#25](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/25) ([@erkin98](https://github.com/erkin98), [@andrii-i](https://github.com/andrii-i), [@dlqqq](https://github.com/dlqqq))
+- Forward file and notebook attachments to ACP agents [#24](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/24) ([@erkin98](https://github.com/erkin98), [@andrii-i](https://github.com/andrii-i), [@dlqqq](https://github.com/dlqqq))
+
+### Contributors to this release
+
+The following people contributed discussions, new ideas, code and documentation contributions, and review.
+See [our definition of contributors](https://github-activity.readthedocs.io/en/latest/use/#how-does-this-tool-define-contributions-in-the-reports).
+
+([GitHub contributors page for this release](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/graphs/contributors?from=2026-03-03&to=2026-03-10&type=c))
+
+@andrii-i ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Aandrii-i+updated%3A2026-03-03..2026-03-10&type=Issues)) | @bhavana-nair ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Abhavana-nair+updated%3A2026-03-03..2026-03-10&type=Issues)) | @dlqqq ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Adlqqq+updated%3A2026-03-03..2026-03-10&type=Issues)) | @erkin98 ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Aerkin98+updated%3A2026-03-03..2026-03-10&type=Issues)) | @joshuatowner ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Ajoshuatowner+updated%3A2026-03-03..2026-03-10&type=Issues)) | @knaresh ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Aknaresh+updated%3A2026-03-03..2026-03-10&type=Issues))
+
+<!-- <END NEW CHANGELOG ENTRY> -->
+
 ## 0.0.6
 
 ([Full Changelog](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/compare/v0.0.5...86e6bad5b7df686621095936b66f93b0e6bfbcdb))
@@ -18,8 +42,6 @@ See [our definition of contributors](https://github-activity.readthedocs.io/en/l
 ([GitHub contributors page for this release](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/graphs/contributors?from=2026-03-03&to=2026-03-03&type=c))
 
 @bhavana-nair ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Abhavana-nair+updated%3A2026-03-03..2026-03-03&type=Issues)) | @dlqqq ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Adlqqq+updated%3A2026-03-03..2026-03-03&type=Issues)) | @joshuatowner ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Ajoshuatowner+updated%3A2026-03-03..2026-03-03&type=Issues))
-
-<!-- <END NEW CHANGELOG ENTRY> -->
 
 ## 0.0.5
 
