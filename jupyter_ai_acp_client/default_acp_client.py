@@ -308,10 +308,9 @@ class JaiAcpClient(Client):
                 if self._cancel_requested.get(session_id, False):
                     return response
 
-                # Trigger find_mentions on the final message
-                message_id = self._tool_call_manager.get_message_id(session_id)
-                if message_id:
-                    msg = persona.ychat.get_message(message_id)
+                # Trigger find_mentions on all messages created this turn
+                for mid in self._tool_call_manager.get_all_message_ids(session_id):
+                    msg = persona.ychat.get_message(mid)
                     if msg:
                         persona.ychat.update_message(
                             msg,
@@ -347,9 +346,8 @@ class JaiAcpClient(Client):
         persona = self._personas_by_session.get(session_id)
         if persona is None:
             return
-        message_id = self._tool_call_manager.get_or_create_message(session_id, persona)
-        serialized_tool_calls = self._tool_call_manager.serialize(session_id)
-        persona.log.info(f"agent_message_chunk: {len(text)} chars, tool_calls={len(serialized_tool_calls)}")
+        message_id = self._tool_call_manager.get_or_create_text_message(session_id, persona)
+        persona.log.info(f"agent_message_chunk: {len(text)} chars")
 
         msg = Message(
             id=message_id,
@@ -357,7 +355,6 @@ class JaiAcpClient(Client):
             time=time(),
             sender=persona.id,
             raw_time=False,
-            metadata={"tool_calls": serialized_tool_calls},
         )
         persona.ychat.update_message(msg, append=True, trigger_actions=[])
 
@@ -486,22 +483,21 @@ class JaiAcpClient(Client):
             if diffs:
                 tc.diffs = diffs
 
-            self._tool_call_manager.get_or_create_message(session_id, persona)
-            self._tool_call_manager._flush_to_message(session_id, persona)  # Yjs sync and re-renders with the buttons
+            self._tool_call_manager.flush_tool_call(session_id, tool_call.tool_call_id, persona)
 
             # Suspend until the user clicks a permission button
             selected_option_id = await future
 
             if selected_option_id is None:
                 tc.permission_status = "resolved"
-                self._tool_call_manager._flush_to_message(session_id, persona)
+                self._tool_call_manager.flush_tool_call(session_id, tool_call.tool_call_id, persona)
                 return RequestPermissionResponse(
                     outcome=DeniedOutcome(outcome="cancelled")
                 )
-            
+
             tc.permission_status = "resolved"
             tc.selected_option_id = selected_option_id
-            self._tool_call_manager._flush_to_message(session_id, persona)
+            self._tool_call_manager.flush_tool_call(session_id, tool_call.tool_call_id, persona)
 
             return RequestPermissionResponse(
                 outcome=AllowedOutcome(option_id=selected_option_id, outcome='selected')
