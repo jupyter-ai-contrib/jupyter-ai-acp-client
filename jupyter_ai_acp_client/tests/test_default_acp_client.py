@@ -4,8 +4,17 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from acp.schema import ResourceContentBlock, TextContentBlock
+from jupyterlab_chat.models import (
+    AttachmentSelection,
+    FileAttachment,
+    NotebookAttachment,
+    NotebookAttachmentCell,
+)
 
-from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
+from jupyter_ai_acp_client.default_acp_client import (
+    JaiAcpClient,
+    _build_attachment_description,
+)
 
 
 SESSION_ID = "sess-1"
@@ -54,13 +63,14 @@ class TestPromptAndReplyContentBlocks:
         assert blocks[0].text == "hello"
 
     async def test_file_attachment_produces_resource_block(self):
-        """A file attachment produces a ResourceContentBlock with file:// URI."""
+        """A FileAttachment produces a ResourceContentBlock with correct fields."""
         client, conn, _ = _make_client_and_persona()
 
+        att = FileAttachment(value="src/main.py", mimetype="text/x-python")
         await client.prompt_and_reply(
             session_id=SESSION_ID,
-            prompt="check this",
-            attachments=[{"value": "src/main.py", "type": "file", "mimetype": "text/x-python"}],
+            prompt="review",
+            attachments=[att],
             root_dir="/home/user/notebooks",
         )
 
@@ -72,50 +82,53 @@ class TestPromptAndReplyContentBlocks:
         assert blocks[1].mime_type == "text/x-python"
 
     async def test_notebook_attachment_default_mime_type(self):
-        """Notebook attachments get application/x-ipynb+json when mimetype is None."""
+        """NotebookAttachment gets default application/x-ipynb+json MIME type."""
         client, conn, _ = _make_client_and_persona()
 
+        att = NotebookAttachment(value="analysis.ipynb")
         await client.prompt_and_reply(
             session_id=SESSION_ID,
-            prompt="review",
-            attachments=[{"value": "analysis.ipynb", "type": "notebook"}],
-            root_dir="/home/user",
+            prompt="check",
+            attachments=[att],
+            root_dir="/tmp",
         )
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
         assert blocks[1].mime_type == "application/x-ipynb+json"
 
-    async def test_notebook_explicit_mimetype_preserved(self):
-        """When notebook has explicit mimetype, it is preserved."""
+    async def test_file_explicit_mimetype_preserved(self):
+        """Explicit mimetype on FileAttachment is preserved."""
         client, conn, _ = _make_client_and_persona()
 
+        att = FileAttachment(value="data.csv", mimetype="text/csv")
         await client.prompt_and_reply(
             session_id=SESSION_ID,
-            prompt="review",
-            attachments=[{"value": "nb.ipynb", "type": "notebook", "mimetype": "custom/type"}],
-            root_dir="/home/user",
+            prompt="parse",
+            attachments=[att],
+            root_dir="/tmp",
         )
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
-        assert blocks[1].mime_type == "custom/type"
+        assert blocks[1].mime_type == "text/csv"
 
     async def test_multiple_attachments_in_order(self):
-        """Multiple attachments produce ResourceContentBlocks in order after text."""
+        """Multiple attachments produce resource blocks in order after text."""
         client, conn, _ = _make_client_and_persona()
 
+        atts = [
+            FileAttachment(value="a.py"),
+            NotebookAttachment(value="b.ipynb"),
+        ]
         await client.prompt_and_reply(
             session_id=SESSION_ID,
-            prompt="review all",
-            attachments=[
-                {"value": "a.py", "type": "file"},
-                {"value": "b.ipynb", "type": "notebook"},
-            ],
+            prompt="review",
+            attachments=atts,
             root_dir="/tmp",
         )
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
         assert len(blocks) == 3
-        assert blocks[0].text == "review all"
+        assert isinstance(blocks[0], TextContentBlock)
         assert blocks[1].name == "a.py"
         assert blocks[2].name == "b.ipynb"
         assert blocks[2].mime_type == "application/x-ipynb+json"
@@ -150,23 +163,25 @@ class TestPromptAndReplyContentBlocks:
         """When attachment value is empty, name falls back to '<attachment>'."""
         client, conn, _ = _make_client_and_persona()
 
+        att = FileAttachment(value="")
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check",
-            attachments=[{"value": "", "type": "file"}],
+            attachments=[att],
         )
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
         assert blocks[1].name == "<attachment>"
 
     async def test_mimetype_none_for_file(self):
-        """File attachment with no mimetype gets None mime_type."""
+        """File without explicit mimetype gets None mime_type."""
         client, conn, _ = _make_client_and_persona()
 
+        att = FileAttachment(value="unknown.xyz")
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check",
-            attachments=[{"value": "data.csv", "type": "file"}],
+            attachments=[att],
             root_dir="/tmp",
         )
 
@@ -174,43 +189,191 @@ class TestPromptAndReplyContentBlocks:
         assert blocks[1].mime_type is None
 
     async def test_no_root_dir_uses_relative_path(self):
-        """When root_dir is None, URI is the raw relative path."""
+        """Without root_dir, attachment value is used as-is for URI."""
         client, conn, _ = _make_client_and_persona()
 
+        att = FileAttachment(value="src/main.py")
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check",
-            attachments=[{"value": "subdir/file.py", "type": "file"}],
-            root_dir=None,
+            attachments=[att],
         )
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
-        assert blocks[1].uri == "subdir/file.py"
+        assert blocks[1].uri == "src/main.py"
 
     async def test_file_uri_format(self):
-        """file:// URI has correct RFC 8089 format with three slashes."""
+        """With root_dir, attachment gets a file:// URI."""
         client, conn, _ = _make_client_and_persona()
 
+        att = FileAttachment(value="main.py")
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check",
-            attachments=[{"value": "test.py", "type": "file"}],
-            root_dir="/home/user",
+            attachments=[att],
+            root_dir="/tmp",
         )
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
-        assert blocks[1].uri.startswith("file:///")
+        assert blocks[1].uri == Path("/tmp/main.py").as_uri()
 
     async def test_path_traversal_blocked(self):
-        """Attachment path escaping root_dir falls back to raw relative path."""
+        """Path traversal attempt falls back to raw value."""
         client, conn, _ = _make_client_and_persona()
 
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check",
-            attachments=[{"value": "../../../etc/passwd", "type": "file"}],
+            attachments=[FileAttachment(value="../../../etc/passwd")],
             root_dir="/home/user/notebooks",
         )
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
         assert blocks[1].uri == "../../../etc/passwd"
+
+    async def test_file_selection_produces_description(self):
+        """File with selection gets human-readable line range in description."""
+        client, conn, _ = _make_client_and_persona()
+
+        att = FileAttachment(
+            value="main.py",
+            selection=AttachmentSelection(start=(5, 0), end=(10, 0), content="..."),
+        )
+        await client.prompt_and_reply(
+            session_id=SESSION_ID,
+            prompt="check",
+            attachments=[att],
+            root_dir="/tmp",
+        )
+
+        blocks = conn.prompt.call_args.kwargs["prompt"]
+        assert blocks[1].description == "Lines 6-11"
+
+    async def test_notebook_cells_produce_description(self):
+        """Notebook with cells gets cell IDs in description."""
+        client, conn, _ = _make_client_and_persona()
+
+        att = NotebookAttachment(
+            value="nb.ipynb",
+            cells=[
+                NotebookAttachmentCell(id="abc", input_type="code"),
+                NotebookAttachmentCell(id="def", input_type="markdown"),
+            ],
+        )
+        await client.prompt_and_reply(
+            session_id=SESSION_ID,
+            prompt="check",
+            attachments=[att],
+            root_dir="/tmp",
+        )
+
+        blocks = conn.prompt.call_args.kwargs["prompt"]
+        assert blocks[1].description == 'Selected cells: Cell "abc", Cell "def"'
+
+    async def test_no_selection_no_description(self):
+        """File without selection gets None description."""
+        client, conn, _ = _make_client_and_persona()
+
+        await client.prompt_and_reply(
+            session_id=SESSION_ID,
+            prompt="check",
+            attachments=[FileAttachment(value="plain.py")],
+            root_dir="/tmp",
+        )
+
+        blocks = conn.prompt.call_args.kwargs["prompt"]
+        assert blocks[1].description is None
+
+
+class TestAttachmentDescription:
+    """Tests for _build_attachment_description helper."""
+
+    def test_file_no_selection(self):
+        att = FileAttachment(value="main.py")
+        assert _build_attachment_description(att) is None
+
+    def test_file_single_line_selection(self):
+        att = FileAttachment(
+            value="main.py",
+            selection=AttachmentSelection(start=(6, 0), end=(6, 15), content="x = 1"),
+        )
+        assert _build_attachment_description(att) == "Line 7"
+
+    def test_file_multi_line_selection(self):
+        att = FileAttachment(
+            value="main.py",
+            selection=AttachmentSelection(start=(5, 0), end=(10, 0), content="..."),
+        )
+        assert _build_attachment_description(att) == "Lines 6-11"
+
+    def test_notebook_no_cells(self):
+        att = NotebookAttachment(value="nb.ipynb")
+        assert _build_attachment_description(att) is None
+
+    def test_notebook_cells_without_selection(self):
+        att = NotebookAttachment(
+            value="nb.ipynb",
+            cells=[
+                NotebookAttachmentCell(id="abc", input_type="code"),
+                NotebookAttachmentCell(id="def", input_type="markdown"),
+            ],
+        )
+        assert _build_attachment_description(att) == 'Selected cells: Cell "abc", Cell "def"'
+
+    def test_notebook_cell_with_single_line_selection(self):
+        att = NotebookAttachment(
+            value="nb.ipynb",
+            cells=[
+                NotebookAttachmentCell(
+                    id="abc",
+                    input_type="code",
+                    selection=AttachmentSelection(start=(4, 0), end=(4, 10), content="x"),
+                ),
+            ],
+        )
+        assert _build_attachment_description(att) == 'Selected cells: Cell "abc" (line 5)'
+
+    def test_notebook_cell_with_multi_line_selection(self):
+        att = NotebookAttachment(
+            value="nb.ipynb",
+            cells=[
+                NotebookAttachmentCell(
+                    id="abc",
+                    input_type="code",
+                    selection=AttachmentSelection(start=(0, 0), end=(2, 5), content="..."),
+                ),
+            ],
+        )
+        assert _build_attachment_description(att) == 'Selected cells: Cell "abc" (lines 1-3)'
+
+    def test_notebook_mixed_cells(self):
+        """Some cells with selection, some without."""
+        att = NotebookAttachment(
+            value="nb.ipynb",
+            cells=[
+                NotebookAttachmentCell(
+                    id="abc",
+                    input_type="code",
+                    selection=AttachmentSelection(start=(0, 0), end=(2, 0), content="..."),
+                ),
+                NotebookAttachmentCell(id="def", input_type="markdown"),
+                NotebookAttachmentCell(
+                    id="ghi",
+                    input_type="code",
+                    selection=AttachmentSelection(start=(4, 0), end=(7, 0), content="..."),
+                ),
+            ],
+        )
+        assert _build_attachment_description(att) == 'Selected cells: Cell "abc" (lines 1-3), Cell "def", Cell "ghi" (lines 5-8)'
+
+    def test_notebook_empty_cells_list(self):
+        att = NotebookAttachment(value="nb.ipynb", cells=[])
+        assert _build_attachment_description(att) is None
+
+    def test_zero_indexed_to_one_indexed(self):
+        """Verifies 0-indexed CodeMirror positions become 1-indexed."""
+        att = FileAttachment(
+            value="main.py",
+            selection=AttachmentSelection(start=(0, 0), end=(0, 5), content="x"),
+        )
+        assert _build_attachment_description(att) == "Line 1"

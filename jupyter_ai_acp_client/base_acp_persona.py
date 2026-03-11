@@ -2,15 +2,79 @@ import asyncio
 import sys
 from asyncio import Task
 from asyncio.subprocess import Process
+from dataclasses import fields as dataclass_fields
 from typing import Awaitable, ClassVar
 
 from acp import NewSessionResponse, LoadSessionResponse
 from acp.schema import AvailableCommand
 from jupyter_ai_persona_manager import BasePersona
-from jupyterlab_chat.models import Message
+from jupyterlab_chat.models import (
+    AttachmentSelection,
+    FileAttachment,
+    Message,
+    NotebookAttachment,
+    NotebookAttachmentCell,
+)
 
 from .default_acp_client import JaiAcpClient
 
+
+def _reconstruct_selection(raw: dict) -> AttachmentSelection | None:
+    """Reconstruct an AttachmentSelection, converting CRDT lists to tuples."""
+    start = raw.get("start")
+    end = raw.get("end")
+    content = raw.get("content")
+    if start is None or end is None or content is None:
+        return None
+    return AttachmentSelection(
+        start=tuple(start) if isinstance(start, list) else start,
+        end=tuple(end) if isinstance(end, list) else end,
+        content=content,
+    )
+
+
+def _deserialize_attachment(raw: dict) -> FileAttachment | NotebookAttachment | None:
+    """Convert a raw dict from YChat into a typed attachment dataclass.
+
+    YChat stores attachments as plain dicts (via ``dataclasses.asdict()`` →
+    pycrdt Map → ``to_py()``).  This rebuilds the original dataclass,
+    filtering unknown keys for forward-compatibility.
+    """
+    att_type = raw.get("type")
+    if att_type == "file":
+        cls = FileAttachment
+    elif att_type == "notebook":
+        cls = NotebookAttachment
+    else:
+        return None
+
+    accepted_keys = {f.name for f in dataclass_fields(cls)}
+    filtered = {k: v for k, v in raw.items() if k in accepted_keys}
+
+    # Reconstruct nested AttachmentSelection
+    if isinstance(filtered.get("selection"), dict):
+        filtered["selection"] = _reconstruct_selection(filtered["selection"])
+
+    # Reconstruct nested NotebookAttachmentCell list
+    if isinstance(filtered.get("cells"), list):
+        cell_keys = {f.name for f in dataclass_fields(NotebookAttachmentCell)}
+        reconstructed = []
+        for raw_cell in filtered["cells"]:
+            if not isinstance(raw_cell, dict):
+                continue
+            cell_data = {k: v for k, v in raw_cell.items() if k in cell_keys}
+            if isinstance(cell_data.get("selection"), dict):
+                cell_data["selection"] = _reconstruct_selection(cell_data["selection"])
+            try:
+                reconstructed.append(NotebookAttachmentCell(**cell_data))
+            except TypeError:
+                continue
+        filtered["cells"] = reconstructed or None
+
+    try:
+        return cls(**filtered)
+    except TypeError:
+        return None
 
 
 class BaseAcpPersona(BasePersona):
@@ -27,7 +91,7 @@ class BaseAcpPersona(BasePersona):
     The task that yields the agent subprocess once complete. This is a class
     attribute because multiple instances of the same ACP persona may share an
     ACP agent subprocess.
-    
+
     Developers should always use `self.get_agent_subprocess()`.
     """
 
@@ -87,7 +151,7 @@ class BaseAcpPersona(BasePersona):
 
         The `BaseAcpPersona` does not implement this method by default.
         Subclasses are expected to provide a custom implementation of this
-        method if required. 
+        method if required.
         """
         return None
 
@@ -109,7 +173,7 @@ class BaseAcpPersona(BasePersona):
         client = JaiAcpClient(agent_subprocess=agent_subprocess, event_loop=self.event_loop)
         self.log.info("Initialized ACP client for '%s'.", self.__class__.__name__)
         return client
-    
+
     def _get_existing_sessions(self) -> dict[str, str]:
         """
         Returns a dictionary of existing ACP session IDs within this instance's
@@ -120,7 +184,7 @@ class BaseAcpPersona(BasePersona):
         """
         sessions = self.ychat.get_metadata().get("acp_session_ids", {})
         return sessions
-    
+
     def _record_new_session(self, new_session_id: str) -> None:
         """
         Adds a new ACP session ID into this chat's metadata. Always use this
@@ -167,19 +231,19 @@ class BaseAcpPersona(BasePersona):
         Safely returns the ACP agent subprocess for this persona.
         """
         return await self.__class__._subprocess_future
-    
+
     async def get_client(self) -> JaiAcpClient:
         """
         Safely returns the ACP client for this persona.
         """
         return await self.__class__._client_future
-    
+
     async def get_session_response(self) -> NewSessionResponse | LoadSessionResponse:
         """
         Safely returns the ACP session response for this chat.
         """
         return await self._client_session_future
-    
+
     async def get_session_id(self) -> str:
         """
         Safely returns the ACP session ID assigned to this chat.
@@ -190,14 +254,14 @@ class BaseAcpPersona(BasePersona):
         session_ids =  self._get_existing_sessions()
         assert self.id in session_ids
         return session_ids[self.id]
-    
+
     async def is_authed(self) -> bool:
         """
         Returns whether the client is authenticated to use this agent. Returns
         `True` by default. Subclasses should override this if possible.
         """
         return True
-    
+
     async def handle_no_auth(self, message: Message) -> None:
         """
         Method called when the persona receives a message while the user is not
@@ -206,7 +270,7 @@ class BaseAcpPersona(BasePersona):
         customize the help message sent.
         """
         self.send_message("You are not authenticated. Please log in.")
-    
+
     async def process_message(self, message: Message) -> None:
         """
         A default implementation for the `BasePersona.process_message()` method
@@ -224,17 +288,23 @@ class BaseAcpPersona(BasePersona):
 
         prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
 
-        # Resolve attachments from YChat by ID
-        attachments: list[dict] | None = None
+        # Resolve attachments from YChat by ID and deserialize to typed dataclasses
+        attachments: list[FileAttachment | NotebookAttachment] | None = None
         if message.attachments:
             all_attachments = self.ychat.get_attachments()
-            resolved = []
+            resolved: list[FileAttachment | NotebookAttachment] = []
             for aid in message.attachments:
                 raw = all_attachments.get(aid)
                 if raw is None:
                     self.log.warning("Attachment %s not found in YChat", aid)
                     continue
-                resolved.append(raw)
+                att = _deserialize_attachment(raw)
+                if att is None:
+                    self.log.warning(
+                        "Cannot deserialize attachment %s (type=%s)", aid, raw.get("type")
+                    )
+                    continue
+                resolved.append(att)
             attachments = resolved or None
 
         await client.prompt_and_reply(
@@ -243,7 +313,7 @@ class BaseAcpPersona(BasePersona):
             attachments=attachments,
             root_dir=self.parent.root_dir,
         )
-    
+
     @property
     def acp_slash_commands(self) -> list[AvailableCommand]:
         """
@@ -255,7 +325,7 @@ class BaseAcpPersona(BasePersona):
         `AvailableCommandsUpdate` payload from the ACP agent.
         """
         return self._acp_slash_commands
-    
+
     @acp_slash_commands.setter
     def acp_slash_commands(self, commands: list[AvailableCommand]):
         self.log.info(
