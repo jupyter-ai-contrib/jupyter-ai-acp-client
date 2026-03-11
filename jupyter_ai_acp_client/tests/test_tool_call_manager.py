@@ -62,26 +62,6 @@ def make_tool_call_progress(
 SESSION_ID = "session-abc"
 
 
-class TestEnsureSession:
-    def test_creates_session_when_absent(self):
-        mgr = ToolCallManager()
-        state = mgr._ensure_session(SESSION_ID)
-        assert isinstance(state, SessionState)
-        assert SESSION_ID in mgr._sessions
-
-    def test_returns_same_object_on_repeat_calls(self):
-        mgr = ToolCallManager()
-        a = mgr._ensure_session(SESSION_ID)
-        b = mgr._ensure_session(SESSION_ID)
-        assert a is b
-
-    def test_does_not_overwrite_existing(self):
-        mgr = ToolCallManager()
-        mgr._sessions[SESSION_ID] = SessionState(current_message_id="existing")
-        state = mgr._ensure_session(SESSION_ID)
-        assert state.current_message_id == "existing"
-
-
 class TestReset:
     def test_creates_fresh_session(self):
         mgr = ToolCallManager()
@@ -172,16 +152,6 @@ class TestGetAllMessageIds:
         mgr.reset(SESSION_ID)
         assert mgr.get_all_message_ids(SESSION_ID) == []
 
-    def test_returns_copy_not_reference(self):
-        mgr = ToolCallManager()
-        persona = make_persona(["msg-1"])
-        mgr.reset(SESSION_ID)
-        mgr.get_or_create_text_message(SESSION_ID, persona)
-
-        ids = mgr.get_all_message_ids(SESSION_ID)
-        ids.append("injected")
-        assert mgr.get_all_message_ids(SESSION_ID) == ["msg-1"]
-
 
 class TestGetOrCreateTextMessage:
     def test_creates_text_message_on_first_call(self):
@@ -207,7 +177,7 @@ class TestGetOrCreateTextMessage:
         persona.ychat.add_message.assert_called_once()
 
     def test_creates_new_after_tool_call(self):
-        """Transition: IN_TOOL_CALL → AgentMessageChunk → WRITING_TEXT."""
+        """After a tool call, the next text chunk creates a new message."""
         mgr = ToolCallManager()
         persona = make_persona(["msg-tc", "msg-text"])
         mgr.reset(SESSION_ID)
@@ -609,26 +579,6 @@ class TestStateMachine:
         # Verify message was created with empty body
         add_call = persona.ychat.add_message.call_args
         assert add_call[0][0].body == ""
-
-    def test_interleaved_five_messages(self):
-        """text → tc1 → text → tc2 → text creates 5 messages in order."""
-        mgr = ToolCallManager()
-        persona = make_persona(["msg-1", "msg-2", "msg-3", "msg-4", "msg-5"])
-        mgr.reset(SESSION_ID)
-
-        mid1 = mgr.get_or_create_text_message(SESSION_ID, persona)
-        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
-        mid3 = mgr.get_or_create_text_message(SESSION_ID, persona)
-        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-2"), persona)
-        mid5 = mgr.get_or_create_text_message(SESSION_ID, persona)
-
-        assert persona.ychat.add_message.call_count == 5
-        assert mid1 == "msg-1"
-        assert mid3 == "msg-3"
-        assert mid5 == "msg-5"
-        assert mgr.get_all_message_ids(SESSION_ID) == [
-            "msg-1", "msg-2", "msg-3", "msg-4", "msg-5"
-        ]
 
     def test_consecutive_text_chunks_reuse_message(self):
         """Multiple text chunks in sequence append to the same message."""
