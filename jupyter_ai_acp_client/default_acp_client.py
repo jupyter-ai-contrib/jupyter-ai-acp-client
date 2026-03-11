@@ -53,7 +53,7 @@ from acp.schema import (
     DeniedOutcome
 )
 from jupyter_ai_persona_manager import BasePersona, McpServerStdio
-from jupyterlab_chat.models import Message
+from jupyterlab_chat.models import FileAttachment, Message, NotebookAttachment
 from jupyterlab_chat.utils import find_mentions
 from asyncio.subprocess import Process
 
@@ -63,6 +63,42 @@ from .tool_call_renderer import ensure_serializable, extract_diffs
 from .permission_manager import PermissionManager
 
 import traceback as tb_mod
+
+def _build_attachment_description(
+    att: FileAttachment | NotebookAttachment,
+) -> str | None:
+    """Build a human-readable description from attachment selection/cell info.
+
+    CodeMirror positions are 0-indexed; this function converts to 1-indexed
+    for human display.
+    """
+    if isinstance(att, FileAttachment):
+        if att.selection is None:
+            return None
+        start_line = att.selection.start[0] + 1
+        end_line = att.selection.end[0] + 1
+        if start_line == end_line:
+            return f"Line {start_line}"
+        return f"Lines {start_line}-{end_line}"
+
+    if isinstance(att, NotebookAttachment):
+        if not att.cells:
+            return None
+        parts: list[str] = []
+        for cell in att.cells:
+            if cell.selection is not None:
+                start_line = cell.selection.start[0] + 1
+                end_line = cell.selection.end[0] + 1
+                if start_line == end_line:
+                    parts.append(f'Cell "{cell.id}" (line {start_line})')
+                else:
+                    parts.append(f'Cell "{cell.id}" (lines {start_line}-{end_line})')
+            else:
+                parts.append(f'Cell "{cell.id}"')
+        return f"Selected cells: {', '.join(parts)}"
+
+    return None
+
 
 class JaiAcpClient(Client):
     """
@@ -218,11 +254,12 @@ class JaiAcpClient(Client):
         self._personas_by_session[session_id] = persona
         return response
 
+
     async def prompt_and_reply(
         self,
         session_id: str,
         prompt: str,
-        attachments: list[dict] | None = None,
+        attachments: list[FileAttachment | NotebookAttachment] | None = None,
         root_dir: str | None = None,
     ) -> PromptResponse:
         """
@@ -260,33 +297,28 @@ class JaiAcpClient(Client):
 
             try:
                 # Build content blocks: text prompt + optional attachment resources
-                content_blocks: list[TextContentBlock | ResourceContentBlock] = [
-                    TextContentBlock(text=prompt, type="text"),
-                ]
+                content_blocks = [TextContentBlock(text=prompt, type="text")]
+
                 if attachments:
                     for att in attachments:
-                        att_value = att.get("value", "")
-                        att_type = att.get("type", "file")
+                        att_value = att.value
+                        mime_type = getattr(att, "mimetype", None)
 
-                        # Resolve to absolute file:// URI when root_dir is available
+                        # Resolve file:// URI from root_dir
+                        uri = att_value
                         if root_dir and att_value:
                             abs_path = (Path(root_dir) / att_value).resolve()
                             root_resolved = Path(root_dir).resolve()
                             if not abs_path.is_relative_to(root_resolved):
                                 persona.log.warning(
-                                    "Attachment path %r escapes root_dir %r",
-                                    att_value,
-                                    root_dir,
+                                    "Attachment path %s escapes root_dir %s",
+                                    att_value, root_dir,
                                 )
-                                uri = att_value
                             else:
                                 uri = abs_path.as_uri()
-                        else:
-                            uri = att_value
 
-                        # Determine MIME type: explicit value or notebook default
-                        mime_type = att.get("mimetype")
-                        if mime_type is None and att_type == "notebook":
+                        # Default notebook MIME type
+                        if isinstance(att, NotebookAttachment) and not mime_type:
                             mime_type = "application/x-ipynb+json"
 
                         content_blocks.append(
@@ -295,6 +327,7 @@ class JaiAcpClient(Client):
                                 name=Path(att_value).name if att_value else "<attachment>",
                                 type="resource_link",
                                 mime_type=mime_type,
+                                description=_build_attachment_description(att),
                             )
                         )
 
