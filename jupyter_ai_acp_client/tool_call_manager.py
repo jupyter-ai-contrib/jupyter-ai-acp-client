@@ -146,7 +146,8 @@ class ToolCallManager:
     ) -> None:
         """Handle a ToolCallStart event.
 
-        Always creates a new Yjs message for the tool call.
+        Creates a new Yjs message for the tool call. If this tool_call_id
+        already has a message, updates the existing one instead.
         """
         session = self._ensure_session(session_id)
         kind_str = update.kind or None
@@ -172,10 +173,11 @@ class ToolCallManager:
             raw_input=raw_input,
         )
 
-        message_id = self._create_message(session_id, persona)
-        session.current_message_type = "tool_call"
-        session.tool_call_message_ids[update.tool_call_id] = message_id
+        if update.tool_call_id not in session.tool_call_message_ids:
+            message_id = self._create_message(session_id, persona)
+            session.tool_call_message_ids[update.tool_call_id] = message_id
 
+        session.current_message_type = "tool_call"
         self.flush_tool_call(session_id, update.tool_call_id, persona)
 
     def handle_progress(
@@ -184,8 +186,7 @@ class ToolCallManager:
         """Handle a ToolCallProgress event.
 
         Updates the tool call state and flushes to its dedicated message.
-        If the tool_call_id is unknown (orphaned progress), creates both
-        the state and a message defensively.
+        If the tool_call_id has no prior message, creates one.
         """
         session = self._ensure_session(session_id)
 
