@@ -108,8 +108,8 @@ class ToolCallManager:
     ) -> str:
         """Get the current text message, or create a new one.
 
-        If the current state is WRITING_TEXT, returns the existing message.
-        Otherwise (IDLE or IN_TOOL_CALL), creates a new text message.
+        If currently appending to a text message, returns the existing one.
+        Otherwise, creates a new text message.
         """
         session = self._ensure_session(session_id)
         if session.current_message_type == "text" and session.current_message_id:
@@ -216,7 +216,7 @@ class ToolCallManager:
             diffs=diffs,
         )
 
-        # If this is an orphaned progress (no prior ToolCallStart), create a message
+        # Create a message if this tool_call_id has no prior one
         if update.tool_call_id not in session.tool_call_message_ids:
             message_id = self._create_message(session_id, persona)
             session.current_message_type = "tool_call"

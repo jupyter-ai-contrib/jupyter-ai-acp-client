@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 from jupyter_ai_acp_client.tool_call_manager import SessionState, ToolCallManager
 
 
-def make_persona(message_id_seq=None):
+def make_persona(message_id_seq: list[str] | str | None = None) -> MagicMock:
     """Return a mock persona whose ychat.add_message returns message IDs.
 
     If ``message_id_seq`` is a list, successive calls return successive IDs.
@@ -25,9 +25,9 @@ def make_tool_call_start(
     tool_call_id: str = "tc-1",
     title: str = "Reading file.py",
     kind: str = "read",
-    locations=None,
-    raw_input=None,
-):
+    locations: list[MagicMock] | None = None,
+    raw_input: object = None,
+) -> MagicMock:
     update = MagicMock()
     update.tool_call_id = tool_call_id
     update.title = title
@@ -43,10 +43,10 @@ def make_tool_call_progress(
     title: str | None = None,
     kind: str | None = None,
     status: str | None = "completed",
-    raw_input=None,
-    raw_output=None,
-    locations=None,
-):
+    raw_input: object = None,
+    raw_output: object = None,
+    locations: list[MagicMock] | None = None,
+) -> MagicMock:
     update = MagicMock()
     update.tool_call_id = tool_call_id
     update.title = title
