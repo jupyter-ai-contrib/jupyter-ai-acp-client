@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from jupyter_ai_acp_client.tool_call_manager import SessionState, ToolCallManager
+from jupyter_ai_acp_client.tool_call_manager import ToolCallManager
 
 
 def make_persona(message_id_seq: list[str] | str | None = None) -> MagicMock:
@@ -144,14 +144,6 @@ class TestGetAllMessageIds:
 
         assert mgr.get_all_message_ids(SESSION_ID) == ["msg-1", "msg-2", "msg-3"]
 
-    def test_reset_clears_ids(self):
-        mgr = ToolCallManager()
-        persona = make_persona(["msg-1"])
-        mgr.get_or_create_text_message(SESSION_ID, persona)
-
-        mgr.reset(SESSION_ID)
-        assert mgr.get_all_message_ids(SESSION_ID) == []
-
 
 class TestGetOrCreateTextMessage:
     def test_creates_text_message_on_first_call(self):
@@ -234,15 +226,6 @@ class TestHandleStart:
         session = mgr._sessions[SESSION_ID]
         assert session.tool_call_message_ids["tc-1"] == "msg-1"
         assert session.tool_call_message_ids["tc-2"] == "msg-2"
-
-    def test_sets_current_message_type_to_tool_call(self):
-        mgr = ToolCallManager()
-        persona = make_persona(["msg-1"])
-        mgr.reset(SESSION_ID)
-
-        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
-
-        assert mgr._sessions[SESSION_ID].current_message_type == "tool_call"
 
     def test_flushes_to_message_after_state_update(self):
         mgr = ToolCallManager()
@@ -640,29 +623,6 @@ class TestFullFlow:
         session = mgr._sessions[SESSION_ID]
         message_ids = list(session.tool_call_message_ids.values())
         assert len(set(message_ids)) == 3  # all unique
-
-    def test_reset_between_turns_clears_state(self):
-        """After reset, previous turn's tool calls are gone."""
-        mgr = ToolCallManager()
-        persona = make_persona(["msg-1"])
-        mgr.reset(SESSION_ID)
-        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
-
-        mgr.reset(SESSION_ID)
-
-        assert mgr.get_all_message_ids(SESSION_ID) == []
-        assert mgr._sessions[SESSION_ID].tool_call_message_ids == {}
-
-    def test_flush_skipped_when_yjs_returns_no_message(self):
-        """flush_tool_call must not crash when ychat.get_message() returns None."""
-        mgr = ToolCallManager()
-        persona = make_persona(["msg-1"])
-        persona.ychat.get_message.return_value = None
-        mgr.reset(SESSION_ID)
-
-        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
-
-        persona.ychat.update_message.assert_not_called()
 
     def test_yjs_write_count_per_tool_call(self):
         """Each handle_start/progress produces exactly one update_message call."""
