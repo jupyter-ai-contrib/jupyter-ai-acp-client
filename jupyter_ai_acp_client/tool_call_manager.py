@@ -16,15 +16,7 @@ from .tool_call_renderer import (
 
 @dataclass
 class SessionState:
-    """Bundles per-session tool call state.
-
-    Tracks a state machine with three states determined by
-    ``current_message_type``:
-
-    - ``None`` (IDLE): no message created yet this turn
-    - ``"text"``: currently appending to a text message
-    - ``"tool_call"``: last message created was for a tool call
-    """
+    """Bundles per-session tool call state."""
 
     tool_calls: dict[str, ToolCallState] = field(default_factory=dict)
     current_message_id: Optional[str] = None
@@ -38,10 +30,7 @@ class SessionState:
 class ToolCallManager:
     """Manages per-session tool call state and Yjs message rendering.
 
-    Implements a message-per-tool-call architecture: each ToolCallStart
-    creates a new Yjs message with ``body=""`` and the tool call in metadata.
-    Text chunks create or append to separate text messages. Stream order is
-    preserved by Y.Array insertion order.
+    Each tool call gets its own Yjs message; text chunks get separate messages.
     """
 
     def __init__(self) -> None:
