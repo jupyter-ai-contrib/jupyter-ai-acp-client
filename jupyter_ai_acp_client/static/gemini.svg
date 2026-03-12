@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient id="gemini-gradient-1" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#4285F4;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#34A853;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="gemini-gradient-2" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#FBBC04;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#EA4335;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="gemini-gradient-3" x1="0%" y1="100%" x2="100%" y2="0%">
+            <stop offset="0%" style="stop-color:#34A853;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#FBBC04;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="gemini-gradient-4" x1="100%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:#EA4335;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#4285F4;stop-opacity:1" />
+        </linearGradient>
+    </defs>
+    <g id="gemini-logo">
+        <!-- Center circle -->
+        <circle cx="600" cy="600" r="120" fill="url(#gemini-gradient-1)" opacity="0.9"/>
+
+        <!-- Top-right sparkle -->
+        <path d="M 800 300 L 820 380 L 900 400 L 820 420 L 800 500 L 780 420 L 700 400 L 780 380 Z"
+              fill="url(#gemini-gradient-1)" opacity="0.95"/>
+
+        <!-- Top-left sparkle -->
+        <path d="M 400 300 L 420 380 L 500 400 L 420 420 L 400 500 L 380 420 L 300 400 L 380 380 Z"
+              fill="url(#gemini-gradient-2)" opacity="0.95"/>
+
+        <!-- Bottom-left sparkle -->
+        <path d="M 400 900 L 420 820 L 500 800 L 420 780 L 400 700 L 380 780 L 300 800 L 380 820 Z"
+              fill="url(#gemini-gradient-3)" opacity="0.95"/>
+
+        <!-- Bottom-right sparkle -->
+        <path d="M 800 900 L 820 820 L 900 800 L 820 780 L 800 700 L 780 780 L 700 800 L 780 820 Z"
+              fill="url(#gemini-gradient-4)" opacity="0.95"/>
+
+        <!-- Small accent sparkles -->
+        <path d="M 600 200 L 610 230 L 640 240 L 610 250 L 600 280 L 590 250 L 560 240 L 590 230 Z"
+              fill="#4285F4" opacity="0.8"/>
+
+        <path d="M 950 600 L 930 620 L 920 650 L 910 620 L 880 600 L 910 580 L 920 550 L 930 580 Z"
+              fill="#34A853" opacity="0.8"/>
+
+        <path d="M 600 1000 L 610 970 L 640 960 L 610 950 L 600 920 L 590 950 L 560 960 L 590 970 Z"
+              fill="#FBBC04" opacity="0.8"/>
+
+        <path d="M 250 600 L 270 620 L 280 650 L 290 620 L 320 600 L 290 580 L 280 550 L 270 580 Z"
+              fill="#EA4335" opacity="0.8"/>
+    </g>
+</svg>
