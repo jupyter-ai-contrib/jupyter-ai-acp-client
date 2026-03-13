@@ -145,10 +145,13 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   font-size: var(--jp-ui-font-size0);
   font-family: var(--jp-code-font-family);
   color: var(--jp-ui-font-color2);
+}
+
+.jp-jupyter-ai-acp-client-diff-header-clickable {
   cursor: pointer;
 }
 
-.jp-jupyter-ai-acp-client-diff-header:hover {
+.jp-jupyter-ai-acp-client-diff-header-clickable:hover {
   text-decoration: underline;
 }
 
