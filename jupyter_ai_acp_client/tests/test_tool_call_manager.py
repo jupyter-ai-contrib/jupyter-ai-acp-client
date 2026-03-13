@@ -594,6 +594,55 @@ class TestStateMachine:
         persona.ychat.get_message.assert_called_with("msg-tc1")
 
 
+class TestCancelPendingToolCalls:
+    def test_marks_in_progress_as_failed(self):
+        mgr = ToolCallManager()
+        persona = make_persona(["msg-1", "msg-2"])
+        mgr.reset(SESSION_ID)
+
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-2"), persona)
+
+        mgr.cancel_pending_tool_calls(SESSION_ID, persona)
+
+        assert mgr._sessions[SESSION_ID].tool_calls["tc-1"].status == "failed"
+        assert mgr._sessions[SESSION_ID].tool_calls["tc-2"].status == "failed"
+
+    def test_leaves_completed_unchanged(self):
+        mgr = ToolCallManager()
+        persona = make_persona(["msg-1"])
+        mgr.reset(SESSION_ID)
+
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
+        mgr.handle_progress(
+            SESSION_ID, make_tool_call_progress("tc-1", status="completed"), persona
+        )
+
+        mgr.cancel_pending_tool_calls(SESSION_ID, persona)
+
+        assert mgr._sessions[SESSION_ID].tool_calls["tc-1"].status == "completed"
+
+    def test_flushes_each_failed_tool_call(self):
+        mgr = ToolCallManager()
+        persona = make_persona(["msg-1", "msg-2"])
+        mgr.reset(SESSION_ID)
+
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-2"), persona)
+        persona.ychat.update_message.reset_mock()
+
+        mgr.cancel_pending_tool_calls(SESSION_ID, persona)
+
+        # One flush per failed tool call
+        assert persona.ychat.update_message.call_count == 2
+
+    def test_noop_for_unknown_session(self):
+        mgr = ToolCallManager()
+        persona = make_persona()
+        # Should not raise
+        mgr.cancel_pending_tool_calls("no-such-session", persona)
+
+
 class TestFullFlow:
     def test_start_then_progress(self):
         """ToolCallStart → ToolCallProgress → tool call state reflects final status."""

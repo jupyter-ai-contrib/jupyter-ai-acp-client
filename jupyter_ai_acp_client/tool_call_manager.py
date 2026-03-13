@@ -118,17 +118,41 @@ class ToolCallManager:
 
         message_id = session.tool_call_message_ids.get(tool_call_id)
         if not message_id:
+            persona.log.warning(
+                f"flush_tool_call: no message_id for tool_call {tool_call_id}"
+                f" in session {session_id}"
+            )
             return
 
         tc = session.tool_calls.get(tool_call_id)
         if not tc:
+            persona.log.warning(
+                f"flush_tool_call: no ToolCallState for {tool_call_id}"
+                f" in session {session_id}"
+            )
             return
 
         msg = persona.ychat.get_message(message_id)
         if not msg:
+            persona.log.warning(
+                f"flush_tool_call: Yjs message {message_id} not found"
+                f" for tool_call {tool_call_id}"
+            )
             return
         msg.metadata = {"tool_calls": [tc.model_dump(exclude_none=True)]}
         persona.ychat.update_message(msg, trigger_actions=[])
+
+    def cancel_pending_tool_calls(
+        self, session_id: str, persona: BasePersona
+    ) -> None:
+        """Mark non-finished tool calls as failed and flush each to its message."""
+        session = self._sessions.get(session_id)
+        if session is None:
+            return
+        for tc_id, tc in session.tool_calls.items():
+            if tc.status not in ("completed", "failed"):
+                tc.status = "failed"
+                self.flush_tool_call(session_id, tc_id, persona)
 
     def handle_start(
         self, session_id: str, update: ToolCallStart, persona: BasePersona

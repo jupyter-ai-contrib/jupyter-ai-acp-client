@@ -676,9 +676,8 @@ class JaiAcpClient(Client):
         except Exception:
             persona.log.warning(f"stop_streaming: failed to send cancel for session {session_id}")
 
-        # Finalize the partial message as-is
-        message_id = self._tool_call_manager.get_message_id(session_id)
-        if message_id:
+        # Finalize all messages created this turn
+        for message_id in self._tool_call_manager.get_all_message_ids(session_id):
             msg = persona.ychat.get_message(message_id)
             if msg:
                 persona.ychat.update_message(msg, append=False, trigger_actions=[find_mentions])
@@ -692,12 +691,9 @@ class JaiAcpClient(Client):
         """Mark non-finished tool calls as failed, reject pending permissions, and flush."""
         persona = self._personas_by_session.get(session_id)
 
-        # Mark non-finished tool calls as failed
-        session_state = self._tool_call_manager._sessions.get(session_id)
-        if session_state:
-            for tc in session_state.tool_calls.values():
-                if tc.status not in ("completed", "failed"):
-                    tc.status = "failed"
+        # Mark non-finished tool calls as failed and flush each to its message
+        if persona:
+            self._tool_call_manager.cancel_pending_tool_calls(session_id, persona)
 
         # Cancel pending permissions
         rejected = self._permission_manager.cancel_all_pending(session_id)
@@ -705,10 +701,6 @@ class JaiAcpClient(Client):
             persona.log.info(
                 f"_cancel_pending_work: auto-rejected {rejected} pending permission(s) for session {session_id}"
             )
-
-        # Flush updated state to frontend
-        if persona:
-            self._tool_call_manager._flush_to_message(session_id, persona)
 
 
 
