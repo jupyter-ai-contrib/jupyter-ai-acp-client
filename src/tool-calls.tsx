@@ -286,7 +286,10 @@ function ToolCallLine({
           <PermissionLabel toolCall={toolCall} />
         </summary>
         {hasDiffs ? (
-          <DiffView diffs={toolCall.diffs!} onOpenFile={isCompleted ? onOpenFile : undefined} />
+          <DiffView
+            diffs={toolCall.diffs!}
+            onOpenFile={isCompleted ? onOpenFile : undefined}
+          />
         ) : (
           <div className="jp-jupyter-ai-acp-client-tool-call-detail">
             {detailsLines.join('\n')}
