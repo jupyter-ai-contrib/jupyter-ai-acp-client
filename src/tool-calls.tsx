@@ -4,6 +4,7 @@ import {
   IPermissionOption,
   MessagePreambleProps
 } from '@jupyter/chat';
+import { PageConfig } from '@jupyterlab/coreutils';
 import { submitPermissionDecision } from './request';
 import clsx from 'clsx';
 import { DiffView } from './diff-view';
@@ -21,7 +22,14 @@ export function ToolCallsComponent(
   }
 
   const onOpenFile = (path: string) => {
-    model.documentManager?.openOrReveal(path);
+    // ACP agents provide absolute filesystem paths, but openOrReveal
+    // expects server-relative paths. Strip the server root prefix.
+    const serverRoot = PageConfig.getOption('serverRoot');
+    let relPath = path;
+    if (serverRoot && path.startsWith(serverRoot)) {
+      relPath = path.slice(serverRoot.length).replace(/^\//, '');
+    }
+    model.documentManager?.openOrReveal(relPath);
   };
 
   return (
@@ -240,7 +248,7 @@ function ToolCallLine({
             </span>{' '}
             <em>{displayTitle}</em>
           </summary>
-          <DiffView diffs={toolCall.diffs!} onOpenFile={onOpenFile} />
+          <DiffView diffs={toolCall.diffs!} />
         </details>
         <PermissionButtons toolCall={toolCall} />
       </div>
@@ -286,7 +294,10 @@ function ToolCallLine({
           <PermissionLabel toolCall={toolCall} />
         </summary>
         {hasDiffs ? (
-          <DiffView diffs={toolCall.diffs!} onOpenFile={onOpenFile} />
+          <DiffView
+            diffs={toolCall.diffs!}
+            onOpenFile={isCompleted ? onOpenFile : undefined}
+          />
         ) : (
           <div className="jp-jupyter-ai-acp-client-tool-call-detail">
             {detailsLines.join('\n')}

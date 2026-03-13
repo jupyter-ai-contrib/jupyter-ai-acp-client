@@ -67,7 +67,7 @@ function DiffBlock({
   return (
     <div className="jp-jupyter-ai-acp-client-diff-block">
       <div
-        className="jp-jupyter-ai-acp-client-diff-header"
+        className={`jp-jupyter-ai-acp-client-diff-header${onOpenFile ? ' jp-jupyter-ai-acp-client-diff-header-clickable' : ''}`}
         onClick={onOpenFile ? () => onOpenFile(diff.path) : undefined}
         title={diff.path}
       >
