@@ -32,7 +32,6 @@ def _make_client_and_persona():
 
     # Mock tool call manager
     client._tool_call_manager = MagicMock()
-    client._tool_call_manager.get_message_id.return_value = None
 
     client._personas_by_session = {SESSION_ID: persona}
 
