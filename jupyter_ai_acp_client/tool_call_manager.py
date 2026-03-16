@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Optional
 
 from acp.schema import ToolCallProgress, ToolCallStart
 from jupyter_ai_persona_manager import BasePersona
@@ -20,7 +20,6 @@ class SessionState:
 
     tool_calls: dict[str, ToolCallState] = field(default_factory=dict)
     current_message_id: Optional[str] = None
-    current_message_type: Optional[Literal["text", "tool_call"]] = None
     # Maps tool_call_id → message_id for targeted progress updates
     tool_call_message_ids: dict[str, str] = field(default_factory=dict)
     # Maps message_id → [tool_call_id, ...] (reverse of tool_call_message_ids)
@@ -81,7 +80,6 @@ class ToolCallManager:
         """Create a new Yjs message and return its ID.
 
         Updates awareness and records the message ID in ``all_message_ids``.
-        Does NOT set ``current_message_type`` — callers own that.
         """
         session = self._ensure_session(session_id)
 
@@ -105,12 +103,11 @@ class ToolCallManager:
         Otherwise, creates a new text message.
         """
         session = self._ensure_session(session_id)
-        if session.current_message_type == "text" and session.current_message_id:
+        if (session.current_message_id is not None
+                and session.current_message_id not in session.message_tool_call_ids):
             return session.current_message_id
 
-        message_id = self._create_message(session_id, persona)
-        session.current_message_type = "text"
-        return message_id
+        return self._create_message(session_id, persona)
 
     def _assign_message(
         self, session_id: str, tool_call_id: str, persona: BasePersona
@@ -124,7 +121,8 @@ class ToolCallManager:
         if tool_call_id in session.tool_call_message_ids:
             return False
 
-        if session.current_message_type == "tool_call" and session.current_message_id:
+        if (session.current_message_id is not None
+                and session.current_message_id in session.message_tool_call_ids):
             message_id = session.current_message_id
         else:
             message_id = self._create_message(session_id, persona)
@@ -222,7 +220,6 @@ class ToolCallManager:
         )
 
         self._assign_message(session_id, update.tool_call_id, persona)
-        session.current_message_type = "tool_call"
         self.flush_tool_call(session_id, update.tool_call_id, persona)
 
     def handle_progress(
@@ -262,7 +259,5 @@ class ToolCallManager:
             diffs=diffs,
         )
 
-        if self._assign_message(session_id, update.tool_call_id, persona):
-            session.current_message_type = "tool_call"
-
+        self._assign_message(session_id, update.tool_call_id, persona)
         self.flush_tool_call(session_id, update.tool_call_id, persona)

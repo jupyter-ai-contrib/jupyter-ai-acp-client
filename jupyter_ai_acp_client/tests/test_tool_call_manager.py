@@ -69,7 +69,6 @@ class TestReset:
         session = mgr._sessions[SESSION_ID]
         assert session.tool_calls == {}
         assert session.current_message_id is None
-        assert session.current_message_type is None
         assert session.tool_call_message_ids == {}
         assert session.message_tool_call_ids == {}
         assert session.all_message_ids == []
@@ -84,7 +83,6 @@ class TestReset:
         session = mgr._sessions[SESSION_ID]
         assert session.tool_calls == {}
         assert session.current_message_id is None
-        assert session.current_message_type is None
         assert session.tool_call_message_ids == {}
         assert session.message_tool_call_ids == {}
         assert session.all_message_ids == []
@@ -157,7 +155,6 @@ class TestGetOrCreateTextMessage:
 
         assert msg_id == "msg-1"
         persona.ychat.add_message.assert_called_once()
-        assert mgr._sessions[SESSION_ID].current_message_type == "text"
 
     def test_returns_existing_on_consecutive_calls(self):
         mgr = ToolCallManager()
@@ -177,11 +174,9 @@ class TestGetOrCreateTextMessage:
         mgr.reset(SESSION_ID)
 
         mgr.handle_start(SESSION_ID, make_tool_call_start(), persona)
-        assert mgr._sessions[SESSION_ID].current_message_type == "tool_call"
 
         msg_id = mgr.get_or_create_text_message(SESSION_ID, persona)
         assert msg_id == "msg-text"
-        assert mgr._sessions[SESSION_ID].current_message_type == "text"
         assert persona.ychat.add_message.call_count == 2
 
     def test_sets_awareness_on_creation(self):
@@ -325,22 +320,21 @@ class TestHandleStart:
         persona.ychat.add_message.assert_called_once()  # only 1 message created
         assert mgr._sessions[SESSION_ID].tool_call_message_ids["tc-1"] == "msg-1"
         assert mgr._sessions[SESSION_ID].tool_calls["tc-1"].title == "Reading file.py"
-        assert mgr._sessions[SESSION_ID].current_message_type == "tool_call"
         # Flush called twice (once per start), both targeting the same message
         assert persona.ychat.update_message.call_count == 2
 
-    def test_repeated_start_always_sets_message_type(self):
-        """current_message_type must be 'tool_call' even for a repeated start."""
+    def test_repeated_start_after_text_does_not_create_new_message(self):
+        """Repeated start for an already-assigned tool call reuses its message."""
         mgr = ToolCallManager()
         persona = make_persona(["msg-tc", "msg-text"])
         mgr.reset(SESSION_ID)
 
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1", "read"), persona)
-        mgr.get_or_create_text_message(SESSION_ID, persona)  # switches to "text"
-        assert mgr._sessions[SESSION_ID].current_message_type == "text"
+        mgr.get_or_create_text_message(SESSION_ID, persona)
 
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1", "Reading file.py"), persona)
-        assert mgr._sessions[SESSION_ID].current_message_type == "tool_call"
+        # No new message created — tc-1 already had msg-tc
+        assert persona.ychat.add_message.call_count == 2  # msg-tc + msg-text only
 
 
 class TestHandleProgress:
@@ -416,8 +410,8 @@ class TestHandleProgress:
         tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
         assert tc.raw_output == {"key": "value"}
 
-    def test_orphaned_progress_sets_message_type(self):
-        """Orphaned progress must set current_message_type so next text creates a new message."""
+    def test_orphaned_progress_does_not_reuse_message_for_text(self):
+        """After orphaned progress, next text chunk creates a new message."""
         mgr = ToolCallManager()
         persona = make_persona(["msg-orphan", "msg-text"])
         mgr.reset(SESSION_ID)
@@ -425,7 +419,6 @@ class TestHandleProgress:
         mgr.handle_progress(
             SESSION_ID, make_tool_call_progress("tc-orphan", status="completed"), persona
         )
-        assert mgr._sessions[SESSION_ID].current_message_type == "tool_call"
 
         # Next text chunk must create a new message, not reuse the tool call's message
         text_msg = mgr.get_or_create_text_message(SESSION_ID, persona)
@@ -521,17 +514,9 @@ class TestStateMachine:
         persona = make_persona(["msg-1", "msg-2", "msg-3"])
         mgr.reset(SESSION_ID)
 
-        # Text
         mid1 = mgr.get_or_create_text_message(SESSION_ID, persona)
-        assert mgr._sessions[SESSION_ID].current_message_type == "text"
-
-        # Tool call
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
-        assert mgr._sessions[SESSION_ID].current_message_type == "tool_call"
-
-        # Text again (should create new message)
         mid3 = mgr.get_or_create_text_message(SESSION_ID, persona)
-        assert mgr._sessions[SESSION_ID].current_message_type == "text"
 
         assert persona.ychat.add_message.call_count == 3
         assert mid1 == "msg-1"
