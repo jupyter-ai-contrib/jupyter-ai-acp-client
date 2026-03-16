@@ -71,6 +71,7 @@ class TestReset:
         assert session.current_message_id is None
         assert session.current_message_type is None
         assert session.tool_call_message_ids == {}
+        assert session.message_tool_call_ids == {}
         assert session.all_message_ids == []
 
     def test_clears_existing_state(self):
@@ -85,6 +86,7 @@ class TestReset:
         assert session.current_message_id is None
         assert session.current_message_type is None
         assert session.tool_call_message_ids == {}
+        assert session.message_tool_call_ids == {}
         assert session.all_message_ids == []
 
 
@@ -135,14 +137,14 @@ class TestGetAllMessageIds:
 
     def test_returns_ids_in_creation_order(self):
         mgr = ToolCallManager()
-        persona = make_persona(["msg-1", "msg-2", "msg-3"])
+        persona = make_persona(["msg-text", "msg-tc", "msg-text2"])
         mgr.reset(SESSION_ID)
 
         mgr.get_or_create_text_message(SESSION_ID, persona)
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
         mgr.get_or_create_text_message(SESSION_ID, persona)
 
-        assert mgr.get_all_message_ids(SESSION_ID) == ["msg-1", "msg-2", "msg-3"]
+        assert mgr.get_all_message_ids(SESSION_ID) == ["msg-text", "msg-tc", "msg-text2"]
 
 
 class TestGetOrCreateTextMessage:
@@ -213,19 +215,24 @@ class TestHandleStart:
         assert "tc-1" in mgr._sessions[SESSION_ID].tool_calls
         assert mgr._sessions[SESSION_ID].tool_calls["tc-1"].status == "in_progress"
 
-    def test_creates_new_message_for_each_tool_call(self):
-        """Each ToolCallStart gets its own Yjs message."""
+    def test_consecutive_tool_calls_share_message(self):
+        """Consecutive ToolCallStarts are grouped into a single Yjs message."""
         mgr = ToolCallManager()
-        persona = make_persona(["msg-1", "msg-2"])
+        persona = make_persona(["msg-1"])
         mgr.reset(SESSION_ID)
 
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-2"), persona)
 
-        assert persona.ychat.add_message.call_count == 2
+        assert persona.ychat.add_message.call_count == 1
         session = mgr._sessions[SESSION_ID]
         assert session.tool_call_message_ids["tc-1"] == "msg-1"
-        assert session.tool_call_message_ids["tc-2"] == "msg-2"
+        assert session.tool_call_message_ids["tc-2"] == "msg-1"
+
+        # Verify grouped metadata contains both tool calls in order
+        flushed_msg = persona.ychat.update_message.call_args[0][0]
+        tc_ids = [tc["tool_call_id"] for tc in flushed_msg.metadata["tool_calls"]]
+        assert tc_ids == ["tc-1", "tc-2"]
 
     def test_flushes_to_message_after_state_update(self):
         mgr = ToolCallManager()
@@ -365,24 +372,22 @@ class TestHandleProgress:
         assert mgr._sessions[SESSION_ID].tool_call_message_ids["tc-orphan"] == "msg-orphan"
         persona.ychat.add_message.assert_called_once()
 
-    def test_flushes_to_tool_calls_own_message(self):
-        """Progress must update the tool call's specific message, not the current one."""
+    def test_flushes_to_grouped_message(self):
+        """Progress for a grouped tool call flushes to the shared message."""
         mgr = ToolCallManager()
-        persona = make_persona(["msg-tc1", "msg-tc2"])
+        persona = make_persona(["msg-1"])
         mgr.reset(SESSION_ID)
 
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-2"), persona)
         persona.ychat.update_message.reset_mock()
 
-        # Progress for tc-1 should update msg-tc1, not msg-tc2
         mgr.handle_progress(
             SESSION_ID, make_tool_call_progress("tc-1", status="completed"), persona
         )
 
-        flushed_msg = persona.ychat.update_message.call_args[0][0]
-        # get_message was called with msg-tc1 (tc-1's message)
-        persona.ychat.get_message.assert_called_with("msg-tc1")
+        # Both tool calls share msg-1
+        persona.ychat.get_message.assert_called_with("msg-1")
 
     def test_non_serializable_raw_output_is_stringified(self):
         mgr = ToolCallManager()
@@ -536,19 +541,34 @@ class TestStateMachine:
         assert mgr.get_all_message_ids(SESSION_ID) == ["msg-1", "msg-2", "msg-3"]
 
     def test_text_then_two_tool_calls(self):
-        """text → tc1 → tc2 creates 3 messages (each TC separate)."""
+        """text → tc1 → tc2 creates 2 messages (text + grouped TCs)."""
         mgr = ToolCallManager()
-        persona = make_persona(["msg-1", "msg-2", "msg-3"])
+        persona = make_persona(["msg-text", "msg-tc"])
         mgr.reset(SESSION_ID)
 
         mgr.get_or_create_text_message(SESSION_ID, persona)
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-2"), persona)
 
+        assert persona.ychat.add_message.call_count == 2
+        session = mgr._sessions[SESSION_ID]
+        assert session.tool_call_message_ids["tc-1"] == "msg-tc"
+        assert session.tool_call_message_ids["tc-2"] == "msg-tc"
+
+    def test_tool_call_text_tool_call_creates_3_messages(self):
+        """tc1 → text → tc2 creates 3 messages (text breaks grouping)."""
+        mgr = ToolCallManager()
+        persona = make_persona(["msg-tc1", "msg-text", "msg-tc2"])
+        mgr.reset(SESSION_ID)
+
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
+        mgr.get_or_create_text_message(SESSION_ID, persona)
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-2"), persona)
+
         assert persona.ychat.add_message.call_count == 3
         session = mgr._sessions[SESSION_ID]
-        assert session.tool_call_message_ids["tc-1"] == "msg-2"
-        assert session.tool_call_message_ids["tc-2"] == "msg-3"
+        assert session.tool_call_message_ids["tc-1"] == "msg-tc1"
+        assert session.tool_call_message_ids["tc-2"] == "msg-tc2"
 
     def test_tool_call_only(self):
         """Tool call without preceding text creates 1 message with empty body."""
@@ -576,28 +596,45 @@ class TestStateMachine:
         assert mid1 == mid2 == mid3 == "msg-1"
         persona.ychat.add_message.assert_called_once()
 
-    def test_progress_targets_correct_message_after_state_change(self):
-        """Progress for tc-1 arriving after tc-2 starts updates tc-1's message."""
+    def test_progress_targets_grouped_message(self):
+        """Progress for any grouped tool call updates the shared message."""
         mgr = ToolCallManager()
-        persona = make_persona(["msg-tc1", "msg-tc2"])
+        persona = make_persona(["msg-1"])
         mgr.reset(SESSION_ID)
 
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-2"), persona)
 
-        # Current message is msg-tc2, but progress for tc-1 should target msg-tc1
         persona.ychat.get_message.reset_mock()
         mgr.handle_progress(
             SESSION_ID, make_tool_call_progress("tc-1", status="completed"), persona
         )
 
-        persona.ychat.get_message.assert_called_with("msg-tc1")
+        # Both tool calls share the same message
+        persona.ychat.get_message.assert_called_with("msg-1")
+
+    def test_progress_targets_correct_message_across_groups(self):
+        """Progress for tc-1 targets its group, not tc-2's group."""
+        mgr = ToolCallManager()
+        persona = make_persona(["msg-group1", "msg-text", "msg-group2"])
+        mgr.reset(SESSION_ID)
+
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
+        mgr.get_or_create_text_message(SESSION_ID, persona)
+        mgr.handle_start(SESSION_ID, make_tool_call_start("tc-2"), persona)
+
+        persona.ychat.get_message.reset_mock()
+        mgr.handle_progress(
+            SESSION_ID, make_tool_call_progress("tc-1", status="completed"), persona
+        )
+
+        persona.ychat.get_message.assert_called_with("msg-group1")
 
 
 class TestCancelPendingToolCalls:
     def test_marks_in_progress_as_failed(self):
         mgr = ToolCallManager()
-        persona = make_persona(["msg-1", "msg-2"])
+        persona = make_persona(["msg-1"])
         mgr.reset(SESSION_ID)
 
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
@@ -624,7 +661,7 @@ class TestCancelPendingToolCalls:
 
     def test_flushes_each_failed_tool_call(self):
         mgr = ToolCallManager()
-        persona = make_persona(["msg-1", "msg-2"])
+        persona = make_persona(["msg-1"])
         mgr.reset(SESSION_ID)
 
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
@@ -633,7 +670,7 @@ class TestCancelPendingToolCalls:
 
         mgr.cancel_pending_tool_calls(SESSION_ID, persona)
 
-        # One flush per failed tool call
+        # One flush per failed tool call (both share same message)
         assert persona.ychat.update_message.call_count == 2
 
     def test_noop_for_unknown_session(self):
@@ -656,33 +693,34 @@ class TestFullFlow:
         tc = mgr._sessions[SESSION_ID].tool_calls["tc-1"]
         assert tc.status == "completed"
 
-    def test_multiple_tool_calls_create_separate_messages(self):
-        """Multiple tool calls in one session each get their own message."""
+    def test_consecutive_tool_calls_share_message(self):
+        """Consecutive tool calls are grouped into a single message."""
         mgr = ToolCallManager()
-        persona = make_persona([f"msg-{i}" for i in range(3)])
+        persona = make_persona(["msg-1"])
         mgr.reset(SESSION_ID)
 
         for i in range(3):
             mgr.handle_start(SESSION_ID, make_tool_call_start(f"tc-{i}", f"Task {i}"), persona)
             mgr.handle_progress(SESSION_ID, make_tool_call_progress(f"tc-{i}", status="completed"), persona)
 
-        assert persona.ychat.add_message.call_count == 3
-        assert len(mgr.get_all_message_ids(SESSION_ID)) == 3
-        # Each tool call maps to a different message
+        assert persona.ychat.add_message.call_count == 1
+        assert len(mgr.get_all_message_ids(SESSION_ID)) == 1
+        # All tool calls map to the same message
         session = mgr._sessions[SESSION_ID]
         message_ids = list(session.tool_call_message_ids.values())
-        assert len(set(message_ids)) == 3  # all unique
+        assert len(set(message_ids)) == 1
 
     def test_yjs_write_count_per_tool_call(self):
         """Each handle_start/progress produces exactly one update_message call."""
         mgr = ToolCallManager()
-        persona = make_persona(["msg-1", "msg-2"])
+        persona = make_persona(["msg-1"])
         mgr.reset(SESSION_ID)
 
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-1"), persona)
         assert persona.ychat.add_message.call_count == 1
         assert persona.ychat.update_message.call_count == 1
 
+        # Consecutive tool call reuses message (grouping)
         mgr.handle_start(SESSION_ID, make_tool_call_start("tc-2"), persona)
-        assert persona.ychat.add_message.call_count == 2
-        assert persona.ychat.update_message.call_count == 2
+        assert persona.ychat.add_message.call_count == 1  # no new message
+        assert persona.ychat.update_message.call_count == 2  # still flushes

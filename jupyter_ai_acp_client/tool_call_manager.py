@@ -23,6 +23,8 @@ class SessionState:
     current_message_type: Optional[Literal["text", "tool_call"]] = None
     # Maps tool_call_id → message_id for targeted progress updates
     tool_call_message_ids: dict[str, str] = field(default_factory=dict)
+    # Maps message_id → [tool_call_id, ...] (reverse of tool_call_message_ids)
+    message_tool_call_ids: dict[str, list[str]] = field(default_factory=dict)
     # All message IDs created this turn (for find_mentions at end)
     all_message_ids: list[str] = field(default_factory=list)
 
@@ -30,7 +32,9 @@ class SessionState:
 class ToolCallManager:
     """Manages per-session tool call state and Yjs message rendering.
 
-    Each tool call gets its own Yjs message; text chunks get separate messages.
+    Consecutive tool calls are grouped into a single Yjs message;
+    text chunks get separate messages. A text message between tool calls
+    starts a new group.
     """
 
     def __init__(self) -> None:
@@ -108,6 +112,29 @@ class ToolCallManager:
         session.current_message_type = "text"
         return message_id
 
+    def _assign_message(
+        self, session_id: str, tool_call_id: str, persona: BasePersona
+    ) -> bool:
+        """Assign a tool_call_id to a Yjs message, grouping if consecutive.
+
+        Returns True if a new assignment was made, False if the tool_call_id
+        was already assigned.
+        """
+        session = self._ensure_session(session_id)
+        if tool_call_id in session.tool_call_message_ids:
+            return False
+
+        if session.current_message_type == "tool_call" and session.current_message_id:
+            message_id = session.current_message_id
+        else:
+            message_id = self._create_message(session_id, persona)
+
+        session.tool_call_message_ids[tool_call_id] = message_id
+        session.message_tool_call_ids.setdefault(message_id, []).append(
+            tool_call_id
+        )
+        return True
+
     def flush_tool_call(
         self, session_id: str, tool_call_id: str, persona: BasePersona
     ) -> None:
@@ -139,7 +166,14 @@ class ToolCallManager:
                 f" for tool_call {tool_call_id}"
             )
             return
-        msg.metadata = {"tool_calls": [tc.model_dump(exclude_none=True)]}
+        # Build tool_calls array from reverse index (O(K) where K = group size)
+        tc_ids = session.message_tool_call_ids.get(message_id, [])
+        all_tcs = [
+            session.tool_calls[tc_id].model_dump(exclude_none=True)
+            for tc_id in tc_ids
+            if tc_id in session.tool_calls
+        ]
+        msg.metadata = {"tool_calls": all_tcs}
         persona.ychat.update_message(msg, trigger_actions=[])
 
     def cancel_pending_tool_calls(
@@ -159,8 +193,9 @@ class ToolCallManager:
     ) -> None:
         """Handle a ToolCallStart event.
 
-        Creates a new Yjs message for the tool call. If this tool_call_id
-        already has a message, updates the existing one instead.
+        Groups with the current message if consecutive tool calls, otherwise
+        creates a new one. If this tool_call_id already has a message, updates
+        the existing one instead.
         """
         session = self._ensure_session(session_id)
         kind_str = update.kind or None
@@ -186,10 +221,7 @@ class ToolCallManager:
             raw_input=raw_input,
         )
 
-        if update.tool_call_id not in session.tool_call_message_ids:
-            message_id = self._create_message(session_id, persona)
-            session.tool_call_message_ids[update.tool_call_id] = message_id
-
+        self._assign_message(session_id, update.tool_call_id, persona)
         session.current_message_type = "tool_call"
         self.flush_tool_call(session_id, update.tool_call_id, persona)
 
@@ -198,8 +230,9 @@ class ToolCallManager:
     ) -> None:
         """Handle a ToolCallProgress event.
 
-        Updates the tool call state and flushes to its dedicated message.
-        If the tool_call_id has no prior message, creates one.
+        Updates the tool call state and flushes to its assigned message.
+        If the tool_call_id has no prior message, groups with the current
+        message or creates a new one.
         """
         session = self._ensure_session(session_id)
 
@@ -229,10 +262,7 @@ class ToolCallManager:
             diffs=diffs,
         )
 
-        # Create a message if this tool_call_id has no prior one
-        if update.tool_call_id not in session.tool_call_message_ids:
-            message_id = self._create_message(session_id, persona)
+        if self._assign_message(session_id, update.tool_call_id, persona):
             session.current_message_type = "tool_call"
-            session.tool_call_message_ids[update.tool_call_id] = message_id
 
         self.flush_tool_call(session_id, update.tool_call_id, persona)
