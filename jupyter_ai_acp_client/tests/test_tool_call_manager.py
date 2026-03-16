@@ -313,7 +313,6 @@ class TestHandleStart:
         assert mgr.get_all_message_ids(session_a) == ["msg-a"]
         assert mgr.get_all_message_ids(session_b) == ["msg-b"]
 
-
     def test_repeated_start_same_id_reuses_message(self):
         """ACP sends two ToolCallStart for the same ID; must reuse the message."""
         mgr = ToolCallManager()

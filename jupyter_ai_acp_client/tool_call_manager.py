@@ -166,7 +166,7 @@ class ToolCallManager:
                 f" for tool_call {tool_call_id}"
             )
             return
-        # Build tool_calls array from reverse index (O(K) where K = group size)
+        # Build tool_calls array from reverse index
         tc_ids = session.message_tool_call_ids.get(message_id, [])
         all_tcs = [
             session.tool_calls[tc_id].model_dump(exclude_none=True)
