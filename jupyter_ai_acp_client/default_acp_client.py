@@ -309,8 +309,8 @@ class JaiAcpClient(Client):
                     return response
 
                 # Trigger find_mentions on all messages created this turn
-                for mid in self._tool_call_manager.get_all_message_ids(session_id):
-                    msg = persona.ychat.get_message(mid)
+                for message_id in self._tool_call_manager.get_all_message_ids(session_id):
+                    msg = persona.ychat.get_message(message_id)
                     if msg:
                         persona.ychat.update_message(
                             msg,
