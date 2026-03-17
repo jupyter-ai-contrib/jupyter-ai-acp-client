@@ -10,7 +10,7 @@ from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
 
 from .default_acp_client import JaiAcpClient
-from .telemetry import emit_server_init_event, emit_session_init_event, emit_chat_message_event
+from .telemetry import emit_event
 
 
 
@@ -110,12 +110,16 @@ class BaseAcpPersona(BasePersona):
             agent_subprocess = await self.get_agent_subprocess()
             client = JaiAcpClient(agent_subprocess=agent_subprocess, event_loop=self.event_loop)
             self.log.info("Initialized ACP client for '%s'.", self.__class__.__name__)
-            emit_server_init_event(self.event_logger, self.__class__.__name__, "success")
-            self.log.info("[telemetry] Emitted acp_server_init (success) for '%s'.", self.__class__.__name__)
+            emit_event(self.event_logger, "acp_server_init", "success", {
+                "persona_class": self.__class__.__name__,
+            })
             return client
         except Exception as e:
             error_msg = f"{type(e).__name__}: {e}"
-            emit_server_init_event(self.event_logger, self.__class__.__name__, "failure", error_msg)
+            emit_event(self.event_logger, "acp_server_init", "failure", {
+                "persona_class": self.__class__.__name__,
+                "error_message": error_msg,
+            })
             raise
     
     def _get_existing_sessions(self) -> dict[str, str]:
@@ -159,11 +163,11 @@ class BaseAcpPersona(BasePersona):
                     self.__class__.__name__,
                     existing_session_id,
                 )
-                emit_session_init_event(
-                    self.event_logger, self.__class__.__name__,
-                    existing_session_id, "load", "success"
-                )
-                self.log.info("[telemetry] Emitted acp_session_init (load/success) for '%s'.", self.__class__.__name__)
+                emit_event(self.event_logger, "acp_session_init", "success", {
+                    "persona_class": self.__class__.__name__,
+                    "session_id": existing_session_id,
+                    "session_operation": "load",
+                })
                 return response
             else:
                 # otherwise create new session and add it to the metadata
@@ -173,20 +177,21 @@ class BaseAcpPersona(BasePersona):
                     self.__class__.__name__,
                     response.session_id,
                 )
-                emit_session_init_event(
-                    self.event_logger, self.__class__.__name__,
-                    response.session_id, "new", "success"
-                )
-                self.log.info("[telemetry] Emitted acp_session_init (new/success) for '%s'.", self.__class__.__name__)
+                emit_event(self.event_logger, "acp_session_init", "success", {
+                    "persona_class": self.__class__.__name__,
+                    "session_id": response.session_id,
+                    "session_operation": "new",
+                })
                 self._record_new_session(response.session_id)
                 return response
         except Exception as e:
             operation = "load" if (existing_session_id and supports_session_load) else "new"
             error_msg = f"{type(e).__name__}: {e}"
-            emit_session_init_event(
-                self.event_logger, self.__class__.__name__,
-                None, operation, "failure", error_msg
-            )
+            emit_event(self.event_logger, "acp_session_init", "failure", {
+                "persona_class": self.__class__.__name__,
+                "session_operation": operation,
+                "error_message": error_msg,
+            })
             raise
 
     async def get_agent_subprocess(self) -> asyncio.subprocess.Process:
@@ -249,11 +254,10 @@ class BaseAcpPersona(BasePersona):
         client = await self.get_client()
         session_id = await self.get_session_id()
 
-        emit_chat_message_event(
-            self.event_logger,
-            self.__class__.__name__,
-            session_id,
-        )
+        emit_event(self.event_logger, "acp_chat_message", "success", {
+            "persona_class": self.__class__.__name__,
+            "session_id": session_id,
+        })
 
         prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
 
