@@ -109,13 +109,17 @@ class ToolCallManager:
 
         return self._create_message(session_id, persona)
 
-    def _assign_message(
+    def _assign_tool_call(
         self, session_id: str, tool_call_id: str, persona: BasePersona
     ) -> bool:
-        """Assign a tool_call_id to a Yjs message, grouping if consecutive.
+        """Assign a tool call to a Yjs message, grouping consecutive tool calls.
 
-        Returns True if a new assignment was made, False if the tool_call_id
-        was already assigned.
+        Returns True if assigned to a new or existing message, False if already
+        assigned to a message.
+
+        If the current message contains no tool calls (i.e. is a text message),
+        creates a new message and assigns the tool call there. Otherwise,
+        appends the tool call to the current message.
         """
         session = self._ensure_session(session_id)
         if tool_call_id in session.tool_call_message_ids:
@@ -219,7 +223,7 @@ class ToolCallManager:
             raw_input=raw_input,
         )
 
-        self._assign_message(session_id, update.tool_call_id, persona)
+        self._assign_tool_call(session_id, update.tool_call_id, persona)
         self.flush_tool_call(session_id, update.tool_call_id, persona)
 
     def handle_progress(
@@ -259,5 +263,5 @@ class ToolCallManager:
             diffs=diffs,
         )
 
-        self._assign_message(session_id, update.tool_call_id, persona)
+        self._assign_tool_call(session_id, update.tool_call_id, persona)
         self.flush_tool_call(session_id, update.tool_call_id, persona)
