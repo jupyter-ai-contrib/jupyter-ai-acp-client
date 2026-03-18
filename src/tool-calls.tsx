@@ -263,6 +263,7 @@ function ToolCallLine({
           </summary>
           <DiffView
             diffs={toolCall.diffs!}
+            onOpenFile={toolCall.kind === 'edit' ? onOpenFile : undefined}
             toDisplayPath={toServerRelativePath}
           />
         </details>
