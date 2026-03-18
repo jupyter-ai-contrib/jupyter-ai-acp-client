@@ -4,10 +4,28 @@ import {
   IPermissionOption,
   MessagePreambleProps
 } from '@jupyter/chat';
-import { PageConfig } from '@jupyterlab/coreutils';
+import { PageConfig, PathExt } from '@jupyterlab/coreutils';
 import { submitPermissionDecision } from './request';
 import clsx from 'clsx';
 import { DiffView } from './diff-view';
+
+/**
+ * Convert an absolute filesystem path to a server-relative path.
+ * Returns the path unchanged if the server root is not set or the path
+ * is outside it.
+ */
+function toServerRelativePath(absolutePath: string): string {
+  const serverRoot = PageConfig.getOption('serverRoot');
+  if (!serverRoot) {
+    return absolutePath;
+  }
+  const relativePath = PathExt.relative(serverRoot, absolutePath);
+  // Path is outside server root — keep absolute
+  if (relativePath.startsWith('..')) {
+    return absolutePath;
+  }
+  return relativePath;
+}
 
 /**
  * Preamble component that renders tool call status lines above message body.
@@ -22,14 +40,7 @@ export function ToolCallsComponent(
   }
 
   const onOpenFile = (path: string) => {
-    // ACP agents provide absolute filesystem paths, but openOrReveal
-    // expects server-relative paths. Strip the server root prefix.
-    const serverRoot = PageConfig.getOption('serverRoot');
-    let relPath = path;
-    if (serverRoot && path.startsWith(serverRoot)) {
-      relPath = path.slice(serverRoot.length).replace(/^\//, '');
-    }
-    model.documentManager?.openOrReveal(relPath);
+    model.documentManager?.openOrReveal(toServerRelativePath(path));
   };
 
   return (
@@ -83,7 +94,7 @@ function formatToolInput(input: unknown): string {
 
 /**
  * Compute the pre-permission detail text for a tool call, or null if nothing
- * to show beyond the title. Returns a plain string so callers can check null.
+ * to show beyond the title.
  */
 function buildPermissionDetail(toolCall: IToolCall): string | null {
   const { kind, title, locations, raw_input } = toolCall;
@@ -113,8 +124,10 @@ function buildPermissionDetail(toolCall: IToolCall): string | null {
     locations?.length
   ) {
     return kind === 'move' && locations.length >= 2
-      ? locations[0] + '  \u2192  ' + locations[1]
-      : locations.join('\n');
+      ? toServerRelativePath(locations[0]) +
+          '  \u2192  ' +
+          toServerRelativePath(locations[1])
+      : locations.map(toServerRelativePath).join('\n');
   }
 
   // Generic fallback for unknown/MCP kinds with raw_input.
@@ -159,7 +172,7 @@ function buildPermissionDetail(toolCall: IToolCall): string | null {
   return null;
 }
 
-/** Tool kinds where expanded view shows full file path(s) from locations. */
+/** Tool kinds where expanded view shows file path(s) from locations. */
 const FILE_KINDS = new Set(['read', 'edit', 'delete', 'move']);
 
 /** Tool kinds where expanded view shows raw_output (stdout, search results, etc.). */
@@ -169,7 +182,7 @@ const OUTPUT_KINDS = new Set(['search', 'execute', 'think', 'fetch']);
  * Build the expandable details content for a tool call.
  * Returns lines of metadata to display, or empty array if nothing to show.
  *
- * File operations show full paths; output operations show raw_output;
+ * File operations show server-relative paths; output operations show raw_output;
  * switch_mode/other/None show nothing (clean title only).
  */
 function buildDetailsLines(toolCall: IToolCall): string[] {
@@ -178,7 +191,7 @@ function buildDetailsLines(toolCall: IToolCall): string[] {
 
   if (kind && FILE_KINDS.has(kind) && toolCall.locations?.length) {
     for (const loc of toolCall.locations) {
-      lines.push(loc);
+      lines.push(toServerRelativePath(loc));
     }
   } else if (kind && OUTPUT_KINDS.has(kind) && toolCall.raw_output) {
     lines.push(formatOutput(toolCall.raw_output));
@@ -248,7 +261,10 @@ function ToolCallLine({
             </span>{' '}
             <em>{displayTitle}</em>
           </summary>
-          <DiffView diffs={toolCall.diffs!} />
+          <DiffView
+            diffs={toolCall.diffs!}
+            toDisplayPath={toServerRelativePath}
+          />
         </details>
         <PermissionButtons toolCall={toolCall} />
       </div>
@@ -296,7 +312,8 @@ function ToolCallLine({
         {hasDiffs ? (
           <DiffView
             diffs={toolCall.diffs!}
-            onOpenFile={isCompleted ? onOpenFile : undefined}
+            onOpenFile={onOpenFile}
+            toDisplayPath={toServerRelativePath}
           />
         ) : (
           <div className="jp-jupyter-ai-acp-client-tool-call-detail">
