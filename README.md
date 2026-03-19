@@ -51,12 +51,14 @@ class ClaudeAcpPersona(BaseAcpPersona):
         )
 ```
 
-Currently, this package provides 2 personas:
+Currently, this package provides 3 personas:
 
 1. `@Claude-ACP`
    - requires `claude-code-acp`, installed via `npm install -g @zed-industries/claude-code-acp`
 2. `@Kiro`
    - requires `kiro-cli`, installed from https://kiro.dev
+3. `@Mistral-Vibe`
+   - requires `vibe-acp`, installed via `uv tool install mistral-vibe` or `pip install mistral-vibe`
 
 ## Dependencies
 
@@ -70,6 +72,7 @@ Currently, this package provides 2 personas:
 
 - `claude-code-acp` (enables `@Claude-ACP`)
 - `kiro-cli` (enables `@Kiro`)
+- `mistral-vibe` (enables `@Mistral-Vibe` via the `vibe-acp` command)
 
 ## Install
 
