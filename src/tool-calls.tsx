@@ -15,7 +15,10 @@ import { DiffView } from './diff-view';
  * is outside it.
  */
 function toServerRelativePath(absolutePath: string): string {
-  const serverRoot = PageConfig.getOption('serverRoot');
+  const rootUri = PageConfig.getOption('rootUri');
+  const serverRoot = rootUri
+    ? new URL(rootUri).pathname
+    : PageConfig.getOption('serverRoot');
   if (!serverRoot) {
     return absolutePath;
   }
