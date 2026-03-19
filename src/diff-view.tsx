@@ -22,11 +22,13 @@ interface IDiffLineInfo {
 function DiffBlock({
   diff,
   onOpenFile,
-  toDisplayPath
+  toDisplayPath,
+  pendingPermission
 }: {
   diff: IToolCallDiff;
   onOpenFile?: (path: string) => void;
   toDisplayPath?: (path: string) => string;
+  pendingPermission?: boolean;
 }): JSX.Element {
   const patch = structuredPatch(
     diff.path,
@@ -40,6 +42,8 @@ function DiffBlock({
   const displayPath = toDisplayPath
     ? toDisplayPath(diff.path)
     : PathExt.basename(diff.path);
+  const isClickable =
+    !!onOpenFile && !(pendingPermission && diff.old_text === undefined);
   const [expanded, setExpanded] = React.useState(false);
 
   // Flatten hunks into renderable lines
@@ -74,9 +78,9 @@ function DiffBlock({
     <div className="jp-jupyter-ai-acp-client-diff-block">
       <div
         className={clsx('jp-jupyter-ai-acp-client-diff-header', {
-          'jp-jupyter-ai-acp-client-diff-header-clickable': !!onOpenFile
+          'jp-jupyter-ai-acp-client-diff-header-clickable': isClickable
         })}
-        onClick={onOpenFile ? () => onOpenFile(diff.path) : undefined}
+        onClick={isClickable ? () => onOpenFile!(diff.path) : undefined}
         title={diff.path}
       >
         {displayPath}
@@ -119,11 +123,13 @@ function DiffBlock({
 export function DiffView({
   diffs,
   onOpenFile,
-  toDisplayPath
+  toDisplayPath,
+  pendingPermission
 }: {
   diffs: IToolCallDiff[];
   onOpenFile?: (path: string) => void;
   toDisplayPath?: (path: string) => string;
+  pendingPermission?: boolean;
 }): JSX.Element {
   return (
     <div className="jp-jupyter-ai-acp-client-diff-container">
@@ -133,6 +139,7 @@ export function DiffView({
           diff={d}
           onOpenFile={onOpenFile}
           toDisplayPath={toDisplayPath}
+          pendingPermission={pendingPermission}
         />
       ))}
     </div>

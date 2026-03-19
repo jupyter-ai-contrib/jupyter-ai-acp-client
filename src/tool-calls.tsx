@@ -265,6 +265,7 @@ function ToolCallLine({
             diffs={toolCall.diffs!}
             onOpenFile={toolCall.kind === 'edit' ? onOpenFile : undefined}
             toDisplayPath={toServerRelativePath}
+            pendingPermission
           />
         </details>
         <PermissionButtons toolCall={toolCall} />
