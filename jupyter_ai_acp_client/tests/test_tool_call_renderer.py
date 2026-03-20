@@ -695,3 +695,66 @@ class TestExtractDiffs:
         result = extract_diffs(content)
         assert result is not None
         assert result[0].old_text is None
+
+    def test_relative_path_normalized_with_root_dir(self):
+        content = [
+            FileEditToolCallContent(
+                path="b.py", newText="new", type="diff"
+            )
+        ]
+        result = extract_diffs(content, root_dir="/srv")
+        assert result is not None
+        assert result[0].path == "/srv/b.py"
+
+    def test_absolute_path_unchanged_with_root_dir(self):
+        content = [
+            FileEditToolCallContent(
+                path="/a/b.py", newText="new", type="diff"
+            )
+        ]
+        result = extract_diffs(content, root_dir="/srv")
+        assert result is not None
+        assert result[0].path == "/a/b.py"
+
+    def test_no_root_dir_preserves_relative_path(self):
+        content = [
+            FileEditToolCallContent(
+                path="b.py", newText="new", type="diff"
+            )
+        ]
+        result = extract_diffs(content)
+        assert result is not None
+        assert result[0].path == "b.py"
+
+    def test_tilde_path_expanded_with_root_dir(self):
+        content = [
+            FileEditToolCallContent(
+                path="~/docs/b.py", newText="new", type="diff"
+            )
+        ]
+        result = extract_diffs(content, root_dir="/srv")
+        assert result is not None
+        # expanduser() resolves ~ to actual home dir
+        assert result[0].path.endswith("/docs/b.py")
+        assert not result[0].path.startswith("~")
+        assert result[0].path.startswith("/")
+
+    def test_dotdot_path_resolved_with_root_dir(self):
+        content = [
+            FileEditToolCallContent(
+                path="../nbs/b.py", newText="new", type="diff"
+            )
+        ]
+        result = extract_diffs(content, root_dir="/srv/root")
+        assert result is not None
+        assert result[0].path == "/srv/nbs/b.py"
+
+    def test_dot_relative_path_cleaned_with_root_dir(self):
+        content = [
+            FileEditToolCallContent(
+                path="./dir/b.py", newText="new", type="diff"
+            )
+        ]
+        result = extract_diffs(content, root_dir="/srv")
+        assert result is not None
+        assert result[0].path == "/srv/dir/b.py"

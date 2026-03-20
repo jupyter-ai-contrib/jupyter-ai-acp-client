@@ -42,8 +42,15 @@ function DiffBlock({
   const displayPath = toDisplayPath
     ? toDisplayPath(diff.path)
     : PathExt.basename(diff.path);
+  // After backend normalization, diff.path is always absolute.
+  // toDisplayPath returns a relative path for files inside the server root,
+  // and the unchanged absolute path (leading '/') for files outside it.
+  // Files outside the server root cannot be opened (Contents API limitation).
+  const isOutsideRoot = displayPath.startsWith('/');
   const isClickable =
-    !!onOpenFile && !(pendingPermission && diff.old_text === undefined);
+    !!onOpenFile &&
+    !isOutsideRoot &&
+    !(pendingPermission && diff.old_text === undefined);
   const [expanded, setExpanded] = React.useState(false);
 
   // Flatten hunks into renderable lines

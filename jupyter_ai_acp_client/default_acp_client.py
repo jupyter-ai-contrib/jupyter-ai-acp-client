@@ -478,7 +478,7 @@ class JaiAcpClient(Client):
 
             # Extract diffs from tool_call.content — agents may send
             # FileEditToolCallContent here rather than on ToolCallStart
-            diffs = extract_diffs(tool_call.content)
+            diffs = extract_diffs(tool_call.content, root_dir=persona.parent.root_dir)
             if diffs:
                 tc.diffs = diffs
 

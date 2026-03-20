@@ -204,7 +204,7 @@ class ToolCallManager:
         locations_paths = (
             [loc.path for loc in update.locations] if update.locations else None
         )
-        diffs = extract_diffs(update.content)
+        diffs = extract_diffs(update.content, root_dir=persona.parent.root_dir)
 
         raw_input = ensure_serializable(update.raw_input)
 
@@ -245,7 +245,7 @@ class ToolCallManager:
         locations_paths = (
             [loc.path for loc in update.locations] if update.locations else None
         )
-        diffs = extract_diffs(update.content)
+        diffs = extract_diffs(update.content, root_dir=persona.parent.root_dir)
         persona.log.info(
             f"tool_call_progress: id={update.tool_call_id} title={update.title!r}"
             f" status={status_str} locations={locations_paths}"

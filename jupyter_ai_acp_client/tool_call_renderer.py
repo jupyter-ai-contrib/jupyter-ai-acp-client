@@ -7,6 +7,7 @@ for Yjs transport as part of chat messages.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
@@ -48,15 +49,25 @@ def extract_diffs(
     content: Optional[
         list[ContentToolCallContent | FileEditToolCallContent | TerminalToolCallContent]
     ],
+    root_dir: Optional[str] = None,
 ) -> Optional[list[ToolCallDiff]]:
-    """Extract FileEditToolCallContent items from an ACP content list."""
+    """Extract FileEditToolCallContent items from an ACP content list.
+
+    When root_dir is provided, normalizes relative and tilde paths to absolute
+    so that ToolCallDiff.path is always a resolved filesystem path.
+    """
     if not content:
         return None
-    diffs = [
-        ToolCallDiff(path=item.path, new_text=item.new_text, old_text=item.old_text)
-        for item in content
-        if isinstance(item, FileEditToolCallContent)
-    ]
+    diffs = []
+    for item in content:
+        if isinstance(item, FileEditToolCallContent):
+            path = item.path
+            if root_dir:
+                p = Path(path).expanduser()
+                if not p.is_absolute():
+                    p = (Path(root_dir) / p).resolve()
+                path = str(p)
+            diffs.append(ToolCallDiff(path=path, new_text=item.new_text, old_text=item.old_text))
     return diffs or None
 
 
