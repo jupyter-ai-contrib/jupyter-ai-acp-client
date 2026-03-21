@@ -10,8 +10,7 @@ from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
 
 from .default_acp_client import JaiAcpClient
-
-
+from .telemetry import emit_event, track
 
 class BaseAcpPersona(BasePersona):
     _before_subprocess_future: ClassVar[Task[None] | None] = None
@@ -105,10 +104,14 @@ class BaseAcpPersona(BasePersona):
         return process
 
     async def _init_client(self) -> JaiAcpClient:
-        agent_subprocess = await self.get_agent_subprocess()
-        client = JaiAcpClient(agent_subprocess=agent_subprocess, event_loop=self.event_loop)
-        self.log.info("Initialized ACP client for '%s'.", self.__class__.__name__)
-        return client
+        async with track(self.event_logger, "acp_server_init", {
+            "persona_class": self.__class__.__name__,
+        }):
+            agent_subprocess = await self.get_agent_subprocess()
+            client = JaiAcpClient(agent_subprocess=agent_subprocess, event_loop=self.event_loop)
+            self.log.info("Initialized ACP client for '%s'.", self.__class__.__name__)
+            return client
+
     
     def _get_existing_sessions(self) -> dict[str, str]:
         """
@@ -144,23 +147,32 @@ class BaseAcpPersona(BasePersona):
         if existing_session_id and supports_session_load:
             # load existing session if one exists and the agent indicates it
             # supports loading sessions in its agent capabilities
-            response = await client.load_session(persona=self, session_id=existing_session_id)
-            self.log.info(
-                "Loaded existing ACP client session for '%s' with ID '%s'.",
-                self.__class__.__name__,
-                existing_session_id,
-            )
-            return response
+            async with track(self.event_logger, "acp_session_init", {
+                "persona_class": self.__class__.__name__,
+                "session_id": existing_session_id,
+                "session_operation": "load",
+            }):
+                response = await client.load_session(persona=self, session_id=existing_session_id)
+                self.log.info(
+                    "Loaded existing ACP client session for '%s' with ID '%s'.",
+                    self.__class__.__name__,
+                    existing_session_id,
+                )
+                return response
         else:
             # otherwise create new session and add it to the metadata
-            response = await client.create_session(persona=self)
-            self.log.info(
-                "Initialized new ACP client session for '%s' with ID '%s'.",
-                self.__class__.__name__,
-                response.session_id,
-            )
-            self._record_new_session(response.session_id)
-            return response
+            async with track(self.event_logger, "acp_session_init", {
+                "persona_class": self.__class__.__name__,
+                "session_operation": "new",
+            }):
+                response = await client.create_session(persona=self)
+                self.log.info(
+                    "Initialized new ACP client session for '%s' with ID '%s'.",
+                    self.__class__.__name__,
+                    response.session_id,
+                )
+                self._record_new_session(response.session_id)
+                return response
 
     async def get_agent_subprocess(self) -> asyncio.subprocess.Process:
         """
@@ -221,6 +233,11 @@ class BaseAcpPersona(BasePersona):
 
         client = await self.get_client()
         session_id = await self.get_session_id()
+
+        emit_event(self.event_logger, "acp_chat_message", "success", {
+            "persona_class": self.__class__.__name__,
+            "session_id": session_id,
+        })
 
         prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
 
@@ -306,3 +323,15 @@ class BaseAcpPersona(BasePersona):
                 exc_info=True,
             )
         self.log.info("Successfully closed ACP agent and client for '%s'.", self.__class__.__name__)
+
+    @property
+    def event_logger(self):
+        """Return the Jupyter EventLogger, or None if unavailable."""
+        try:
+            from jupyter_events import EventLogger
+            extension_app = self.parent.parent  # ExtensionApp instance
+            event_logger: EventLogger = extension_app.serverapp.event_logger
+            return event_logger
+        except Exception:
+            self.log.warning("EventLogger unavailable; telemetry will be skipped.")
+            return None

@@ -17,14 +17,28 @@ class JaiAcpClientExtension(ExtensionApp):
     ]
 
     def initialize_settings(self):
-        """Initialize router settings and event listeners."""
-        # # Ensure 'jupyter-ai' dictionary is in `self.settings`, which gets
-        # # copied to `self.serverapp.web_app.settings` after this method returns
-        # if 'jupyter-ai' not in self.settings:
-        #     self.settings['jupyter-ai'] = {}
-        
-        # self.settings['jupyter-ai']['acp-client']
-        return
+        """Initialize router settings and register telemetry event schema."""
+        from .telemetry import register_telemetry_schemas, SCHEMA_ID
+
+        try:
+            event_logger = self.serverapp.event_logger
+            register_telemetry_schemas(event_logger)
+
+            ext_log = self.log
+
+            async def _log_telemetry_event(logger, schema_id, data):
+                ext_log.info("[telemetry event] schema=%s data=%s", schema_id, data)
+
+            event_logger.add_listener(
+                schema_id=SCHEMA_ID,
+                listener=_log_telemetry_event,
+            )
+            self.log.info("Telemetry schema and event listener registered.")
+        except Exception:
+            self.log.error(
+                "Failed to register telemetry schema or listener.",
+                exc_info=True,
+            )
 
     async def stop_extension(self):
         """Clean up router when extension stops."""
