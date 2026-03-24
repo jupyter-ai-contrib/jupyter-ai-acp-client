@@ -57,9 +57,9 @@ Currently, this package provides 4 personas:
   - requires `claude-code-acp`, installed via `npm install -g @zed-industries/claude-code-acp`
   - optional env variable `CLAUDE_CODE_EXECUTABLE` points to your custom-installed Claude executable location. By default, claude-code-acp uses Claude packaged in `@zed-industries/claude-code-acp`.
 - `@Gemini`
-  - requires `gemini` CLI, installed via https://geminicli.com/
+  - requires `gemini` CLI (>= 0.34.0), installed via https://geminicli.com/
 - `@Kiro`
-  - requires `kiro-cli`, installed via https://kiro.dev
+  - requires `kiro-cli` (>= 1.25.0, < 2), installed via https://kiro.dev
 - `@Mistral-Vibe`
   - requires `vibe-acp`, installed via `uv tool install mistral-vibe` or `pip install mistral-vibe`
 
