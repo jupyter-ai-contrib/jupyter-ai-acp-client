@@ -28,13 +28,13 @@ package also provides a default ACP client implementation as `JaiAcpClient`.
   the persona name, the persona avatar, and the `executable` starting the ACP
   agent server.
 
-For example, the `@Claude-ACP` persona is defined in `claude.py` using less than
+For example, the `@Claude` persona is defined in `claude.py` using less than
 20 lines of code:
 
 ```py
 class ClaudeAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
-        executable = ["claude-code-acp"]
+        executable = ["claude-agent-acp"]
         super().__init__(*args, executable=executable, **kwargs)
 
     @property
@@ -44,22 +44,24 @@ class ClaudeAcpPersona(BaseAcpPersona):
         ))
 
         return PersonaDefaults(
-            name="Claude-ACP",
+            name="Claude",
             description="Claude Code as an ACP agent persona.",
             avatar_path=avatar_path,
             system_prompt="unused"
         )
 ```
 
-Currently, this package provides 3 personas:
+Currently, this package provides 4 personas:
 
-1. `@Claude-ACP`
-   - requires `claude-code-acp`, installed via `npm install -g @zed-industries/claude-code-acp`
-   - optional env variable `CLAUDE_CODE_EXECUTABLE` points to your custom-installed Claude executable location. By default, claude-code-acp uses Claude packaged in `@zed-industries/claude-code-acp`.
-2. `@Kiro`
-   - requires `kiro-cli`, installed from https://kiro.dev
-3. `@Mistral-Vibe`
-   - requires `vibe-acp`, installed via `uv tool install mistral-vibe` or `pip install mistral-vibe`
+- `@Claude`
+  - requires `claude-agent-acp`, installed via `npm install -g @zed-industries/claude-agent-acp`
+  - optional env variable `CLAUDE_CODE_EXECUTABLE` points to your custom-installed Claude executable location. By default, claude-agent-acp uses Claude packaged in `@zed-industries/claude-agent-acp`.
+- `@Gemini`
+  - requires `gemini` CLI (>= 0.34.0), installed via https://geminicli.com/
+- `@Kiro`
+  - requires `kiro-cli` (>= 1.25.0, < 2), installed via https://kiro.dev
+- `@Mistral-Vibe`
+  - requires `vibe-acp`, installed via `uv tool install mistral-vibe` or `pip install mistral-vibe`
 
 ## Dependencies
 
@@ -71,7 +73,8 @@ Currently, this package provides 3 personas:
 
 **Optional**
 
-- `claude-code-acp` (enables `@Claude-ACP`)
+- `claude-agent-acp` (enables `@Claude`)
+- `gemini` (enables `@Gemini`)
 - `kiro-cli` (enables `@Kiro`)
 - `mistral-vibe` (enables `@Mistral-Vibe` via the `vibe-acp` command)
 
