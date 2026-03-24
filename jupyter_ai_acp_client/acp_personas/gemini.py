@@ -47,8 +47,8 @@ try:
     version_str = version_match.group(1)
     version_parts = [int(x) for x in version_str.split('.')]
 
-    # Check if version >= 0.1.0
-    required_version = (0, 1, 0)
+    # Check if version >= 0.1.13
+    required_version = (0, 1, 13)
     current_version = tuple(version_parts)
 
     if current_version < required_version:
@@ -72,7 +72,7 @@ except FileNotFoundError:
 class GeminiAcpPersona(BaseAcpPersona):
     _terminal_opened: bool
     def __init__(self, *args, **kwargs):
-        executable = ["gemini", "--experimental-acp"] # For a specific model, use additional entries "-m", "<model_id>"
+        executable = ["gemini", "--acp"] # For a specific model, use additional entries "-m", "<model_id>"
         super().__init__(*args, executable=executable, **kwargs)
         self._terminal_opened = False
 
