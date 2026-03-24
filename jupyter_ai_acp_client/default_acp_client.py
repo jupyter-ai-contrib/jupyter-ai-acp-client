@@ -462,12 +462,14 @@ class JaiAcpClient(Client):
             # then flush to Yjs so the frontend renders the buttons.
             tc = self._tool_call_manager.get_tool_call(session_id, tool_call.tool_call_id)
             if tc is None:
-                persona.log.warning(
-                    f"request_permission: tool_call_id={tool_call.tool_call_id} not found in session {session_id}"
+                # Agent sent request_permission without a prior tool_call start —
+                # ACP allows this, so create the tool call state now.
+                self._tool_call_manager.handle_start(
+                    session_id,
+                    ToolCallStart(session_update="tool_call", **tool_call.model_dump(by_alias=True, exclude_none=True)),
+                    persona,
                 )
-                raise RequestError.invalid_params(
-                    {"tool_call_id": f"Unknown tool_call_id: {tool_call.tool_call_id}"}
-                )
+                tc = self._tool_call_manager.get_tool_call(session_id, tool_call.tool_call_id)
             tc.permission_options = permission_options
             tc.permission_status = "pending"
             tc.session_id = session_id
