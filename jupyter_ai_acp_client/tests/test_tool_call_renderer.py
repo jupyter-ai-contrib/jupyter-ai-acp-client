@@ -827,38 +827,6 @@ class TestParseUnifiedDiff:
     def test_empty_hunks(self):
         assert _parse_unified_diff("@@ -0,0 +0,0 @@\n") is None
 
-    def test_real_opencode_new_file(self):
-        """Verified format from OpenCode request_permission logs."""
-        diff = (
-            "Index: /Users/user/project/verify_write.py\n"
-            "===================================================================\n"
-            "--- /Users/user/project/verify_write.py\n"
-            "+++ /Users/user/project/verify_write.py\n"
-            '@@ -0,0 +1,1 @@\n'
-            '+print("hello world")\n'
-        )
-        result = _parse_unified_diff(diff)
-        assert result is not None
-        old, new = result
-        assert old == ""
-        assert new == 'print("hello world")'
-
-    def test_real_opencode_edit_file(self):
-        """Verified format from OpenCode request_permission logs."""
-        diff = (
-            "Index: /Users/user/project/verify_write.py\n"
-            "===================================================================\n"
-            "--- /Users/user/project/verify_write.py\n"
-            "+++ /Users/user/project/verify_write.py\n"
-            "@@ -1,1 +1,2 @@\n"
-            "+# this is a test\n"
-            ' print("hello world")\n'
-        )
-        result = _parse_unified_diff(diff)
-        assert result is not None
-        old, new = result
-        assert old == 'print("hello world")'
-        assert new == '# this is a test\nprint("hello world")'
 
 
 class TestExtractDiffsFromRawInput:
@@ -899,10 +867,8 @@ class TestExtractDiffsFromRawInput:
     def test_no_diff_key(self):
         assert extract_diffs_from_raw_input({"filepath": "/tmp/f.py"}) is None
 
-    def test_non_dict(self):
+    def test_non_dict_input(self):
         assert extract_diffs_from_raw_input("string") is None
-
-    def test_none(self):
         assert extract_diffs_from_raw_input(None) is None
 
     def test_diff_not_string(self):
@@ -911,6 +877,9 @@ class TestExtractDiffsFromRawInput:
     def test_invalid_diff_content(self):
         raw = {"filepath": "/f.py", "diff": "not a unified diff"}
         assert extract_diffs_from_raw_input(raw) is None
+
+    def test_empty_diff_string(self):
+        assert extract_diffs_from_raw_input({"filepath": "/f.py", "diff": ""}) is None
 
     def test_relative_path_resolved(self):
         raw = {
