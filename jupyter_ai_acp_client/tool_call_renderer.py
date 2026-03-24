@@ -117,7 +117,11 @@ def update_tool_call_from_start(
 
     Creates a new ToolCallState with status 'in_progress'.
     Generates a title from kind/locations if the agent sends an empty title.
+    No-op if the tool call already exists.
     """
+    if tool_call_id in tool_calls:
+        return
+
     if not title and (kind or locations):
         title = _generate_title(kind, locations)
     elif not title:
