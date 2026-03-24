@@ -51,7 +51,7 @@ class TestUpdateToolCallFromStart:
         tc = tool_calls["tc-1"]
         assert tc.title == "New title"
         assert tc.kind == "edit"
-        assert tc.status == "in_progress"
+        assert tc.status == "completed"  # status preserved on merge
 
     def test_without_kind(self):
         tool_calls = {}
