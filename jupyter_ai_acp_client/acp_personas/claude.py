@@ -1,9 +1,9 @@
 import shutil
 from jupyter_ai_persona_manager import PersonaRequirementsUnmet
-if shutil.which("claude-code-acp") is None:
+if shutil.which("claude-agent-acp") is None:
     raise PersonaRequirementsUnmet(
-        "This persona requires the Claude Code ACP adapter to be installed."
-        " Install it via `npm install -g @zed-industries/claude-code-acp`"
+        "This persona requires the Claude Agent ACP adapter to be installed."
+        " Install it via `npm install -g @zed-industries/claude-agent-acp`"
         " then restart."
     )
 
@@ -15,7 +15,7 @@ from acp.exceptions import RequestError
 from ..base_acp_persona import BaseAcpPersona
 class ClaudeAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
-        executable = ["claude-code-acp"]
+        executable = ["claude-agent-acp"]
         super().__init__(*args, executable=executable, **kwargs)
     
     @property
@@ -33,7 +33,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
     
     async def before_agent_subprocess(self):
         # The Claude ACP agent server seems to always be able to start as long
-        # as `claude-code-acp` is installed, so this method does not need to be
+        # as `claude-agent-acp` is installed, so this method does not need to be
         # implemented.
         return None
 
