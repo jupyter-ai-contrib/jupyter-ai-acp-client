@@ -53,7 +53,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
             await super().process_message(message)
         except RequestError as e:
             if "Authentication required" in str(e):
-                self.log.info("[Claude] User is not logged in.")
+                self.log.debug("[Claude] User is not logged in.")
                 await self.handle_no_auth(message)
             else:
                 raise e

@@ -253,7 +253,7 @@ class JaiAcpClient(Client):
             # Reset session state for this prompt
             self._tool_call_manager.reset(session_id)
 
-            persona.log.info(f"prompt_and_reply: starting for session {session_id}")
+            persona.log.debug(f"prompt_and_reply: starting for session {session_id}")
 
             # Set awareness to indicate writing
             persona.awareness.set_local_state_field("isWriting", True)
@@ -317,7 +317,7 @@ class JaiAcpClient(Client):
                             trigger_actions=[find_mentions],
                         )
 
-                persona.log.info(f"prompt_and_reply: completed for session {session_id}")
+                persona.log.debug(f"prompt_and_reply: completed for session {session_id}")
                 return response
             except Exception:
                 persona.log.exception(f"prompt_and_reply: failed for session {session_id}")
@@ -347,7 +347,7 @@ class JaiAcpClient(Client):
         if persona is None:
             return
         message_id = self._tool_call_manager.get_or_create_text_message(session_id, persona)
-        persona.log.info(f"agent_message_chunk: {len(text)} chars")
+        persona.log.debug(f"agent_message_chunk: {len(text)} chars")
 
         msg = Message(
             id=message_id,
@@ -382,7 +382,7 @@ class JaiAcpClient(Client):
 
         persona = self._personas_by_session.get(session_id)
         if persona:
-            persona.log.info(f"session_update: {type(update).__name__} for session {session_id}")
+            persona.log.debug(f"session_update: {type(update).__name__} for session {session_id}")
 
         if isinstance(update, AvailableCommandsUpdate):
             if not update.available_commands:
@@ -440,7 +440,7 @@ class JaiAcpClient(Client):
             )
 
         try:
-            persona.log.info(
+            persona.log.debug(
                 f"request_permission: CALLED session={session_id} "
                 f"tool_call_id={tool_call.tool_call_id} "
                 f"options_count={len(options)} "
@@ -454,7 +454,7 @@ class JaiAcpClient(Client):
                 session_id, tool_call.tool_call_id, options=permission_options
             )
 
-            persona.log.info(
+            persona.log.debug(
                 f"request_permission: {len(permission_options)} permission_options"
             )
 
@@ -698,7 +698,7 @@ class JaiAcpClient(Client):
         # Cancel pending permissions
         rejected = self._permission_manager.cancel_all_pending(session_id)
         if rejected and persona:
-            persona.log.info(
+            persona.log.debug(
                 f"_cancel_pending_work: auto-rejected {rejected} pending permission(s) for session {session_id}"
             )
 

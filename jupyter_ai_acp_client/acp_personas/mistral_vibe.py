@@ -66,7 +66,7 @@ class MistralVibeAcpPersona(BaseAcpPersona):
             if not _is_auth_error(error):
                 raise
 
-            self.log.info(
+            self.log.debug(
                 "[Mistral Vibe] Authentication or configuration required: %s",
                 error,
             )
