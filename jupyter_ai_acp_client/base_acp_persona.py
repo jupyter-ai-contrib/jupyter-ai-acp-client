@@ -323,5 +323,5 @@ class BaseAcpPersona(BasePersona):
             event_logger: EventLogger = extension_app.serverapp.event_logger
             return event_logger
         except Exception:
-            self.log.warning("EventLogger unavailable; telemetry will be skipped.")
+            self.log.warning("EventLogger unavailable; event logging will be skipped.")
             return None

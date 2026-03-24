@@ -61,7 +61,7 @@ def register_telemetry_schemas(event_logger: EventLogger) -> None:
     try:
         event_logger.register_event_schema(ACP_TELEMETRY_SCHEMA)
     except Exception:
-        logger.error("Failed to register telemetry event schema.", exc_info=True)
+        logger.error("Failed to register ACP event schema with EventLogger.", exc_info=True)
 
 
 def emit_event(
@@ -86,7 +86,7 @@ def emit_event(
             data["details"] = details
         event_logger.emit(schema_id=SCHEMA_ID, data=data)
     except Exception:
-        logger.warning("Failed to emit telemetry event %s.", operation, exc_info=True)
+        logger.warning("Failed to emit ACP event to EventLogger: %s", operation, exc_info=True)
 
 def auto_emit_event(operation: str, details_fn=None):
     def decorator(method):
