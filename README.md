@@ -28,7 +28,7 @@ package also provides a default ACP client implementation as `JaiAcpClient`.
   the persona name, the persona avatar, and the `executable` starting the ACP
   agent server.
 
-For example, the `@Claude-ACP` persona is defined in `claude.py` using less than
+For example, the `@Claude` persona is defined in `claude.py` using less than
 20 lines of code:
 
 ```py
@@ -44,7 +44,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
         ))
 
         return PersonaDefaults(
-            name="Claude-ACP",
+            name="Claude",
             description="Claude Code as an ACP agent persona.",
             avatar_path=avatar_path,
             system_prompt="unused"
@@ -53,7 +53,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
 
 Currently, this package provides 3 personas:
 
-1. `@Claude-ACP`
+1. `@Claude`
    - requires `claude-code-acp`, installed via `npm install -g @zed-industries/claude-code-acp`
    - optional env variable `CLAUDE_CODE_EXECUTABLE` points to your custom-installed Claude executable location. By default, claude-code-acp uses Claude packaged in `@zed-industries/claude-code-acp`.
 2. `@Kiro`
@@ -71,7 +71,7 @@ Currently, this package provides 3 personas:
 
 **Optional**
 
-- `claude-code-acp` (enables `@Claude-ACP`)
+- `claude-code-acp` (enables `@Claude`)
 - `kiro-cli` (enables `@Kiro`)
 - `mistral-vibe` (enables `@Mistral-Vibe` via the `vibe-acp` command)
 

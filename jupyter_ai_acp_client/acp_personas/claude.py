@@ -25,7 +25,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
         ))
 
         return PersonaDefaults(
-            name="Claude-ACP",
+            name="Claude",
             description="Claude Code as an ACP agent persona.",
             avatar_path=avatar_path,
             system_prompt="unused"
