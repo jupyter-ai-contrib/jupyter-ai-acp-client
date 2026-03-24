@@ -466,7 +466,7 @@ class JaiAcpClient(Client):
                 # ACP allows this, so create the tool call state now.
                 self._tool_call_manager.handle_start(
                     session_id,
-                    ToolCallStart(session_update="tool_call", **tool_call.model_dump(by_alias=True, exclude_none=True)),
+                    ToolCallStart(session_update="tool_call", **tool_call.model_dump(exclude_none=True)),
                     persona,
                 )
                 tc = self._tool_call_manager.get_tool_call(session_id, tool_call.tool_call_id)
