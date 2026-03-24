@@ -1,13 +1,21 @@
+import asyncio
 import os
 import re
 import shutil
 import subprocess
+import sys
+from asyncio.subprocess import Process
 
 from acp.exceptions import RequestError
 from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
 from jupyterlab_chat.models import Message
 
 from ..base_acp_persona import BaseAcpPersona
+
+# Path to the bundled opencode.json that ships with this package.
+# Configures permission: {edit: "ask", bash: "ask"} so OpenCode requests
+# approval before file edits and shell commands.
+_BUNDLED_CONFIG = os.path.join(os.path.dirname(__file__), "opencode.json")
 
 
 def _is_auth_error(error: Exception) -> bool:
@@ -111,8 +119,20 @@ class OpenCodeAcpPersona(BaseAcpPersona):
             system_prompt="unused",
         )
 
-    async def before_agent_subprocess(self) -> None:
-        return None
+    async def _init_agent_subprocess(self) -> Process:
+        await self._before_subprocess_future
+        env = os.environ.copy()
+        env["OPENCODE_CONFIG"] = _BUNDLED_CONFIG
+        process = await asyncio.create_subprocess_exec(
+            *self._executable,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=sys.stderr,
+            limit=50 * 1024 * 1024,
+            env=env,
+        )
+        self.log.info("Spawned ACP agent subprocess for '%s'.", self.__class__.__name__)
+        return process
 
     async def is_authed(self) -> bool:
         return True
