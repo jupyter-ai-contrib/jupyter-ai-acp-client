@@ -1,8 +1,20 @@
 """Tests for the OpenCode ACP persona helper functions."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
-from jupyter_ai_acp_client.acp_personas.opencode import _is_auth_error
+# opencode.py has a module-level guard that raises PersonaRequirementsUnmet
+# when the opencode CLI is not installed. Mock the guard so we can import
+# _is_auth_error in CI without the CLI.
+_mock_run = MagicMock()
+_mock_run.returncode = 0
+_mock_run.stdout = "1.0.0"
+_mock_run.stderr = ""
+
+with patch("shutil.which", return_value="/usr/bin/opencode"), \
+     patch("subprocess.run", return_value=_mock_run):
+    from jupyter_ai_acp_client.acp_personas.opencode import _is_auth_error
 
 
 class TestIsAuthError:
