@@ -102,14 +102,14 @@ class KiroAcpPersona(BaseAcpPersona):
 
             # Reaching here := user is not signed in
             if not failed_auth_check:
-                self.log.info("[Kiro] User is not signed in.")
+                self.log.debug("[Kiro] User is not signed in.")
                 failed_auth_check = True
 
             # Re-check every 2 seconds
             await asyncio.sleep(2)
         
         # Reaching this point := user is authenticated
-        self.log.info("[Kiro] User is signed in.")
+        self.log.debug("[Kiro] User is signed in.")
 
         # If initially signed out, send a message letting the user know they are
         # now signed in.

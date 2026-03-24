@@ -89,7 +89,7 @@ class ToolCallManager:
         )
         session.current_message_id = message_id
         session.all_message_ids.append(message_id)
-        persona.log.info(f"Created message {message_id} for session {session_id}")
+        persona.log.debug(f"Created message {message_id} for session {session_id}")
         persona.awareness.set_local_state_field("isWriting", message_id)
 
         return message_id
@@ -208,7 +208,7 @@ class ToolCallManager:
 
         raw_input = ensure_serializable(update.raw_input)
 
-        persona.log.info(
+        persona.log.debug(
             f"tool_call_start: id={update.tool_call_id} title={update.title!r}"
             f" kind={kind_str} locations={locations_paths}"
             f" diffs={len(diffs) if diffs else 0}"
@@ -246,7 +246,7 @@ class ToolCallManager:
             [loc.path for loc in update.locations] if update.locations else None
         )
         diffs = extract_diffs(update.content, root_dir=persona.parent.root_dir)
-        persona.log.info(
+        persona.log.debug(
             f"tool_call_progress: id={update.tool_call_id} title={update.title!r}"
             f" status={status_str} locations={locations_paths}"
             f" diffs={len(diffs) if diffs else 0}"

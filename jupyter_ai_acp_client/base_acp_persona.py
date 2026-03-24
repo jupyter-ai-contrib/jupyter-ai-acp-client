@@ -101,13 +101,13 @@ class BaseAcpPersona(BasePersona):
             stderr=sys.stderr,
             limit=50 * 1024 * 1024,
         )
-        self.log.info("Spawned ACP agent subprocess for '%s'.", self.__class__.__name__)
+        self.log.debug("Spawned ACP agent subprocess for '%s'.", self.__class__.__name__)
         return process
 
     async def _init_client(self) -> JaiAcpClient:
         agent_subprocess = await self.get_agent_subprocess()
         client = JaiAcpClient(agent_subprocess=agent_subprocess, event_loop=self.event_loop)
-        self.log.info("Initialized ACP client for '%s'.", self.__class__.__name__)
+        self.log.debug("Initialized ACP client for '%s'.", self.__class__.__name__)
         return client
     
     def _get_existing_sessions(self) -> dict[str, str]:
@@ -145,7 +145,7 @@ class BaseAcpPersona(BasePersona):
             # load existing session if one exists and the agent indicates it
             # supports loading sessions in its agent capabilities
             response = await client.load_session(persona=self, session_id=existing_session_id)
-            self.log.info(
+            self.log.debug(
                 "Loaded existing ACP client session for '%s' with ID '%s'.",
                 self.__class__.__name__,
                 existing_session_id,
@@ -154,7 +154,7 @@ class BaseAcpPersona(BasePersona):
         else:
             # otherwise create new session and add it to the metadata
             response = await client.create_session(persona=self)
-            self.log.info(
+            self.log.debug(
                 "Initialized new ACP client session for '%s' with ID '%s'.",
                 self.__class__.__name__,
                 response.session_id,
@@ -258,7 +258,7 @@ class BaseAcpPersona(BasePersona):
     
     @acp_slash_commands.setter
     def acp_slash_commands(self, commands: list[AvailableCommand]):
-        self.log.info(
+        self.log.debug(
             "Setting %d slash commands for '%s' in room '%s'.",
             len(commands),
             self.name,
@@ -274,7 +274,7 @@ class BaseAcpPersona(BasePersona):
         self.event_loop.create_task(self._shutdown())
 
     async def _shutdown(self):
-        self.log.info("Closing ACP agent and client for '%s'.", self.__class__.__name__)
+        self.log.debug("Closing ACP agent and client for '%s'.", self.__class__.__name__)
         client = await self.get_client()
         try:
             session_id = await self.get_session_id()
@@ -305,4 +305,4 @@ class BaseAcpPersona(BasePersona):
                 self.__class__.__name__,
                 exc_info=True,
             )
-        self.log.info("Successfully closed ACP agent and client for '%s'.", self.__class__.__name__)
+        self.log.debug("Successfully closed ACP agent and client for '%s'.", self.__class__.__name__)
