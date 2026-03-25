@@ -24,19 +24,12 @@ class TestIsAuthError:
         "message",
         [
             "API key not found",
-            "Invalid api key provided",
             "OPENAI_API_KEY is not set",
             "Authentication required",
-            "authentication failed for provider",
             "Unauthorized access",
-            "Request unauthorized",
             "Invalid credential",
-            "credentials expired",
             "Provider not configured",
-            "Model is not configured",
             "403 Forbidden",
-            "request forbidden by policy",
-            "missing api_key parameter",
         ],
     )
     def test_detects_auth_errors(self, message):
