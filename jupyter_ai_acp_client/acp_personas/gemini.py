@@ -52,8 +52,9 @@ try:
     current_version = tuple(version_parts)
 
     if current_version < required_version:
+        required_version_str = ".".join(map(str, required_version))
         raise PersonaRequirementsUnmet(
-            f"gemini CLI version {version_str} is installed, but version >=0.1.0 is required."
+            f"gemini CLI version {version_str} is installed, but version >={required_version_str} is required."
             " Please upgrade gemini CLI. See https://ai.google.dev for instructions."
         )
 
