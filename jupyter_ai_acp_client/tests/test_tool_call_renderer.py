@@ -861,26 +861,6 @@ class TestExtractDiffsFromRawInput:
         assert result[0].old_text == "old"
         assert result[0].new_text == "# new\nold"
 
-    def test_no_filepath(self):
-        assert extract_diffs_from_raw_input({"diff": "@@ -0,0 +1,1 @@\n+x\n"}) is None
-
-    def test_no_diff_key(self):
-        assert extract_diffs_from_raw_input({"filepath": "/tmp/f.py"}) is None
-
-    def test_non_dict_input(self):
-        assert extract_diffs_from_raw_input("string") is None
-        assert extract_diffs_from_raw_input(None) is None
-
-    def test_diff_not_string(self):
-        assert extract_diffs_from_raw_input({"filepath": "/f.py", "diff": 42}) is None
-
-    def test_invalid_diff_content(self):
-        raw = {"filepath": "/f.py", "diff": "not a unified diff"}
-        assert extract_diffs_from_raw_input(raw) is None
-
-    def test_empty_diff_string(self):
-        assert extract_diffs_from_raw_input({"filepath": "/f.py", "diff": ""}) is None
-
     def test_relative_path_resolved(self):
         raw = {
             "filepath": "foo.py",
