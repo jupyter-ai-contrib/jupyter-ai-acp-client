@@ -3,10 +3,11 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from jupyter_ai_persona_manager import PersonaRequirementsUnmet
 
 # opencode.py has a module-level guard that raises PersonaRequirementsUnmet
 # when the opencode CLI is not installed. Mock the guard so we can import
-# _is_auth_error in CI without the CLI.
+# helpers in CI without the CLI.
 _mock_run = MagicMock()
 _mock_run.returncode = 0
 _mock_run.stdout = "1.0.0"
@@ -14,7 +15,10 @@ _mock_run.stderr = ""
 
 with patch("shutil.which", return_value="/usr/bin/opencode"), \
      patch("subprocess.run", return_value=_mock_run):
-    from jupyter_ai_acp_client.acp_personas.opencode import _is_auth_error
+    from jupyter_ai_acp_client.acp_personas.opencode import (
+        _check_opencode,
+        _is_auth_error,
+    )
 
 
 class TestIsAuthError:
@@ -58,3 +62,25 @@ class TestIsAuthError:
 
     def test_empty_message(self):
         assert _is_auth_error(Exception("")) is False
+
+
+def _mock_result(stdout="1.0.0", returncode=0, stderr=""):
+    m = MagicMock()
+    m.stdout = stdout
+    m.returncode = returncode
+    m.stderr = stderr
+    return m
+
+
+class TestCheckOpencode:
+    """Tests for _check_opencode() version guard."""
+
+    def test_not_installed(self):
+        with patch("shutil.which", return_value=None):
+            with pytest.raises(PersonaRequirementsUnmet, match="requires `opencode`"):
+                _check_opencode()
+
+    def test_valid_version(self):
+        with patch("shutil.which", return_value="/usr/bin/opencode"), \
+             patch("subprocess.run", return_value=_mock_result("opencode v1.2.3")):
+            _check_opencode()  # should not raise

@@ -34,23 +34,32 @@ def _is_auth_error(error: Exception) -> bool:
     )
 
 
-# Raise `PersonaRequirementsUnmet` if `opencode` not installed
-if shutil.which("opencode") is None:
-    raise PersonaRequirementsUnmet(
-        "This persona requires `opencode` to be installed."
-        " See https://opencode.ai for installation instructions."
-    )
+def _check_opencode() -> None:
+    """Raise PersonaRequirementsUnmet if opencode is missing or wrong version."""
+    if shutil.which("opencode") is None:
+        raise PersonaRequirementsUnmet(
+            "This persona requires `opencode` to be installed."
+            " See https://opencode.ai for installation instructions."
+        )
 
-# Raise `PersonaRequirementsUnmet` if `opencode<1.0.0` or `opencode>=2`
-try:
-    result = subprocess.run(
-        ["opencode", "--version"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
+    try:
+        result = subprocess.run(
+            ["opencode", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        raise PersonaRequirementsUnmet(
+            "opencode --version command timed out."
+            " Please ensure opencode is properly installed."
+        )
+    except FileNotFoundError:
+        raise PersonaRequirementsUnmet(
+            "opencode command not found."
+            " Please ensure opencode is properly installed."
+        )
 
-    # Check for non-zero exit code
     if result.returncode != 0:
         stderr = result.stderr.strip()
         error_msg = (
@@ -59,10 +68,8 @@ try:
         )
         if stderr:
             error_msg += f"\nStderr output: {stderr}"
-
         raise PersonaRequirementsUnmet(error_msg)
 
-    # Extract semver from stdout using regex
     version_match = re.search(r"(\d+\.\d+\.\d+)", result.stdout)
     if not version_match:
         raise PersonaRequirementsUnmet(
@@ -71,30 +78,17 @@ try:
         )
 
     version_str = version_match.group(1)
-    version_parts = [int(x) for x in version_str.split(".")]
+    current_version = tuple(int(x) for x in version_str.split("."))
 
-    # Check if version >= 1.0.0, < 2
-    required_version = (1, 0, 0)
-    current_version = tuple(version_parts)
-
-    if current_version < required_version or current_version[0] >= 2:
+    if current_version < (1, 0, 0) or current_version[0] >= 2:
         raise PersonaRequirementsUnmet(
             f"opencode version {version_str} is installed,"
             " but version >=1.0.0,<2 is required."
             " Please upgrade opencode. See https://opencode.ai for instructions."
         )
 
-except subprocess.TimeoutExpired:
-    raise PersonaRequirementsUnmet(
-        "opencode --version command timed out."
-        " Please ensure opencode is properly installed."
-    )
-except FileNotFoundError:
-    # This shouldn't happen since we checked with shutil.which, but handle it anyway
-    raise PersonaRequirementsUnmet(
-        "opencode command not found."
-        " Please ensure opencode is properly installed."
-    )
+
+_check_opencode()
 
 
 class OpenCodeAcpPersona(BaseAcpPersona):
