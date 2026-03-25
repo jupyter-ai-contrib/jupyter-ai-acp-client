@@ -76,10 +76,9 @@ Currently, this package provides 5 personas:
 **Optional**
 
 - `claude-agent-acp` (enables `@Claude`)
-- `gemini` (enables `@Gemini`)
+- `gemini` CLI (enables `@Gemini`)
 - `kiro-cli` (enables `@Kiro`)
 - `mistral-vibe` (enables `@Mistral-Vibe` via the `vibe-acp` command)
-- `gemini` CLI (enables `@Gemini`)
 - `opencode` v1.0.0+ (enables `@OpenCode`)
 
 ## Install
