@@ -17,6 +17,7 @@ with patch("shutil.which", return_value="/usr/bin/opencode"), \
      patch("subprocess.run", return_value=_mock_run):
     from jupyter_ai_acp_client.acp_personas.opencode import (
         _check_opencode,
+        _has_user_config,
         _is_auth_error,
     )
 
@@ -84,3 +85,25 @@ class TestCheckOpencode:
         with patch("shutil.which", return_value="/usr/bin/opencode"), \
              patch("subprocess.run", return_value=_mock_result("opencode v1.2.3")):
             _check_opencode()  # should not raise
+
+
+class TestHasUserConfig:
+    """Tests for _has_user_config() global config detection."""
+
+    def test_no_config_files(self, tmp_path):
+        with patch("jupyter_ai_acp_client.acp_personas.opencode.Path.home", return_value=tmp_path):
+            assert _has_user_config() is False
+
+    def test_json_config_exists(self, tmp_path):
+        config_dir = tmp_path / ".config" / "opencode"
+        config_dir.mkdir(parents=True)
+        (config_dir / "opencode.json").write_text("{}")
+        with patch("jupyter_ai_acp_client.acp_personas.opencode.Path.home", return_value=tmp_path):
+            assert _has_user_config() is True
+
+    def test_jsonc_config_exists(self, tmp_path):
+        config_dir = tmp_path / ".config" / "opencode"
+        config_dir.mkdir(parents=True)
+        (config_dir / "opencode.jsonc").write_text("{}")
+        with patch("jupyter_ai_acp_client.acp_personas.opencode.Path.home", return_value=tmp_path):
+            assert _has_user_config() is True

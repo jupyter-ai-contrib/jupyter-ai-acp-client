@@ -2,7 +2,7 @@ import asyncio
 import sys
 from asyncio import Task
 from asyncio.subprocess import Process
-from typing import Awaitable, ClassVar
+from typing import Any, Awaitable, ClassVar, Optional
 
 from acp import NewSessionResponse, LoadSessionResponse
 from acp.schema import AvailableCommand
@@ -90,16 +90,18 @@ class BaseAcpPersona(BasePersona):
         """
         return None
 
-    async def _init_agent_subprocess(self) -> Process:
+    async def _init_agent_subprocess(self, env: Optional[dict[str, str]] = None) -> Process:
         # Wait until user is authenticated
         await self._before_subprocess_future
-        process = await asyncio.create_subprocess_exec(
-            *self._executable,
+        kwargs: dict[str, Any] = dict(
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=sys.stderr,
             limit=50 * 1024 * 1024,
         )
+        if env is not None:
+            kwargs["env"] = env
+        process = await asyncio.create_subprocess_exec(*self._executable, **kwargs)
         self.log.info("Spawned ACP agent subprocess for '%s'.", self.__class__.__name__)
         return process
 

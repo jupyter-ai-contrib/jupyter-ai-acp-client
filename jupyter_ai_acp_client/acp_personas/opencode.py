@@ -1,10 +1,9 @@
-import asyncio
 import os
 import re
 import shutil
 import subprocess
-import sys
 from asyncio.subprocess import Process
+from pathlib import Path
 
 from acp.exceptions import RequestError
 from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
@@ -16,6 +15,12 @@ from ..base_acp_persona import BaseAcpPersona
 # Configures permission: {edit: "ask", bash: "ask"} so OpenCode requests
 # approval before file edits and shell commands.
 _BUNDLED_CONFIG = os.path.join(os.path.dirname(__file__), "opencode.json")
+
+
+def _has_user_config() -> bool:
+    """Check if user has a global OpenCode config file."""
+    config_dir = Path.home() / ".config" / "opencode"
+    return (config_dir / "opencode.json").exists() or (config_dir / "opencode.jsonc").exists()
 
 
 def _is_auth_error(error: Exception) -> bool:
@@ -114,19 +119,15 @@ class OpenCodeAcpPersona(BaseAcpPersona):
         )
 
     async def _init_agent_subprocess(self) -> Process:
-        await self._before_subprocess_future
-        env = os.environ.copy()
-        env["OPENCODE_CONFIG"] = _BUNDLED_CONFIG
-        process = await asyncio.create_subprocess_exec(
-            *self._executable,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=sys.stderr,
-            limit=50 * 1024 * 1024,
-            env=env,
-        )
-        self.log.info("Spawned ACP agent subprocess for '%s'.", self.__class__.__name__)
-        return process
+        env: dict[str, str] | None = None
+
+        # Only inject bundled config if the user hasn't configured OpenCode themselves.
+        # Precedence: OPENCODE_CONFIG env var > ~/.config/opencode/opencode.{json,jsonc} > bundled
+        if "OPENCODE_CONFIG" not in os.environ and not _has_user_config():
+            env = os.environ.copy()
+            env["OPENCODE_CONFIG"] = _BUNDLED_CONFIG
+
+        return await super()._init_agent_subprocess(env=env)
 
     async def is_authed(self) -> bool:
         return True
