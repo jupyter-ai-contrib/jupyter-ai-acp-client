@@ -26,11 +26,11 @@ from acp.schema import (
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
     EnvVariable,
-    FileSystemCapability,
+    FileSystemCapabilities,
     ImageContentBlock,
     InitializeResponse,
     Implementation,
-    KillTerminalCommandResponse,
+    KillTerminalResponse,
     LoadSessionResponse,
     NewSessionResponse,
     PermissionOption,
@@ -121,7 +121,7 @@ class JaiAcpClient(Client):
         init_response = await conn.initialize(
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=ClientCapabilities(
-                fs=FileSystemCapability(read_text_file=True, write_text_file=True),
+                fs=FileSystemCapabilities(read_text_file=True, write_text_file=True),
                 terminal=True,
             ),
             client_info=Implementation(name="Jupyter AI", title="Jupyter AI ACP Client", version="0.1.0"),
@@ -628,7 +628,7 @@ class JaiAcpClient(Client):
 
     async def kill_terminal(
         self, session_id: str, terminal_id: str, **kwargs: Any
-    ) -> KillTerminalCommandResponse | None:
+    ) -> KillTerminalResponse | None:
         return await self._terminal_manager.kill_terminal(
             session_id=session_id,
             terminal_id=terminal_id,

@@ -14,7 +14,7 @@ from acp import RequestError
 from acp.schema import (
     CreateTerminalResponse,
     EnvVariable,
-    KillTerminalCommandResponse,
+    KillTerminalResponse,
     ReleaseTerminalResponse,
     TerminalExitStatus,
     TerminalOutputResponse,
@@ -382,7 +382,7 @@ class TerminalManager:
 
     async def kill_terminal(
         self, session_id: str, terminal_id: str, **kwargs: Any
-    ) -> KillTerminalCommandResponse | None:
+    ) -> KillTerminalResponse | None:
         """
         Terminate a running command without releasing resources.
 
@@ -403,7 +403,7 @@ class TerminalManager:
             exit_code = await info.process.wait()
             self._set_exit_status(info, exit_code)
 
-        return KillTerminalCommandResponse()
+        return KillTerminalResponse()
 
     async def release_terminal(
         self, session_id: str, terminal_id: str, **kwargs: Any
