@@ -75,6 +75,5 @@ class CodexAcpPersona(BaseAcpPersona):
             "\n\n- Set `OPENAI_API_KEY` (or `CODEX_API_KEY`) before starting JupyterLab."
             "\n\n- Or install the Codex CLI (`npm i -g @openai/codex`)"
             " and run `codex login` to log in with your ChatGPT account."
-            "\n\n- If you set the environment variable in a new shell,"
-            " restart the JupyterLab server so this process can see it."
+            "\n\nRestart the JupyterLab server after either step."
         )
