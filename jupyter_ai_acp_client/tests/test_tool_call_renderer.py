@@ -5,7 +5,9 @@ from jupyter_ai_acp_client.tool_call_renderer import (
     ToolCallState,
     _shorten_title,
     _generate_title,
+    _parse_unified_diff,
     extract_diffs,
+    extract_diffs_from_raw_input,
     update_tool_call_from_start,
     update_tool_call_from_progress,
 )
@@ -758,3 +760,121 @@ class TestExtractDiffs:
         result = extract_diffs(content, root_dir="/srv")
         assert result is not None
         assert result[0].path == "/srv/dir/b.py"
+
+
+class TestParseUnifiedDiff:
+    def test_new_file(self):
+        diff = (
+            "Index: foo.py\n"
+            "===================================================================\n"
+            "--- foo.py\n"
+            "+++ foo.py\n"
+            "@@ -0,0 +1,1 @@\n"
+            "+print('hello')\n"
+        )
+        result = _parse_unified_diff(diff)
+        assert result is not None
+        old, new = result
+        assert old == ""
+        assert new == "print('hello')"
+
+    def test_edit_file(self):
+        diff = (
+            "Index: foo.py\n"
+            "===================================================================\n"
+            "--- foo.py\n"
+            "+++ foo.py\n"
+            "@@ -1,1 +1,2 @@\n"
+            "+# comment\n"
+            " print('hello')\n"
+        )
+        result = _parse_unified_diff(diff)
+        assert result is not None
+        old, new = result
+        assert old == "print('hello')"
+        assert new == "# comment\nprint('hello')"
+
+    def test_delete_lines(self):
+        diff = (
+            "@@ -1,2 +1,1 @@\n"
+            "-# old comment\n"
+            " print('hello')\n"
+        )
+        result = _parse_unified_diff(diff)
+        assert result is not None
+        old, new = result
+        assert old == "# old comment\nprint('hello')"
+        assert new == "print('hello')"
+
+    def test_multiple_hunks(self):
+        diff = (
+            "@@ -1,1 +1,1 @@\n"
+            "-old_a\n"
+            "+new_a\n"
+            "@@ -10,1 +10,1 @@\n"
+            "-old_b\n"
+            "+new_b\n"
+        )
+        result = _parse_unified_diff(diff)
+        assert result is not None
+        old, new = result
+        assert old == "old_a\nold_b"
+        assert new == "new_a\nnew_b"
+
+    def test_not_a_diff(self):
+        assert _parse_unified_diff("just a string") is None
+
+    def test_empty_hunks(self):
+        assert _parse_unified_diff("@@ -0,0 +0,0 @@\n") is None
+
+
+
+class TestExtractDiffsFromRawInput:
+    def test_filepath_and_diff(self):
+        raw = {
+            "filepath": "/tmp/foo.py",
+            "diff": "@@ -0,0 +1,1 @@\n+hello\n",
+        }
+        result = extract_diffs_from_raw_input(raw)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].path == "/tmp/foo.py"
+        assert result[0].new_text == "hello"
+        assert result[0].old_text is None
+
+    def test_camelCase_filePath(self):
+        raw = {
+            "filePath": "/tmp/foo.py",
+            "diff": "@@ -0,0 +1,1 @@\n+hello\n",
+        }
+        result = extract_diffs_from_raw_input(raw)
+        assert result is not None
+        assert result[0].path == "/tmp/foo.py"
+
+    def test_edit_preserves_old_text(self):
+        raw = {
+            "filepath": "/tmp/foo.py",
+            "diff": "@@ -1,1 +1,2 @@\n+# new\n old\n",
+        }
+        result = extract_diffs_from_raw_input(raw)
+        assert result is not None
+        assert result[0].old_text == "old"
+        assert result[0].new_text == "# new\nold"
+
+    def test_relative_path_resolved(self):
+        raw = {
+            "filepath": "foo.py",
+            "diff": "@@ -0,0 +1,1 @@\n+x\n",
+        }
+        result = extract_diffs_from_raw_input(raw, root_dir="/srv/project")
+        assert result is not None
+        assert result[0].path == "/srv/project/foo.py"
+
+    def test_absolute_path_unchanged(self):
+        raw = {
+            "filepath": "/abs/path/foo.py",
+            "diff": "@@ -0,0 +1,1 @@\n+x\n",
+        }
+        result = extract_diffs_from_raw_input(raw, root_dir="/home/user/project")
+        assert result is not None
+        assert result[0].path == "/abs/path/foo.py"

@@ -59,7 +59,7 @@ from asyncio.subprocess import Process
 
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
-from .tool_call_renderer import ensure_serializable, extract_diffs
+from .tool_call_renderer import ensure_serializable, extract_diffs, extract_diffs_from_raw_input
 from .permission_manager import PermissionManager
 
 import traceback as tb_mod
@@ -479,8 +479,14 @@ class JaiAcpClient(Client):
                 tc.raw_input = ensure_serializable(tool_call.raw_input)
 
             # Extract diffs from tool_call.content — agents may send
-            # FileEditToolCallContent here rather than on ToolCallStart
+            # FileEditToolCallContent here rather than on ToolCallStart.
+            # Fall back to parsing unified diffs from raw_input for agents
+            # that don't populate tool_call.content (e.g. OpenCode).
             diffs = extract_diffs(tool_call.content, root_dir=persona.parent.root_dir)
+            if not diffs:
+                diffs = extract_diffs_from_raw_input(
+                    tool_call.raw_input, root_dir=persona.parent.root_dir
+                )
             if diffs:
                 tc.diffs = diffs
 

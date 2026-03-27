@@ -45,6 +45,76 @@ class ToolCallState(BaseModel):
     diffs: Optional[list[ToolCallDiff]] = None
 
 
+def _resolve_path(path: str, root_dir: Optional[str]) -> str:
+    """Normalize a file path to an absolute path using root_dir if needed."""
+    if root_dir:
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = (Path(root_dir) / p).resolve()
+        return str(p)
+    return path
+
+
+def _parse_unified_diff(diff_str: str) -> tuple[str, str] | None:
+    """Parse a unified diff string into (old_text, new_text).
+
+    Returns None if the string doesn't contain valid unified diff hunks.
+    """
+    if "@@" not in diff_str:
+        return None
+
+    old_lines: list[str] = []
+    new_lines: list[str] = []
+    in_hunk = False
+
+    for line in diff_str.split("\n"):
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        if not in_hunk:
+            continue
+        if line.startswith("+"):
+            new_lines.append(line[1:])
+        elif line.startswith("-"):
+            old_lines.append(line[1:])
+        elif line.startswith(" "):
+            old_lines.append(line[1:])
+            new_lines.append(line[1:])
+
+    if not old_lines and not new_lines:
+        return None
+
+    return "\n".join(old_lines), "\n".join(new_lines)
+
+
+def extract_diffs_from_raw_input(
+    raw_input: Optional[Any],
+    root_dir: Optional[str] = None,
+) -> Optional[list[ToolCallDiff]]:
+    """Extract diffs from raw_input when tool_call.content has no FileEditToolCallContent.
+
+    Handles agents that send a unified diff string in raw_input.diff
+    instead of using FileEditToolCallContent in tool_call.content.
+    """
+    if not isinstance(raw_input, dict):
+        return None
+
+    filepath = raw_input.get("filepath") or raw_input.get("filePath")
+    diff_str = raw_input.get("diff")
+
+    if not filepath or not isinstance(diff_str, str):
+        return None
+
+    parsed = _parse_unified_diff(diff_str)
+    if parsed is None:
+        return None
+
+    old_text, new_text = parsed
+    path = _resolve_path(filepath, root_dir)
+
+    return [ToolCallDiff(path=path, new_text=new_text, old_text=old_text or None)]
+
+
 def extract_diffs(
     content: Optional[
         list[ContentToolCallContent | FileEditToolCallContent | TerminalToolCallContent]
@@ -61,12 +131,7 @@ def extract_diffs(
     diffs = []
     for item in content:
         if isinstance(item, FileEditToolCallContent):
-            path = item.path
-            if root_dir:
-                p = Path(path).expanduser()
-                if not p.is_absolute():
-                    p = (Path(root_dir) / p).resolve()
-                path = str(p)
+            path = _resolve_path(item.path, root_dir)
             diffs.append(ToolCallDiff(path=path, new_text=item.new_text, old_text=item.old_text))
     return diffs or None
 
