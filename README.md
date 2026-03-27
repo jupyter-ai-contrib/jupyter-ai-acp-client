@@ -51,7 +51,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
         )
 ```
 
-Currently, this package provides 5 personas:
+Currently, this package provides 6 personas:
 
 - `@Claude`
   - requires `claude-agent-acp`, installed via `npm install -g @zed-industries/claude-agent-acp`
@@ -64,6 +64,8 @@ Currently, this package provides 5 personas:
   - requires `vibe-acp`, installed via `uv tool install mistral-vibe` or `pip install mistral-vibe`
 - `@OpenCode`
   - requires `opencode` CLI (>= 1.0.0, < 2), installed via `npm install -g opencode-ai` or from https://opencode.ai
+- `@Codex`
+  - requires `codex-acp`, installed via `npm install -g @zed-industries/codex-acp`
 
 ## Dependencies
 
@@ -80,6 +82,7 @@ Currently, this package provides 5 personas:
 - `kiro-cli` (enables `@Kiro`)
 - `mistral-vibe` (enables `@Mistral-Vibe` via the `vibe-acp` command)
 - `opencode` v1.0.0+ (enables `@OpenCode`)
+- `codex-acp` (enables `@Codex`)
 
 ## Install
 
