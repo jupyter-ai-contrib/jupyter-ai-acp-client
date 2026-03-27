@@ -54,6 +54,9 @@ class CodexAcpPersona(BaseAcpPersona):
         )
 
     async def is_authed(self) -> bool:
+        # Base class calls this before each message to gate access.
+        # codex-acp has no auth status command, so we always return True
+        # and catch auth failures reactively in process_message().
         return True
 
     async def process_message(self, message: Message) -> None:
