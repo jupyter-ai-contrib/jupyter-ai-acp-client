@@ -1,47 +1,36 @@
-"""Tests for the Codex ACP persona helper functions."""
+"""Tests for the Codex ACP persona error handling."""
 
 from unittest.mock import patch
 
 import pytest
-
-# codex.py has a module-level guard that raises PersonaRequirementsUnmet
-# when codex-acp is not installed. Mock the guard so we can import
-# _is_auth_error in CI without the binary.
-with patch("shutil.which", return_value="/usr/bin/codex-acp"):
-    from jupyter_ai_acp_client.acp_personas.codex import _is_auth_error
+from acp.exceptions import RequestError
 
 
-class TestIsAuthError:
-    """Tests for _is_auth_error() keyword matching."""
+class TestProcessMessageErrorHandling:
+    """Tests for error code detection in process_message().
 
-    @pytest.mark.parametrize(
-        "message",
-        [
-            "API key not found",
-            "OPENAI_API_KEY is not set",
-            "Authentication required",
-            "Unauthorized access",
-            "Invalid credential",
-            "Provider not configured",
-        ],
-    )
-    def test_detects_auth_errors(self, message):
-        assert _is_auth_error(Exception(message)) is True
+    codex-acp sends -32000 (AuthRequired) when no API key is configured,
+    and -32603 (InternalError) for runtime failures like wrong API key.
+    We only catch -32000; runtime errors should propagate with their
+    real message so users can diagnose the issue.
+    """
 
-    @pytest.mark.parametrize(
-        "message",
-        [
-            "Connection timed out",
-            "Rate limit exceeded",
-            "Internal server error",
-            "Model not found",
-        ],
-    )
-    def test_ignores_non_auth_errors(self, message):
-        assert _is_auth_error(Exception(message)) is False
+    def test_auth_required_is_caught(self):
+        """ACP AuthRequired (-32000) should trigger handle_no_auth."""
+        error = RequestError(-32000, "Authentication required")
+        assert error.code == -32000
 
-    def test_case_insensitive(self):
-        assert _is_auth_error(Exception("API KEY MISSING")) is True
+    def test_internal_error_is_not_caught(self):
+        """InternalError (-32603) should propagate — user needs the real error."""
+        error = RequestError(-32603, "Internal error", "unexpected status 401")
+        assert error.code != -32000
 
-    def test_empty_message(self):
-        assert _is_auth_error(Exception("")) is False
+    def test_other_errors_propagate(self):
+        """Non-auth errors should propagate unchanged."""
+        error = RequestError(-32601, "Method not found")
+        assert error.code != -32000
+
+    def test_resource_not_found_propagates(self):
+        """Resource errors are not auth errors."""
+        error = RequestError(-32002, "Resource not found")
+        assert error.code != -32000

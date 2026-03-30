@@ -8,21 +8,6 @@ from jupyterlab_chat.models import Message
 from ..base_acp_persona import BaseAcpPersona
 
 
-def _is_auth_error(error: Exception) -> bool:
-    message = str(error).lower()
-    return any(
-        keyword in message
-        for keyword in (
-            "api key",
-            "api_key",
-            "authentication",
-            "authorized",
-            "credential",
-            "not configured",
-        )
-    )
-
-
 if shutil.which("codex-acp") is None:
     raise PersonaRequirementsUnmet(
         "This persona requires `codex-acp`, the ACP adapter for OpenAI Codex."
@@ -53,23 +38,14 @@ class CodexAcpPersona(BaseAcpPersona):
             system_prompt="unused",
         )
 
-    async def is_authed(self) -> bool:
-        # Base class calls this before each message to gate access.
-        # codex-acp has no auth status command, so we always return True
-        # and catch auth failures reactively in process_message().
-        return True
-
     async def process_message(self, message: Message) -> None:
         try:
             await super().process_message(message)
         except RequestError as error:
-            if not _is_auth_error(error):
+            if error.code != -32000:
                 raise
 
-            self.log.info(
-                "[Codex] Authentication or configuration required: %s",
-                error,
-            )
+            self.log.info("[Codex] Authentication required: %s", error)
             await self.handle_no_auth(message)
 
     async def handle_no_auth(self, message: Message) -> None:
