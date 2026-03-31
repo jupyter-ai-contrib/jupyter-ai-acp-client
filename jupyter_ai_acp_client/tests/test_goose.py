@@ -6,7 +6,6 @@ import pytest
 from acp.exceptions import RequestError
 from jupyter_ai_persona_manager import PersonaRequirementsUnmet
 
-# Mock the import-time Goose CLI guard so helpers can be imported in tests.
 _mock_run = MagicMock()
 _mock_run.returncode = 0
 _mock_run.stdout = "goose 1.28.0"
