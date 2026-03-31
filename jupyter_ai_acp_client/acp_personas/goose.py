@@ -4,7 +4,7 @@ import shutil
 import subprocess
 from asyncio.subprocess import Process
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple
 
 from acp.exceptions import RequestError
 from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
@@ -12,17 +12,14 @@ from jupyterlab_chat.models import Message
 
 from ..base_acp_persona import BaseAcpPersona
 
+_DEFAULT_GOOSE_MODE = "approve"
+_GOOSE_MODE_PATTERN = re.compile(
+    r'^\s*GOOSE_MODE\s*:\s*(?:"([^"]+)"|\'([^\']+)\'|([^#\s][^#]*?))\s*(?:#.*)?$'
+)
+
 
 def _is_setup_error(error: Exception) -> bool:
-    """Check if error indicates Goose needs provider configuration.
-
-    Goose wraps all session-init errors as -32603 (InternalError) with
-    descriptive data prefixes: "Failed to set provider:", "Failed to create
-    session/agent:", or "Authentication error:". Framework-level errors
-    from the sacp layer arrive as -32603 with data=None. Goose never sends
-    -32000 today, but we handle it for forward compatibility. Prompt-time
-    provider errors are streamed as text, not RequestError.
-    """
+    """Return whether an error indicates Goose still needs setup."""
     if not isinstance(error, RequestError):
         return False
     if error.code == -32000:
@@ -39,7 +36,7 @@ def _is_setup_error(error: Exception) -> bool:
     )
 
 
-def _check_goose():
+def _check_goose() -> None:
     """Verify goose is installed and has ACP support (>= 1.8.0, < 2)."""
     if shutil.which("goose") is None:
         raise PersonaRequirementsUnmet(
@@ -73,8 +70,7 @@ def _check_goose():
             )
 
         version_str = version_match.group(1)
-        version_parts = [int(x) for x in version_str.split(".")]
-        current_version = tuple(version_parts)
+        current_version = tuple(int(x) for x in version_str.split("."))
         required_version = (1, 8, 0)
 
         if current_version < required_version or current_version[0] >= 2:
@@ -111,13 +107,10 @@ def _get_user_config_path() -> Path:
     return Path.home() / ".config" / "goose" / "config.yaml"
 
 
-def _parse_goose_mode(config_text: str) -> Optional[str]:
+def _parse_goose_mode(config_text: str) -> str | None:
     """Extract an explicit GOOSE_MODE value from Goose config text."""
-    pattern = re.compile(
-        r'^\s*GOOSE_MODE\s*:\s*(?:"([^"]+)"|\'([^\']+)\'|([^#\s][^#]*?))\s*(?:#.*)?$'
-    )
     for line in config_text.splitlines():
-        match = pattern.match(line)
+        match = _GOOSE_MODE_PATTERN.match(line)
         if not match:
             continue
         value = next((group for group in match.groups() if group is not None), "").strip()
@@ -125,8 +118,8 @@ def _parse_goose_mode(config_text: str) -> Optional[str]:
     return None
 
 
-def _get_explicit_user_mode() -> Optional[str]:
-    """Return the explicit GOOSE_MODE from config.yaml, if present."""
+def _get_config_mode() -> str | None:
+    """Return the explicit GOOSE_MODE from Goose config, if present."""
     config_path = _get_user_config_path()
     if not config_path.exists():
         return None
@@ -134,6 +127,36 @@ def _get_explicit_user_mode() -> Optional[str]:
         return _parse_goose_mode(config_path.read_text(encoding="utf-8"))
     except OSError:
         return None
+
+
+def _get_explicit_mode() -> str | None:
+    """Return the explicit Goose mode from env or config."""
+    return os.environ.get("GOOSE_MODE") or _get_config_mode()
+
+
+class _GooseModeDecision(NamedTuple):
+    mode: str
+    env: dict[str, str] | None
+    explicit: bool
+
+
+def _resolve_mode_decision() -> _GooseModeDecision:
+    """Resolve the mode Goose ACP should run with."""
+    explicit_mode = _get_explicit_mode()
+    if explicit_mode is not None:
+        return _GooseModeDecision(
+            mode=explicit_mode,
+            env=None,
+            explicit=True,
+        )
+
+    env = os.environ.copy()
+    env["GOOSE_MODE"] = _DEFAULT_GOOSE_MODE
+    return _GooseModeDecision(
+        mode=_DEFAULT_GOOSE_MODE,
+        env=env,
+        explicit=False,
+    )
 
 
 class GooseAcpPersona(BaseAcpPersona):
@@ -158,33 +181,16 @@ class GooseAcpPersona(BaseAcpPersona):
             system_prompt="unused",
         )
 
-    @staticmethod
-    def _build_subprocess_env() -> Optional[dict[str, str]]:
-        """Return env overrides for Goose ACP process, or None if unchanged.
-
-        Goose defaults to autonomous mode, which bypasses permission prompts.
-        For ACP integration we default to `approve` mode so Goose routes tool
-        permission requests through ACP and the Jupyter permission UI can render.
-        Precedence mirrors OpenCode persona style:
-        explicit env var > explicit config setting > ACP-safe default.
-        """
-        if "GOOSE_MODE" in os.environ:
-            return None
-        if _get_explicit_user_mode() is not None:
-            return None
-        env = os.environ.copy()
-        env["GOOSE_MODE"] = "approve"
-        return env
-
     async def _init_agent_subprocess(self) -> Process:
-        env = self._build_subprocess_env()
-        if env is None:
-            mode = os.environ.get("GOOSE_MODE") or _get_explicit_user_mode()
-            if mode is not None:
-                self.log.info("[Goose] Respecting explicit GOOSE_MODE=%s.", mode)
+        decision = _resolve_mode_decision()
+        if decision.explicit:
+            self.log.info("[Goose] Respecting explicit GOOSE_MODE=%s.", decision.mode)
         else:
-            self.log.info("[Goose] Defaulting GOOSE_MODE=approve for ACP permission flow.")
-        return await super()._init_agent_subprocess(env=env)
+            self.log.info(
+                "[Goose] Defaulting GOOSE_MODE=%s for ACP permission flow.",
+                decision.mode,
+            )
+        return await super()._init_agent_subprocess(env=decision.env)
 
     async def process_message(self, message: Message) -> None:
         try:
