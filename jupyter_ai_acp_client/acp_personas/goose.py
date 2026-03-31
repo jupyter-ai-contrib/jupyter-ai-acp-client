@@ -2,6 +2,9 @@ import os
 import re
 import shutil
 import subprocess
+from asyncio.subprocess import Process
+from pathlib import Path
+from typing import Optional
 
 from acp.exceptions import RequestError
 from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
@@ -96,6 +99,43 @@ def _check_goose():
 _check_goose()
 
 
+def _get_user_config_path() -> Path:
+    """Return the Goose config path for the current platform."""
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "Block" / "goose" / "config" / "config.yaml"
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if config_home:
+        return Path(config_home) / "goose" / "config.yaml"
+    return Path.home() / ".config" / "goose" / "config.yaml"
+
+
+def _parse_goose_mode(config_text: str) -> Optional[str]:
+    """Extract an explicit GOOSE_MODE value from Goose config text."""
+    pattern = re.compile(
+        r'^\s*GOOSE_MODE\s*:\s*(?:"([^"]+)"|\'([^\']+)\'|([^#\s][^#]*?))\s*(?:#.*)?$'
+    )
+    for line in config_text.splitlines():
+        match = pattern.match(line)
+        if not match:
+            continue
+        value = next((group for group in match.groups() if group is not None), "").strip()
+        return value or None
+    return None
+
+
+def _get_explicit_user_mode() -> Optional[str]:
+    """Return the explicit GOOSE_MODE from config.yaml, if present."""
+    config_path = _get_user_config_path()
+    if not config_path.exists():
+        return None
+    try:
+        return _parse_goose_mode(config_path.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+
+
 class GooseAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["goose", "acp"]
@@ -117,6 +157,34 @@ class GooseAcpPersona(BaseAcpPersona):
             avatar_path=avatar_path,
             system_prompt="unused",
         )
+
+    @staticmethod
+    def _build_subprocess_env() -> Optional[dict[str, str]]:
+        """Return env overrides for Goose ACP process, or None if unchanged.
+
+        Goose defaults to autonomous mode, which bypasses permission prompts.
+        For ACP integration we default to `approve` mode so Goose routes tool
+        permission requests through ACP and the Jupyter permission UI can render.
+        Precedence mirrors OpenCode persona style:
+        explicit env var > explicit config setting > ACP-safe default.
+        """
+        if "GOOSE_MODE" in os.environ:
+            return None
+        if _get_explicit_user_mode() is not None:
+            return None
+        env = os.environ.copy()
+        env["GOOSE_MODE"] = "approve"
+        return env
+
+    async def _init_agent_subprocess(self) -> Process:
+        env = self._build_subprocess_env()
+        if env is None:
+            mode = os.environ.get("GOOSE_MODE") or _get_explicit_user_mode()
+            if mode is not None:
+                self.log.info("[Goose] Respecting explicit GOOSE_MODE=%s.", mode)
+        else:
+            self.log.info("[Goose] Defaulting GOOSE_MODE=approve for ACP permission flow.")
+        return await super()._init_agent_subprocess(env=env)
 
     async def process_message(self, message: Message) -> None:
         try:

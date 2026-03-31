@@ -17,8 +17,11 @@ _mock_run.stderr = ""
 with patch("shutil.which", return_value="/usr/bin/goose"), \
      patch("subprocess.run", return_value=_mock_run):
     from jupyter_ai_acp_client.acp_personas.goose import (
+        GooseAcpPersona,
         _check_goose,
+        _get_explicit_user_mode,
         _is_setup_error,
+        _parse_goose_mode,
     )
 
 
@@ -120,3 +123,67 @@ class TestCheckGoose:
              patch("subprocess.run", return_value=_mock_result("goose 2.0.0")):
             with pytest.raises(PersonaRequirementsUnmet, match=">=1.8.0,<2"):
                 _check_goose()
+
+
+class TestGooseModeEnv:
+    """Tests for Goose subprocess environment overrides."""
+
+    def test_sets_approve_mode_when_unset_and_no_explicit_config_mode(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch(
+                "jupyter_ai_acp_client.acp_personas.goose._get_explicit_user_mode",
+                return_value=None,
+            ):
+                env = GooseAcpPersona._build_subprocess_env()
+        assert env is not None
+        assert env["GOOSE_MODE"] == "approve"
+
+    def test_respects_existing_mode(self):
+        with patch.dict("os.environ", {"GOOSE_MODE": "auto"}, clear=True):
+            env = GooseAcpPersona._build_subprocess_env()
+        assert env is None
+
+    def test_respects_explicit_mode_in_user_config(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch(
+                "jupyter_ai_acp_client.acp_personas.goose._get_explicit_user_mode",
+                return_value="smart_approve",
+            ):
+                env = GooseAcpPersona._build_subprocess_env()
+        assert env is None
+
+
+class TestGooseConfigParsing:
+    """Tests for extracting GOOSE_MODE from Goose config."""
+
+    def test_parse_goose_mode_plain(self):
+        assert _parse_goose_mode("GOOSE_MODE: approve\n") == "approve"
+
+    def test_parse_goose_mode_quoted(self):
+        assert _parse_goose_mode('GOOSE_MODE: "smart_approve"\n') == "smart_approve"
+
+    def test_parse_goose_mode_with_comment(self):
+        assert _parse_goose_mode("GOOSE_MODE: approve # require approval\n") == "approve"
+
+    def test_parse_goose_mode_absent(self):
+        assert _parse_goose_mode("GOOSE_PROVIDER: openai\n") is None
+
+    def test_get_explicit_user_mode_reads_config(self):
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = "GOOSE_PROVIDER: openai\nGOOSE_MODE: approve\n"
+        with patch(
+            "jupyter_ai_acp_client.acp_personas.goose._get_user_config_path",
+            return_value=mock_path,
+        ):
+            assert _get_explicit_user_mode() == "approve"
+
+    def test_get_explicit_user_mode_ignores_provider_only_config(self):
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = "GOOSE_PROVIDER: openai\n"
+        with patch(
+            "jupyter_ai_acp_client.acp_personas.goose._get_user_config_path",
+            return_value=mock_path,
+        ):
+            assert _get_explicit_user_mode() is None
