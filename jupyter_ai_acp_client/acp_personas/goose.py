@@ -13,8 +13,8 @@ from jupyterlab_chat.models import Message
 from ..base_acp_persona import BaseAcpPersona
 
 _DEFAULT_GOOSE_MODE = "approve"
-_GOOSE_MODE_PATTERN = re.compile(
-    r'^\s*GOOSE_MODE\s*:\s*(?:"([^"]+)"|\'([^\']+)\'|([^#\s][^#]*?))\s*(?:#.*)?$'
+_GOOSE_SCALAR_TEMPLATE = (
+    r'^\s*{key}\s*:\s*(?:"([^"]+)"|\'([^\']+)\'|([^#\s][^#]*?))\s*(?:#.*)?$'
 )
 
 
@@ -107,10 +107,11 @@ def _get_user_config_path() -> Path:
     return Path.home() / ".config" / "goose" / "config.yaml"
 
 
-def _parse_goose_mode(config_text: str) -> str | None:
-    """Extract an explicit GOOSE_MODE value from Goose config text."""
+def _parse_goose_config_value(config_text: str, key: str) -> str | None:
+    """Extract a scalar config value from Goose config text."""
+    pattern = re.compile(_GOOSE_SCALAR_TEMPLATE.format(key=re.escape(key)))
     for line in config_text.splitlines():
-        match = _GOOSE_MODE_PATTERN.match(line)
+        match = pattern.match(line)
         if not match:
             continue
         value = next((group for group in match.groups() if group is not None), "").strip()
@@ -118,15 +119,25 @@ def _parse_goose_mode(config_text: str) -> str | None:
     return None
 
 
-def _get_config_mode() -> str | None:
-    """Return the explicit GOOSE_MODE from Goose config, if present."""
+def _get_config_value(key: str) -> str | None:
+    """Return a scalar value from Goose config, if present."""
     config_path = _get_user_config_path()
     if not config_path.exists():
         return None
     try:
-        return _parse_goose_mode(config_path.read_text(encoding="utf-8"))
+        return _parse_goose_config_value(config_path.read_text(encoding="utf-8"), key)
     except OSError:
         return None
+
+
+def _get_config_mode() -> str | None:
+    """Return the explicit GOOSE_MODE from Goose config, if present."""
+    return _get_config_value("GOOSE_MODE")
+
+
+def _get_explicit_provider() -> str | None:
+    """Return the explicit Goose provider from env or config."""
+    return os.environ.get("GOOSE_PROVIDER") or _get_config_value("GOOSE_PROVIDER")
 
 
 def _get_explicit_mode() -> str | None:
@@ -191,6 +202,9 @@ class GooseAcpPersona(BaseAcpPersona):
                 decision.mode,
             )
         return await super()._init_agent_subprocess(env=decision.env)
+
+    async def is_authed(self) -> bool:
+        return _get_explicit_provider() is not None
 
     async def process_message(self, message: Message) -> None:
         try:

@@ -14,10 +14,12 @@ _mock_run.stderr = ""
 with patch("shutil.which", return_value="/usr/bin/goose"), \
      patch("subprocess.run", return_value=_mock_run):
     from jupyter_ai_acp_client.acp_personas.goose import (
+        GooseAcpPersona,
         _check_goose,
         _get_config_mode,
+        _get_explicit_provider,
         _is_setup_error,
-        _parse_goose_mode,
+        _parse_goose_config_value,
         _resolve_mode_decision,
     )
 
@@ -112,16 +114,37 @@ class TestGooseConfigParsing:
     """Tests for reading GOOSE_MODE from Goose config."""
 
     def test_parse_goose_mode_plain(self):
-        assert _parse_goose_mode("GOOSE_MODE: approve\n") == "approve"
+        assert (
+            _parse_goose_config_value("GOOSE_MODE: approve\n", "GOOSE_MODE")
+            == "approve"
+        )
 
     def test_parse_goose_mode_quoted(self):
-        assert _parse_goose_mode('GOOSE_MODE: "smart_approve"\n') == "smart_approve"
+        assert (
+            _parse_goose_config_value('GOOSE_MODE: "smart_approve"\n', "GOOSE_MODE")
+            == "smart_approve"
+        )
 
     def test_parse_goose_mode_with_comment(self):
-        assert _parse_goose_mode("GOOSE_MODE: approve # require approval\n") == "approve"
+        assert (
+            _parse_goose_config_value(
+                "GOOSE_MODE: approve # require approval\n",
+                "GOOSE_MODE",
+            )
+            == "approve"
+        )
 
     def test_parse_goose_mode_absent(self):
-        assert _parse_goose_mode("GOOSE_PROVIDER: openai\n") is None
+        assert (
+            _parse_goose_config_value("GOOSE_PROVIDER: openai\n", "GOOSE_MODE")
+            is None
+        )
+
+    def test_parse_goose_provider(self):
+        assert (
+            _parse_goose_config_value("GOOSE_PROVIDER: openai\n", "GOOSE_PROVIDER")
+            == "openai"
+        )
 
     def test_get_config_mode_reads_config(self):
         mock_path = MagicMock()
@@ -180,3 +203,35 @@ class TestGooseModeDecision:
         assert decision.explicit is True
         assert decision.mode == "smart_approve"
         assert decision.env is None
+
+
+class TestGooseProviderDetection:
+    def test_prefers_env_provider_over_config(self):
+        with patch.dict("os.environ", {"GOOSE_PROVIDER": "anthropic"}, clear=True):
+            with patch(
+                "jupyter_ai_acp_client.acp_personas.goose._get_config_value",
+                return_value="openai",
+            ):
+                assert _get_explicit_provider() == "anthropic"
+
+    def test_uses_config_provider_when_present(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch(
+                "jupyter_ai_acp_client.acp_personas.goose._get_config_value",
+                return_value="openai",
+            ):
+                assert _get_explicit_provider() == "openai"
+
+    async def test_is_authed_false_without_provider(self):
+        with patch(
+            "jupyter_ai_acp_client.acp_personas.goose._get_explicit_provider",
+            return_value=None,
+        ):
+            assert await GooseAcpPersona.is_authed(MagicMock()) is False
+
+    async def test_is_authed_true_with_provider(self):
+        with patch(
+            "jupyter_ai_acp_client.acp_personas.goose._get_explicit_provider",
+            return_value="openai",
+        ):
+            assert await GooseAcpPersona.is_authed(MagicMock()) is True
