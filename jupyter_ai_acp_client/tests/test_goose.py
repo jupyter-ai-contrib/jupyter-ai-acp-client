@@ -19,7 +19,7 @@ with patch("shutil.which", return_value="/usr/bin/goose"), \
         _get_config_mode,
         _get_explicit_provider,
         _is_setup_error,
-        _parse_goose_config_value,
+        _parse_goose_config,
         _resolve_mode_decision,
     )
 
@@ -111,40 +111,17 @@ class TestCheckGoose:
 
 
 class TestGooseConfigParsing:
-    """Tests for reading GOOSE_MODE from Goose config."""
+    def test_parse_goose_config_mapping(self):
+        assert _parse_goose_config("GOOSE_MODE: approve\nGOOSE_PROVIDER: openai\n") == {
+            "GOOSE_MODE": "approve",
+            "GOOSE_PROVIDER": "openai",
+        }
 
-    def test_parse_goose_mode_plain(self):
-        assert (
-            _parse_goose_config_value("GOOSE_MODE: approve\n", "GOOSE_MODE")
-            == "approve"
-        )
+    def test_parse_goose_config_invalid_yaml(self):
+        assert _parse_goose_config("GOOSE_MODE: [approve\n") is None
 
-    def test_parse_goose_mode_quoted(self):
-        assert (
-            _parse_goose_config_value('GOOSE_MODE: "smart_approve"\n', "GOOSE_MODE")
-            == "smart_approve"
-        )
-
-    def test_parse_goose_mode_with_comment(self):
-        assert (
-            _parse_goose_config_value(
-                "GOOSE_MODE: approve # require approval\n",
-                "GOOSE_MODE",
-            )
-            == "approve"
-        )
-
-    def test_parse_goose_mode_absent(self):
-        assert (
-            _parse_goose_config_value("GOOSE_PROVIDER: openai\n", "GOOSE_MODE")
-            is None
-        )
-
-    def test_parse_goose_provider(self):
-        assert (
-            _parse_goose_config_value("GOOSE_PROVIDER: openai\n", "GOOSE_PROVIDER")
-            == "openai"
-        )
+    def test_parse_goose_config_non_mapping(self):
+        assert _parse_goose_config("- approve\n- openai\n") is None
 
     def test_get_config_mode_reads_config(self):
         mock_path = MagicMock()
@@ -160,6 +137,16 @@ class TestGooseConfigParsing:
         mock_path = MagicMock()
         mock_path.exists.return_value = True
         mock_path.read_text.return_value = "GOOSE_PROVIDER: openai\n"
+        with patch(
+            "jupyter_ai_acp_client.acp_personas.goose._get_user_config_path",
+            return_value=mock_path,
+        ):
+            assert _get_config_mode() is None
+
+    def test_get_config_mode_ignores_non_string_value(self):
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = "GOOSE_MODE: 1\n"
         with patch(
             "jupyter_ai_acp_client.acp_personas.goose._get_user_config_path",
             return_value=mock_path,

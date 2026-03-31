@@ -9,13 +9,11 @@ from typing import NamedTuple
 from acp.exceptions import RequestError
 from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
 from jupyterlab_chat.models import Message
+import yaml
 
 from ..base_acp_persona import BaseAcpPersona
 
 _DEFAULT_GOOSE_MODE = "approve"
-_GOOSE_SCALAR_TEMPLATE = (
-    r'^\s*{key}\s*:\s*(?:"([^"]+)"|\'([^\']+)\'|([^#\s][^#]*?))\s*(?:#.*)?$'
-)
 
 
 def _is_setup_error(error: Exception) -> bool:
@@ -107,16 +105,13 @@ def _get_user_config_path() -> Path:
     return Path.home() / ".config" / "goose" / "config.yaml"
 
 
-def _parse_goose_config_value(config_text: str, key: str) -> str | None:
-    """Extract a scalar config value from Goose config text."""
-    pattern = re.compile(_GOOSE_SCALAR_TEMPLATE.format(key=re.escape(key)))
-    for line in config_text.splitlines():
-        match = pattern.match(line)
-        if not match:
-            continue
-        value = next((group for group in match.groups() if group is not None), "").strip()
-        return value or None
-    return None
+def _parse_goose_config(config_text: str) -> dict[str, object] | None:
+    """Parse Goose config YAML into a top-level mapping."""
+    try:
+        config = yaml.safe_load(config_text)
+    except yaml.YAMLError:
+        return None
+    return config if isinstance(config, dict) else None
 
 
 def _get_config_value(key: str) -> str | None:
@@ -125,9 +120,16 @@ def _get_config_value(key: str) -> str | None:
     if not config_path.exists():
         return None
     try:
-        return _parse_goose_config_value(config_path.read_text(encoding="utf-8"), key)
+        config = _parse_goose_config(config_path.read_text(encoding="utf-8"))
     except OSError:
         return None
+    if config is None:
+        return None
+    value = config.get(key)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
 
 
 def _get_config_mode() -> str | None:
