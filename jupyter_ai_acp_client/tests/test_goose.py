@@ -23,35 +23,59 @@ with patch("shutil.which", return_value="/usr/bin/goose"), \
 
 
 class TestIsSetupError:
-    """Tests for _is_setup_error() — checks error.data for provider config issues."""
+    """Tests for _is_setup_error() — source-verified against block/goose server.rs."""
 
     def test_provider_not_configured(self):
-        error = RequestError(-32603, "Internal error", "Failed to set provider: No default provider")
+        """server.rs line 870: init_provider fails."""
+        error = RequestError(-32603, "Internal error", "Failed to set provider: Configuration value not found: GOOSE_PROVIDER")
         assert _is_setup_error(error) is True
 
-    def test_no_provider(self):
-        error = RequestError(-32603, "Internal error", "No provider configured")
+    def test_session_creation_failed(self):
+        """server.rs line 855: session_manager.create_session fails."""
+        error = RequestError(-32603, "Internal error", "Failed to create session: database error")
         assert _is_setup_error(error) is True
 
-    def test_unrelated_internal_error(self):
-        error = RequestError(-32603, "Internal error", "Session not found")
-        assert _is_setup_error(error) is False
+    def test_agent_creation_failed(self):
+        """server.rs line 864: create_agent_for_session fails."""
+        error = RequestError(-32603, "Internal error", "Failed to create agent: DeveloperClient error")
+        assert _is_setup_error(error) is True
 
-    def test_auth_error_code_not_setup(self):
-        """ACP auth errors (-32000) are not setup errors."""
-        error = RequestError(-32000, "Authentication required")
-        assert _is_setup_error(error) is False
-
-    def test_plain_exception(self):
-        assert _is_setup_error(Exception("provider error")) is False
-
-    def test_no_data(self):
+    def test_no_data_framework_error(self):
+        """Bug fix: sacp framework errors have data=None."""
         error = RequestError(-32603, "Internal error")
+        assert _is_setup_error(error) is True
+
+    def test_prompt_reply_error_not_caught(self):
+        """server.rs line 1104: agent.reply() failure is NOT a setup error."""
+        error = RequestError(-32603, "Internal error", "Error getting agent reply: timeout")
+        assert _is_setup_error(error) is False
+
+    def test_stream_error_not_caught(self):
+        """server.rs line 1136: stream error is NOT a setup error."""
+        error = RequestError(-32603, "Internal error", "Error in agent response stream: broken pipe")
+        assert _is_setup_error(error) is False
+
+    def test_auth_required_forward_compat(self):
+        """ACP standard -32000 — Goose doesn't send this today but might in future."""
+        error = RequestError(-32000, "Authentication required")
+        assert _is_setup_error(error) is True
+
+    def test_other_codes_propagate(self):
+        error = RequestError(-32601, "Method not found")
+        assert _is_setup_error(error) is False
+
+    def test_resource_not_found_propagates(self):
+        """server.rs line 925: session not found during prompt."""
+        error = RequestError(-32002, "Resource not found", "Session not found: abc123")
         assert _is_setup_error(error) is False
 
     def test_case_insensitive(self):
+        """Defensive: .lower() handles unexpected casing from future Goose versions."""
         error = RequestError(-32603, "Internal error", "FAILED TO SET PROVIDER: ...")
         assert _is_setup_error(error) is True
+
+    def test_plain_exception(self):
+        assert _is_setup_error(Exception("provider error")) is False
 
 
 def _mock_result(stdout="goose 1.28.0", returncode=0, stderr=""):

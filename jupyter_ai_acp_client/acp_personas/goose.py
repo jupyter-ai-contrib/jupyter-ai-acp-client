@@ -13,14 +13,23 @@ from ..base_acp_persona import BaseAcpPersona
 def _is_setup_error(error: Exception) -> bool:
     """Check if error indicates Goose needs provider configuration.
 
-    Goose wraps config errors as internal_error with details in error.data,
-    not in the error message. This is different from other personas which
-    put details in the message field.
+    Source-verified against block/goose (server.rs):
+    - Session creation errors: -32603 with data prefixed "Failed to set provider:"
+      or "Failed to create session/agent:"
+    - Framework errors: -32603 with data=None (sacp dispatch layer)
+    - Goose never sends -32000, but we handle it for forward compatibility.
+    - Prompt-time provider errors are streamed as text, not RequestError.
     """
     if not isinstance(error, RequestError):
         return False
+    if error.code == -32000:
+        return True
+    if error.code != -32603:
+        return False
     data = str(error.data or "").lower()
-    return "provider" in data
+    if not data:
+        return True  # framework error, likely during session init
+    return "failed to set provider" in data or "failed to create" in data
 
 
 def _check_goose():
@@ -113,7 +122,9 @@ class GooseAcpPersona(BaseAcpPersona):
                 raise
 
             self.log.info(
-                "[Goose] Provider not configured: %s",
+                "[Goose] Setup error (code=%s): %s (data=%s)",
+                error.code,
+                str(error),
                 error.data,
             )
             await self.handle_no_auth(message)
