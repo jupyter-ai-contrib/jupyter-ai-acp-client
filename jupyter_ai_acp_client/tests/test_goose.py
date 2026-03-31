@@ -69,6 +69,11 @@ class TestIsSetupError:
         error = RequestError(-32002, "Resource not found", "Session not found: abc123")
         assert _is_setup_error(error) is False
 
+    def test_invalid_api_key(self):
+        """Provider configured but API key invalid/expired."""
+        error = RequestError(-32603, "Internal error", "Authentication error: Authentication failed. Status: 401 Unauthorized. Response: invalid x-api-key")
+        assert _is_setup_error(error) is True
+
     def test_case_insensitive(self):
         """Defensive: .lower() handles unexpected casing from future Goose versions."""
         error = RequestError(-32603, "Internal error", "FAILED TO SET PROVIDER: ...")

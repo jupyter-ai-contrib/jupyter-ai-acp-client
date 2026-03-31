@@ -13,12 +13,12 @@ from ..base_acp_persona import BaseAcpPersona
 def _is_setup_error(error: Exception) -> bool:
     """Check if error indicates Goose needs provider configuration.
 
-    Source-verified against block/goose (server.rs):
-    - Session creation errors: -32603 with data prefixed "Failed to set provider:"
-      or "Failed to create session/agent:"
-    - Framework errors: -32603 with data=None (sacp dispatch layer)
-    - Goose never sends -32000, but we handle it for forward compatibility.
-    - Prompt-time provider errors are streamed as text, not RequestError.
+    Goose wraps all session-init errors as -32603 (InternalError) with
+    descriptive data prefixes: "Failed to set provider:", "Failed to create
+    session/agent:", or "Authentication error:". Framework-level errors
+    from the sacp layer arrive as -32603 with data=None. Goose never sends
+    -32000 today, but we handle it for forward compatibility. Prompt-time
+    provider errors are streamed as text, not RequestError.
     """
     if not isinstance(error, RequestError):
         return False
@@ -29,7 +29,11 @@ def _is_setup_error(error: Exception) -> bool:
     data = str(error.data or "").lower()
     if not data:
         return True  # framework error, likely during session init
-    return "failed to set provider" in data or "failed to create" in data
+    return (
+        "failed to set provider" in data
+        or "failed to create" in data
+        or "authentication" in data
+    )
 
 
 def _check_goose():
