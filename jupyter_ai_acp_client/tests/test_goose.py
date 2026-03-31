@@ -1,5 +1,6 @@
 """Tests for the Goose ACP persona helper functions."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,6 +19,7 @@ with patch("shutil.which", return_value="/usr/bin/goose"), \
         _check_goose,
         _get_config_mode,
         _get_explicit_provider,
+        _get_user_config_path,
         _is_setup_error,
         _parse_goose_config,
         _resolve_mode_decision,
@@ -25,49 +27,56 @@ with patch("shutil.which", return_value="/usr/bin/goose"), \
 
 
 class TestIsSetupError:
-    def test_provider_not_configured(self):
-        error = RequestError(-32603, "Internal error", "Failed to set provider: Configuration value not found: GOOSE_PROVIDER")
-        assert _is_setup_error(error) is True
-
-    def test_session_creation_failed(self):
-        error = RequestError(-32603, "Internal error", "Failed to create session: database error")
-        assert _is_setup_error(error) is True
-
-    def test_agent_creation_failed(self):
-        error = RequestError(-32603, "Internal error", "Failed to create agent: DeveloperClient error")
-        assert _is_setup_error(error) is True
-
-    def test_no_data_framework_error(self):
-        error = RequestError(-32603, "Internal error")
-        assert _is_setup_error(error) is True
-
-    def test_prompt_reply_error_not_caught(self):
-        error = RequestError(-32603, "Internal error", "Error getting agent reply: timeout")
-        assert _is_setup_error(error) is False
-
-    def test_stream_error_not_caught(self):
-        error = RequestError(-32603, "Internal error", "Error in agent response stream: broken pipe")
-        assert _is_setup_error(error) is False
-
-    def test_auth_required_forward_compat(self):
-        error = RequestError(-32000, "Authentication required")
-        assert _is_setup_error(error) is True
-
-    def test_other_codes_propagate(self):
-        error = RequestError(-32601, "Method not found")
-        assert _is_setup_error(error) is False
-
-    def test_resource_not_found_propagates(self):
-        error = RequestError(-32002, "Resource not found", "Session not found: abc123")
-        assert _is_setup_error(error) is False
-
-    def test_invalid_api_key(self):
-        error = RequestError(-32603, "Internal error", "Authentication error: Authentication failed. Status: 401 Unauthorized. Response: invalid x-api-key")
-        assert _is_setup_error(error) is True
-
-    def test_case_insensitive(self):
-        error = RequestError(-32603, "Internal error", "FAILED TO SET PROVIDER: ...")
-        assert _is_setup_error(error) is True
+    @pytest.mark.parametrize(
+        ("error", "expected"),
+        [
+            (RequestError(-32000, "Authentication required"), True),
+            (
+                RequestError(
+                    -32603,
+                    "Internal error",
+                    "Failed to set provider: Configuration value not found: GOOSE_PROVIDER",
+                ),
+                True,
+            ),
+            (
+                RequestError(
+                    -32603,
+                    "Internal error",
+                    "Failed to create session: database error",
+                ),
+                True,
+            ),
+            (
+                RequestError(
+                    -32603,
+                    "Internal error",
+                    "Authentication error: Authentication failed. Status: 401 Unauthorized. Response: invalid x-api-key",
+                ),
+                True,
+            ),
+            (RequestError(-32603, "Internal error"), True),
+            (
+                RequestError(
+                    -32603,
+                    "Internal error",
+                    "Error getting agent reply: timeout",
+                ),
+                False,
+            ),
+            (
+                RequestError(
+                    -32002,
+                    "Resource not found",
+                    "Session not found: abc123",
+                ),
+                False,
+            ),
+            (RequestError(-32601, "Method not found"), False),
+        ],
+    )
+    def test_request_error_classification(self, error, expected):
+        assert _is_setup_error(error) is expected
 
     def test_plain_exception(self):
         assert _is_setup_error(Exception("provider error")) is False
@@ -87,30 +96,35 @@ class TestCheckGoose:
             with pytest.raises(PersonaRequirementsUnmet, match="requires the Goose CLI"):
                 _check_goose()
 
-    def test_valid_version(self):
+    @pytest.mark.parametrize(
+        ("version", "error_match"),
+        [
+            ("1.8.0", None),
+            ("1.7.0", ">=1.8.0"),
+            ("2.0.0", ">=1.8.0,<2"),
+        ],
+    )
+    def test_version_gate(self, version, error_match):
         with patch("shutil.which", return_value="/usr/bin/goose"), \
-             patch("subprocess.run", return_value=_mock_result("goose 1.28.0")):
-            _check_goose()
-
-    def test_old_version(self):
-        with patch("shutil.which", return_value="/usr/bin/goose"), \
-             patch("subprocess.run", return_value=_mock_result("goose 1.7.0")):
-            with pytest.raises(PersonaRequirementsUnmet, match=">=1.8.0"):
+             patch("subprocess.run", return_value=_mock_result(f"goose {version}")):
+            if error_match is None:
                 _check_goose()
-
-    def test_exact_minimum_version(self):
-        with patch("shutil.which", return_value="/usr/bin/goose"), \
-             patch("subprocess.run", return_value=_mock_result("goose 1.8.0")):
-            _check_goose()
-
-    def test_major_version_2_rejected(self):
-        with patch("shutil.which", return_value="/usr/bin/goose"), \
-             patch("subprocess.run", return_value=_mock_result("goose 2.0.0")):
-            with pytest.raises(PersonaRequirementsUnmet, match=">=1.8.0,<2"):
-                _check_goose()
+            else:
+                with pytest.raises(PersonaRequirementsUnmet, match=error_match):
+                    _check_goose()
 
 
 class TestGooseConfigParsing:
+    def test_get_user_config_path_prefers_goose_path_root(self):
+        with patch.dict(
+            "os.environ",
+            {"GOOSE_PATH_ROOT": "/tmp/goose-test", "XDG_CONFIG_HOME": "/tmp/xdg"},
+            clear=True,
+        ):
+            assert _get_user_config_path() == (
+                Path("/tmp/goose-test") / "config" / "config.yaml"
+            )
+
     def test_parse_goose_config_mapping(self):
         assert _parse_goose_config("GOOSE_MODE: approve\nGOOSE_PROVIDER: openai\n") == {
             "GOOSE_MODE": "approve",

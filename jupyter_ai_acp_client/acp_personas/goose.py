@@ -95,6 +95,9 @@ _check_goose()
 
 def _get_user_config_path() -> Path:
     """Return the Goose config path for the current platform."""
+    goose_path_root = os.environ.get("GOOSE_PATH_ROOT")
+    if goose_path_root:
+        return Path(goose_path_root) / "config" / "config.yaml"
     if os.name == "nt":
         appdata = os.environ.get("APPDATA")
         if appdata:
