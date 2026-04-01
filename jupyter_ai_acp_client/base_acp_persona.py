@@ -275,46 +275,80 @@ class BaseAcpPersona(BasePersona):
         )
         self._acp_slash_commands = commands
 
-    def shutdown(self):
+    async def shutdown(self):
         # TODO: allow shutdown() to be async
         if getattr(self, '_shutting_down', False):
             return
         self._shutting_down = True
-        self.event_loop.create_task(self._shutdown())
+        await super().shutdown()
+        await self._shutdown()
 
     async def _shutdown(self):
-        self.log.info("Closing ACP agent and client for '%s'.", self.__class__.__name__)
-        client = await self.get_client()
-        try:
-            session_id = await self.get_session_id()
-            await client.end_session(session_id)
-        except Exception:
-            self.log.warning(
-                "Failed to clean up session resources during shutdown for '%s'.",
-                self.__class__.__name__,
-                exc_info=True,
-            )
-        try:
-            conn = await client.get_connection()
-            await conn.close()
-        except Exception:
-            self.log.warning(
-                "Failed to close connection during shutdown for '%s'.",
-                self.__class__.__name__,
-                exc_info=True,
-            )
+        self.log.info("[shutdown] Starting for '%s'.", self.__class__.__name__)
+
+        # Inspect future states before doing anything
+        subprocess_future = self._subprocess_future
+        client_future = self._client_future
+        session_future = self._client_session_future
+
+        def _future_state(f):
+            if not isinstance(f, Task):
+                return f"not a Task ({type(f).__name__})"
+            if f.cancelled():
+                return "cancelled"
+            if not f.done():
+                return "pending"
+            if f.exception():
+                return f"failed: {f.exception()}"
+            return "resolved"
+
+        self.log.info(
+            "[shutdown] Future states for '%s': subprocess=%s, client=%s, session=%s",
+            self.__class__.__name__,
+            _future_state(subprocess_future),
+            _future_state(client_future),
+            _future_state(session_future),
+        )
+
+        # Step 1: Session cleanup (only if session was established)
+        if isinstance(session_future, Task) and session_future.done() and not session_future.cancelled() and session_future.exception() is None:
+            self.log.info("[shutdown] Step 1: cleaning up session for '%s'.", self.__class__.__name__)
+            try:
+                client = await self.get_client()
+                session_id = await self.get_session_id()
+                self.log.info("[shutdown] Step 1: ending session '%s' for '%s'.", session_id, self.__class__.__name__)
+                await client.end_session(session_id)
+                self.log.info("[shutdown] Step 1: session ended for '%s'.", self.__class__.__name__)
+            except Exception:
+                self.log.warning("[shutdown] Step 1: failed for '%s'.", self.__class__.__name__, exc_info=True)
+        else:
+            self.log.info("[shutdown] Step 1: skipped (session never established) for '%s'.", self.__class__.__name__)
+
+        # Step 2: Close connection (only if client was initialized)
+        if isinstance(client_future, Task) and client_future.done() and not client_future.cancelled() and client_future.exception() is None:
+            self.log.info("[shutdown] Step 2: closing connection for '%s'.", self.__class__.__name__)
+            try:
+                client = await self.get_client()
+                conn = await client.get_connection()
+                await conn.close()
+                self.log.info("[shutdown] Step 2: connection closed for '%s'.", self.__class__.__name__)
+            except Exception:
+                self.log.warning("[shutdown] Step 2: failed for '%s'.", self.__class__.__name__, exc_info=True)
+        else:
+            self.log.info("[shutdown] Step 2: skipped (client never initialized) for '%s'.", self.__class__.__name__)
+
+        # Step 3: Kill the subprocess
+        self.log.info("[shutdown] Step 3: killing subprocess for '%s'.", self.__class__.__name__)
         try:
             subprocess = await self.get_agent_subprocess()
             subprocess.kill()
+            self.log.info("[shutdown] Step 3: subprocess killed for '%s'.", self.__class__.__name__)
         except (ProcessLookupError, PermissionError, OSError):
-            pass
+            self.log.info("[shutdown] Step 3: subprocess already dead for '%s'.", self.__class__.__name__)
         except Exception:
-            self.log.warning(
-                "Failed to kill subprocess during shutdown for '%s'.",
-                self.__class__.__name__,
-                exc_info=True,
-            )
-        self.log.info("Successfully closed ACP agent and client for '%s'.", self.__class__.__name__)
+            self.log.warning("[shutdown] Step 3: failed for '%s'.", self.__class__.__name__, exc_info=True)
+
+        self.log.info("[shutdown] Complete for '%s'.", self.__class__.__name__)
 
     @property
     def event_logger(self):
