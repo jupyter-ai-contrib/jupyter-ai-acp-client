@@ -310,7 +310,7 @@ class BaseAcpPersona(BasePersona):
                 "[shutdown] Step 1: session ended for '%s'.", self.__class__.__name__
             )
         except Exception:
-            self.log.warning(
+            self.log.debug(
                 "[shutdown] Step 1: failed for '%s'.",
                 self.__class__.__name__,
                 exc_info=True,
@@ -327,7 +327,7 @@ class BaseAcpPersona(BasePersona):
                     self.__class__.__name__,
                 )
             except Exception:
-                self.log.warning(
+                self.log.debug(
                     "[shutdown] Step 2: failed for '%s'.",
                     self.__class__.__name__,
                     exc_info=True,
@@ -348,7 +348,7 @@ class BaseAcpPersona(BasePersona):
                     self.__class__.__name__,
                 )
             except Exception:
-                self.log.warning(
+                self.log.debug(
                     "[shutdown] Step 3: failed for '%s'.",
                     self.__class__.__name__,
                     exc_info=True,
