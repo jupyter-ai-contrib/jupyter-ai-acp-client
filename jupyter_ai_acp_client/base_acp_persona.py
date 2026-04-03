@@ -2,7 +2,7 @@ import asyncio
 import sys
 from asyncio import Task
 from asyncio.subprocess import Process
-from typing import Any, Awaitable, ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 from acp import NewSessionResponse, LoadSessionResponse
 from acp.schema import AvailableCommand
@@ -22,16 +22,16 @@ class BaseAcpPersona(BasePersona):
     `self.before_agent_subprocess()` - see method documentation for details.
     """
 
-    _subprocess_future: ClassVar[Awaitable[Process] | None] = None
+    _subprocess_future: ClassVar[Task[Process] | None] = None
     """
     The task that yields the agent subprocess once complete. This is a class
     attribute because multiple instances of the same ACP persona may share an
     ACP agent subprocess.
-    
+
     Developers should always use `self.get_agent_subprocess()`.
     """
 
-    _client_future: ClassVar[Awaitable[JaiAcpClient] | None] = None
+    _client_future: ClassVar[Task[JaiAcpClient] | None] = None
     """
     The future that yields the ACP Client once complete. This is a class
     attribute because multiple instances of the same ACP persona may share an
@@ -40,7 +40,7 @@ class BaseAcpPersona(BasePersona):
     Developers should always use `self.get_client()`.
     """
 
-    _client_session_future: Awaitable[NewSessionResponse | LoadSessionResponse]
+    _client_session_future: Task[NewSessionResponse | LoadSessionResponse]
     """
     The future that yields the ACP client session info. Each instance of an ACP
     persona has a unique session ID, i.e. each chat reserves a unique session.
@@ -298,26 +298,56 @@ class BaseAcpPersona(BasePersona):
         await super().shutdown()
         await self._shutdown()
 
+    def _future_resolved(self, future: Task | None) -> bool:
+        """Returns True if the future completed successfully (not pending,
+        cancelled, or failed)."""
+        return (
+            isinstance(future, Task)
+            and future.done()
+            and not future.cancelled()
+            and future.exception() is None
+        )
+
     async def _shutdown(self):
         self.log.debug("[shutdown] Starting for '%s'.", self.__class__.__name__)
 
-        # Step 1: Session cleanup
-        try:
-            client = await self.get_client()
-            session_id = await self.get_session_id()
-            await client.end_session(session_id)
+        # Cancel any pending startup futures to avoid hanging on auth-gated
+        # personas (e.g. Kiro, Gemini) that never finished startup.
+        for future in [
+            self.__class__._before_subprocess_future,
+            self.__class__._subprocess_future,
+            self.__class__._client_future,
+            self._client_session_future,
+        ]:
+            if isinstance(future, Task) and not future.done():
+                future.cancel()
+
+        # Step 1: Session cleanup (only if both client and session resolved)
+        if self._future_resolved(
+            self.__class__._client_future
+        ) and self._future_resolved(self._client_session_future):
+            try:
+                client = await self.get_client()
+                session_id = await self.get_session_id()
+                await client.end_session(session_id)
+                self.log.debug(
+                    "[shutdown] Step 1: session ended for '%s'.",
+                    self.__class__.__name__,
+                )
+            except Exception:
+                self.log.debug(
+                    "[shutdown] Step 1: failed for '%s'.",
+                    self.__class__.__name__,
+                    exc_info=True,
+                )
+        else:
             self.log.debug(
-                "[shutdown] Step 1: session ended for '%s'.", self.__class__.__name__
-            )
-        except Exception:
-            self.log.debug(
-                "[shutdown] Step 1: failed for '%s'.",
+                "[shutdown] Step 1: skipped (client or session not ready) for '%s'.",
                 self.__class__.__name__,
-                exc_info=True,
             )
 
-        # Step 2: Close connection
-        if isinstance(self._client_future, Task):
+        # Step 2: Close connection (only if client resolved)
+        if self._future_resolved(self.__class__._client_future):
             try:
                 client = await self.get_client()
                 conn = await client.get_connection()
@@ -332,9 +362,14 @@ class BaseAcpPersona(BasePersona):
                     self.__class__.__name__,
                     exc_info=True,
                 )
+        else:
+            self.log.debug(
+                "[shutdown] Step 2: skipped (client not ready) for '%s'.",
+                self.__class__.__name__,
+            )
 
-        # Step 3: Kill the subprocess
-        if isinstance(self._subprocess_future, Task):
+        # Step 3: Kill the subprocess (only if subprocess resolved)
+        if self._future_resolved(self.__class__._subprocess_future):
             try:
                 subprocess = await self.get_agent_subprocess()
                 subprocess.kill()
@@ -353,6 +388,11 @@ class BaseAcpPersona(BasePersona):
                     self.__class__.__name__,
                     exc_info=True,
                 )
+        else:
+            self.log.debug(
+                "[shutdown] Step 3: skipped (subprocess not ready) for '%s'.",
+                self.__class__.__name__,
+            )
 
         self.log.debug("[shutdown] Complete for '%s'.", self.__class__.__name__)
 
