@@ -298,7 +298,7 @@ class BaseAcpPersona(BasePersona):
         await self._shutdown()
 
     async def _shutdown(self):
-        self.log.debug("[shutdown] Starting for '%s'.", self.__class__.__name__)
+        self.log.info("[shutdown] Starting for '%s'.", self.__class__.__name__)
 
         # Cancel any pending startup futures to avoid hanging on auth-gated
         # personas (e.g. Kiro, Gemini) that never finished startup.
@@ -316,32 +316,44 @@ class BaseAcpPersona(BasePersona):
             client = await self.get_client()
             session_id = await self.get_session_id()
             await client.end_session(session_id)
-            self.log.debug(
+            self.log.info(
                 "[shutdown] Step 1: session ended for '%s'.",
                 self.__class__.__name__,
             )
         except asyncio.CancelledError:
             pass
         except Exception:
-            self.log.debug(
+            self.log.warning(
                 "[shutdown] Step 1: failed for '%s'.",
                 self.__class__.__name__,
                 exc_info=True,
             )
+
+        # Skip connection/subprocess teardown if other sessions are still active
+        try:
+            client = await self.get_client()
+            if client.list_sessions():
+                self.log.info(
+                    "[shutdown] Other sessions still active, skipping subprocess teardown for '%s'.",
+                    self.__class__.__name__,
+                )
+                return
+        except (asyncio.CancelledError, Exception):
+            pass
 
         # Step 2: Close connection
         try:
             client = await self.get_client()
             conn = await client.get_connection()
             await conn.close()
-            self.log.debug(
+            self.log.info(
                 "[shutdown] Step 2: connection closed for '%s'.",
                 self.__class__.__name__,
             )
         except asyncio.CancelledError:
             pass
         except Exception:
-            self.log.debug(
+            self.log.warning(
                 "[shutdown] Step 2: failed for '%s'.",
                 self.__class__.__name__,
                 exc_info=True,
@@ -351,25 +363,31 @@ class BaseAcpPersona(BasePersona):
         try:
             subprocess = await self.get_agent_subprocess()
             subprocess.kill()
-            self.log.debug(
+            self.log.info(
                 "[shutdown] Step 3: subprocess killed for '%s'.",
                 self.__class__.__name__,
             )
         except asyncio.CancelledError:
             pass
         except (ProcessLookupError, PermissionError, OSError):
-            self.log.debug(
+            self.log.info(
                 "[shutdown] Step 3: subprocess already dead for '%s'.",
                 self.__class__.__name__,
             )
         except Exception:
-            self.log.debug(
+            self.log.warning(
                 "[shutdown] Step 3: failed for '%s'.",
                 self.__class__.__name__,
                 exc_info=True,
             )
 
-        self.log.debug("[shutdown] Complete for '%s'.", self.__class__.__name__)
+        # Reset class attributes to `None` after cleaning up the global
+        # resources they store
+        self.__class__._before_subprocess_future = None
+        self.__class__._subprocess_future = None
+        self.__class__._client_future = None
+
+        self.log.info("[shutdown] Complete for '%s'.", self.__class__.__name__)
 
     @property
     def event_logger(self):
