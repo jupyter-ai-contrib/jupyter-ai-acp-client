@@ -1,4 +1,6 @@
 import asyncio
+import os
+import signal
 import sys
 from asyncio import Task
 from asyncio.subprocess import Process
@@ -105,11 +107,13 @@ class BaseAcpPersona(BasePersona):
     ) -> Process:
         # Wait until user is authenticated
         await self._before_subprocess_future
+        self.log.info("Spawning ACP agent subprocess for '%s'.", self.__class__.__name__)
         kwargs: dict[str, Any] = dict(
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=sys.stderr,
             limit=50 * 1024 * 1024,
+            start_new_session=True,
         )
         if env is not None:
             kwargs["env"] = env
@@ -151,15 +155,19 @@ class BaseAcpPersona(BasePersona):
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "load"})
     async def _load_session(self, client, existing_session_id) -> LoadSessionResponse:
-        response = await client.load_session(
-            persona=self, session_id=existing_session_id
-        )
-        self.log.info(
-            "Loaded existing ACP client session for '%s' with ID '%s'.",
-            self.__class__.__name__,
-            existing_session_id,
-        )
-        return response
+        try:
+            response = await client.load_session(
+                persona=self, session_id=existing_session_id
+            )
+            self.log.info(
+                "Loaded existing ACP client session for '%s' with ID '%s'.",
+                self.__class__.__name__,
+                existing_session_id,
+            )
+            return response
+        except:
+            self.log.exception("Failed to load client session for %s with ID %s", self.__class__.__name__, existing_session_id)
+            raise
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
     async def _create_session(self, client) -> NewSessionResponse:
@@ -359,14 +367,24 @@ class BaseAcpPersona(BasePersona):
                 exc_info=True,
             )
 
-        # Step 3: Kill the subprocess
+        # Step 3: Stop the subprocess gracefully, falling back to SIGKILL
         try:
             subprocess = await self.get_agent_subprocess()
-            subprocess.kill()
-            self.log.info(
-                "[shutdown] Step 3: subprocess killed for '%s'.",
-                self.__class__.__name__,
-            )
+            pgid = os.getpgid(subprocess.pid)
+            os.killpg(pgid, signal.SIGINT)
+            os.killpg(pgid, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(subprocess.wait(), timeout=5.0)
+                self.log.info(
+                    "[shutdown] Step 3: subprocess terminated for '%s'.",
+                    self.__class__.__name__,
+                )
+            except asyncio.TimeoutError:
+                os.killpg(pgid, signal.SIGKILL)
+                self.log.info(
+                    "[shutdown] Step 3: subprocess killed after timeout for '%s'.",
+                    self.__class__.__name__,
+                )
         except asyncio.CancelledError:
             pass
         except (ProcessLookupError, PermissionError, OSError):
