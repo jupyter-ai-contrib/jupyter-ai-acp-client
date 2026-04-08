@@ -156,19 +156,15 @@ class BaseAcpPersona(BasePersona):
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "load"})
     async def _load_session(self, client, existing_session_id) -> LoadSessionResponse:
-        try:
-            response = await client.load_session(
-                persona=self, session_id=existing_session_id
-            )
-            self.log.info(
-                "Loaded existing ACP client session for '%s' with ID '%s'.",
-                self.__class__.__name__,
-                existing_session_id,
-            )
-            return response
-        except Exception:
-            self.log.exception("Failed to load client session for %s with ID %s", self.__class__.__name__, existing_session_id)
-            raise
+        response = await client.load_session(
+            persona=self, session_id=existing_session_id
+        )
+        self.log.info(
+            "Loaded existing ACP client session for '%s' with ID '%s'.",
+            self.__class__.__name__,
+            existing_session_id,
+        )
+        return response
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
     async def _create_session(self, client) -> NewSessionResponse:
@@ -193,7 +189,7 @@ class BaseAcpPersona(BasePersona):
             try:
                 return await self._load_session(client, existing_session_id)
             except RequestError as err:
-                if "Resource not found" not in str(err):
+                if not self._is_missing_remote_session(err):
                     raise
                 self.log.warning(
                     "Saved ACP session '%s' for '%s' no longer exists remotely; creating a new session.",
