@@ -7,6 +7,7 @@ from asyncio.subprocess import Process
 from typing import Any, ClassVar, Optional
 
 from acp import NewSessionResponse, LoadSessionResponse
+from acp.exceptions import RequestError
 from acp.schema import AvailableCommand
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
@@ -165,7 +166,7 @@ class BaseAcpPersona(BasePersona):
                 existing_session_id,
             )
             return response
-        except:
+        except Exception:
             self.log.exception("Failed to load client session for %s with ID %s", self.__class__.__name__, existing_session_id)
             raise
 
@@ -189,7 +190,17 @@ class BaseAcpPersona(BasePersona):
         supports_session_load = (await client.get_agent_capabilities()).load_session
 
         if existing_session_id and supports_session_load:
-            return await self._load_session(client, existing_session_id)
+            try:
+                return await self._load_session(client, existing_session_id)
+            except RequestError as err:
+                if "Resource not found" not in str(err):
+                    raise
+                self.log.warning(
+                    "Saved ACP session '%s' for '%s' no longer exists remotely; creating a new session.",
+                    existing_session_id,
+                    self.__class__.__name__,
+                )
+                return await self._create_session(client)
         else:
             return await self._create_session(client)
 
