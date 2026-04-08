@@ -51,7 +51,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
         )
 ```
 
-Currently, this package provides 7 personas:
+Currently, this package provides 8 personas:
 
 - `@Claude`
   - requires `claude-agent-acp`, installed via `npm install -g @zed-industries/claude-agent-acp`
@@ -66,6 +66,9 @@ Currently, this package provides 7 personas:
   - requires `opencode` CLI (>= 1.0.0, < 2), installed via `npm install -g opencode-ai` or from https://opencode.ai
 - `@Codex`
   - requires `codex-acp`, installed via `npm install -g @zed-industries/codex-acp`
+- `@Copilot`
+  - requires the `copilot` CLI with built-in ACP support, installed via `npm install -g @github/copilot`, `brew install copilot-cli`, or the [official install docs](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli)
+  - auth via `copilot login` or `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`
 - `@Goose`
   - requires `goose` CLI (>= 1.8.0, < 2), installed via https://github.com/block/goose
   - auth via `goose configure`
@@ -86,6 +89,7 @@ Currently, this package provides 7 personas:
 - `mistral-vibe` (enables `@Mistral-Vibe` via the `vibe-acp` command)
 - `opencode` v1.0.0+ (enables `@OpenCode`)
 - `codex-acp` (enables `@Codex`)
+- `copilot` CLI with ACP support (enables `@Copilot`)
 - `goose` v1.8.0+ (enables `@Goose`)
 
 ## Install

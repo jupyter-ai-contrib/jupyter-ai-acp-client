@@ -103,4 +103,5 @@ mistral-vibe-acp = "jupyter_ai_acp_client.acp_personas.mistral_vibe:MistralVibeA
 gemini-acp = "jupyter_ai_acp_client.acp_personas.gemini:GeminiAcpPersona"
 opencode-acp = "jupyter_ai_acp_client.acp_personas.opencode:OpenCodeAcpPersona"
 codex-acp = "jupyter_ai_acp_client.acp_personas.codex:CodexAcpPersona"
+copilot-acp = "jupyter_ai_acp_client.acp_personas.copilot:CopilotAcpPersona"
 goose-acp = "jupyter_ai_acp_client.acp_personas.goose:GooseAcpPersona"
