@@ -47,7 +47,7 @@ class CopilotAcpPersona(BaseAcpPersona):
         avatar_path = str(
             os.path.abspath(
                 os.path.join(
-                    os.path.dirname(__file__), "..", "static", "copilot.png"
+                    os.path.dirname(__file__), "..", "static", "copilot.svg"
                 )
             )
         )
