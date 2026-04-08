@@ -189,7 +189,8 @@ class BaseAcpPersona(BasePersona):
             try:
                 return await self._load_session(client, existing_session_id)
             except RequestError as err:
-                if not self._is_missing_remote_session(err):
+                # -32002 = "Resource not found" (stale session after subprocess restart)
+                if err.code != -32002:
                     raise
                 self.log.warning(
                     "Saved ACP session '%s' for '%s' no longer exists remotely; creating a new session.",
