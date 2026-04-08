@@ -156,15 +156,19 @@ class BaseAcpPersona(BasePersona):
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "load"})
     async def _load_session(self, client, existing_session_id) -> LoadSessionResponse:
-        response = await client.load_session(
-            persona=self, session_id=existing_session_id
-        )
-        self.log.info(
-            "Loaded existing ACP client session for '%s' with ID '%s'.",
-            self.__class__.__name__,
-            existing_session_id,
-        )
-        return response
+        try:
+            response = await client.load_session(
+                persona=self, session_id=existing_session_id
+            )
+            self.log.info(
+                "Loaded existing ACP client session for '%s' with ID '%s'.",
+                self.__class__.__name__,
+                existing_session_id,
+            )
+            return response
+        except Exception:
+            self.log.exception("Failed to load client session for %s with ID %s", self.__class__.__name__, existing_session_id)
+            raise
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
     async def _create_session(self, client) -> NewSessionResponse:
