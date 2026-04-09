@@ -7,7 +7,10 @@ function getConfiguredServerRoot(): string | null {
     try {
       return new URL(rootUri, 'http://localhost').pathname;
     } catch (error) {
-      console.warn('Could not parse rootUri while opening tool call path.', error);
+      console.warn(
+        'Could not parse rootUri while opening tool call path.',
+        error
+      );
     }
   }
 

@@ -142,8 +142,7 @@ export const slashCommandPlugin: JupyterFrontEndPlugin<void> = {
  */
 export const toolCallComponentsPlugin: JupyterFrontEndPlugin<void> = {
   id: TOOL_CALL_COMPONENTS_PLUGIN_ID,
-  description:
-    'Renders ACP grouped tool calls with jupyter-chat-components.',
+  description: 'Renders ACP grouped tool calls with jupyter-chat-components.',
   autoStart: true,
   optional: [IMessagePreambleRegistry],
   activate: (

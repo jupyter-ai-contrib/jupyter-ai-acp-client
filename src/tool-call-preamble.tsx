@@ -33,13 +33,13 @@ function readStringArray(value: unknown): string[] | undefined {
     return undefined;
   }
 
-  const strings = value.filter((item): item is string => typeof item === 'string');
+  const strings = value.filter(
+    (item): item is string => typeof item === 'string'
+  );
   return strings.length === value.length ? strings : undefined;
 }
 
-function toPermissionOption(
-  value: unknown
-): IToolCallPermissionOption | null {
+function toPermissionOption(value: unknown): IToolCallPermissionOption | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -130,9 +130,7 @@ function toToolCallsEntry(value: unknown): IToolCallsEntry | null {
   if (Array.isArray(value.permission_options)) {
     entry.permissionOptions = value.permission_options
       .map(toPermissionOption)
-      .filter(
-        (option): option is IToolCallPermissionOption => option !== null
-      );
+      .filter((option): option is IToolCallPermissionOption => option !== null);
   }
 
   if (Array.isArray(value.diffs)) {
@@ -144,7 +142,9 @@ function toToolCallsEntry(value: unknown): IToolCallsEntry | null {
   return entry;
 }
 
-function getToolCalls(message: MessagePreambleProps['message']): IToolCallsEntry[] {
+function getToolCalls(
+  message: MessagePreambleProps['message']
+): IToolCallsEntry[] {
   if (!isRecord(message.metadata)) {
     return [];
   }
@@ -178,9 +178,7 @@ export function createToolCallsPreamble(options: IAcpToolCallPreambleOptions) {
         trans={trans}
         toolCalls={toolCalls}
         openToolCallPath={options.openToolCallPath ?? null}
-        toolCallPermissionDecision={
-          options.toolCallPermissionDecision ?? null
-        }
+        toolCallPermissionDecision={options.toolCallPermissionDecision ?? null}
       />
     );
   };
