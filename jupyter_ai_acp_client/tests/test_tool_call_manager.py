@@ -1,10 +1,6 @@
 from unittest.mock import MagicMock
 
 from jupyter_ai_acp_client.tool_call_manager import ToolCallManager
-from jupyter_ai_acp_client.tool_call_renderer import (
-    CHAT_COMPONENTS_MIME_TYPE,
-    GROUPED_TOOL_CALLS_COMPONENT,
-)
 
 
 def make_persona(message_id_seq: list[str] | str | None = None) -> MagicMock:
@@ -488,14 +484,7 @@ class TestFlushToolCall:
         flushed_msg = persona.ychat.update_message.call_args[0][0]
         assert len(flushed_msg.metadata["tool_calls"]) == 1
         assert flushed_msg.metadata["tool_calls"][0]["tool_call_id"] == "tc-1"
-        assert flushed_msg.mime_model.data == {
-            CHAT_COMPONENTS_MIME_TYPE: GROUPED_TOOL_CALLS_COMPONENT
-        }
-        component_metadata = flushed_msg.mime_model.metadata[
-            CHAT_COMPONENTS_MIME_TYPE
-        ]
-        assert component_metadata["toolCalls"][0]["toolCallId"] == "tc-1"
-        assert component_metadata["toolCalls"][0]["title"] == "Reading"
+        assert flushed_msg.mime_model is None
 
     def test_noop_when_session_missing(self):
         mgr = ToolCallManager()

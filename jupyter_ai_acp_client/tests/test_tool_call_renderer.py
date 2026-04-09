@@ -1,14 +1,11 @@
 from acp.schema import FileEditToolCallContent
 
 from jupyter_ai_acp_client.tool_call_renderer import (
-    CHAT_COMPONENTS_MIME_TYPE,
-    GROUPED_TOOL_CALLS_COMPONENT,
     ToolCallDiff,
     ToolCallState,
     _shorten_title,
     _generate_title,
     _parse_unified_diff,
-    build_grouped_tool_calls_metadata,
     extract_diffs,
     extract_diffs_from_raw_input,
     update_tool_call_from_start,
@@ -19,75 +16,6 @@ from jupyter_ai_acp_client.tool_call_renderer import (
 def _serialize(tool_calls: dict[str, ToolCallState]) -> list[dict]:
     """Helper to serialize tool calls using model_dump."""
     return [tc.model_dump(exclude_none=True) for tc in tool_calls.values()]
-
-
-class TestGroupedToolCallsMetadata:
-    def test_serializes_grouped_tool_calls_for_chat_components(self):
-        metadata = build_grouped_tool_calls_metadata(
-            [
-                {
-                    "tool_call_id": "tc-1",
-                    "title": "Edit file.py",
-                    "kind": "edit",
-                    "status": "completed",
-                    "raw_input": {"command": "cat file.py"},
-                    "raw_output": "done",
-                    "locations": ["/tmp/file.py"],
-                    "permission_options": [
-                        {
-                            "option_id": "allow-once",
-                            "name": "Allow once",
-                            "kind": "allow_once",
-                        }
-                    ],
-                    "permission_status": "resolved",
-                    "selected_option_id": "allow-once",
-                    "session_id": "session-1",
-                    "diffs": [
-                        {
-                            "path": "/tmp/file.py",
-                            "old_text": "old",
-                            "new_text": "new",
-                        }
-                    ],
-                }
-            ]
-        )
-
-        assert metadata == {
-            "toolCalls": [
-                {
-                    "toolCallId": "tc-1",
-                    "title": "Edit file.py",
-                    "kind": "edit",
-                    "status": "completed",
-                    "rawInput": {"command": "cat file.py"},
-                    "rawOutput": "done",
-                    "locations": ["/tmp/file.py"],
-                    "permissionOptions": [
-                        {
-                            "optionId": "allow-once",
-                            "name": "Allow once",
-                            "kind": "allow_once",
-                        }
-                    ],
-                    "permissionStatus": "resolved",
-                    "selectedOptionId": "allow-once",
-                    "sessionId": "session-1",
-                    "diffs": [
-                        {
-                            "path": "/tmp/file.py",
-                            "oldText": "old",
-                            "newText": "new",
-                        }
-                    ],
-                }
-            ]
-        }
-
-    def test_chat_component_constants_match_renderer_contract(self):
-        assert CHAT_COMPONENTS_MIME_TYPE == "application/vnd.jupyter.chat.components"
-        assert GROUPED_TOOL_CALLS_COMPONENT == "grouped-tool-calls"
 
 
 class TestUpdateToolCallFromStart:

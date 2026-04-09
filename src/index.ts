@@ -7,15 +7,15 @@ import {
   IChatCommandProvider,
   IChatCommandRegistry,
   IInputModel,
+  IMessagePreambleRegistry,
   IInputToolbarRegistryFactory,
   InputToolbarRegistry,
   ChatCommand
 } from '@jupyter/chat';
 
-import { IComponentsRendererFactory } from 'jupyter-chat-components';
-
 import { getAcpSlashCommands, submitPermissionDecision } from './request';
 import { AcpStopButton } from './stop-button';
+import { createToolCallsPreamble } from './tool-call-preamble';
 import { getOpenableToolCallPath } from './tool-call-paths';
 
 const SLASH_COMMAND_PROVIDER_ID =
@@ -137,30 +137,40 @@ export const slashCommandPlugin: JupyterFrontEndPlugin<void> = {
 };
 
 /**
- * Plugin that wires ACP-specific callbacks into jupyter-chat-components so
- * grouped tool call MIME bundles can open files and resolve permissions.
+ * Plugin that renders ACP tool calls using jupyter-chat-components through the
+ * chat preamble registry.
  */
 export const toolCallComponentsPlugin: JupyterFrontEndPlugin<void> = {
   id: TOOL_CALL_COMPONENTS_PLUGIN_ID,
   description:
-    'Connects ACP grouped tool call actions to jupyter-chat-components.',
+    'Renders ACP grouped tool calls with jupyter-chat-components.',
   autoStart: true,
-  requires: [IComponentsRendererFactory],
+  optional: [IMessagePreambleRegistry],
   activate: (
     app: JupyterFrontEnd,
-    componentsRendererFactory: IComponentsRendererFactory
+    preambleRegistry: IMessagePreambleRegistry | null
   ) => {
-    componentsRendererFactory.toolCallPermissionDecision =
-      submitPermissionDecision;
-    componentsRendererFactory.openToolCallPath = (path: string) => {
-      const openPath = getOpenableToolCallPath(path);
+    if (!preambleRegistry) {
+      console.warn(
+        '[ACP] IMessagePreambleRegistry not available; tool call UI disabled.'
+      );
+      return;
+    }
 
-      if (!openPath) {
-        return;
-      }
+    preambleRegistry.addComponent(
+      createToolCallsPreamble({
+        openToolCallPath: (path: string) => {
+          const openPath = getOpenableToolCallPath(path);
 
-      void app.commands.execute('docmanager:open', { path: openPath });
-    };
+          if (!openPath) {
+            return;
+          }
+
+          void app.commands.execute('docmanager:open', { path: openPath });
+        },
+        toolCallPermissionDecision: submitPermissionDecision
+      })
+    );
   }
 };
 
