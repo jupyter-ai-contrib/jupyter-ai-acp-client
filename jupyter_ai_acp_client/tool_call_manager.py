@@ -3,10 +3,13 @@ from typing import Optional
 
 from acp.schema import ToolCallProgress, ToolCallStart
 from jupyter_ai_persona_manager import BasePersona
-from jupyterlab_chat.models import NewMessage
+from jupyterlab_chat.models import MimeModel, NewMessage
 
 from .tool_call_renderer import (
+    CHAT_COMPONENTS_MIME_TYPE,
+    GROUPED_TOOL_CALLS_COMPONENT,
     ToolCallState,
+    build_grouped_tool_calls_metadata,
     ensure_serializable,
     extract_diffs,
     update_tool_call_from_progress,
@@ -175,7 +178,15 @@ class ToolCallManager:
             for tc_id in tc_ids
             if tc_id in session.tool_calls
         ]
-        msg.metadata = {"tool_calls": all_tcs}
+        metadata = dict(msg.metadata or {})
+        metadata["tool_calls"] = all_tcs
+        msg.metadata = metadata
+        msg.mime_model = MimeModel(
+            data={CHAT_COMPONENTS_MIME_TYPE: GROUPED_TOOL_CALLS_COMPONENT},
+            metadata={
+                CHAT_COMPONENTS_MIME_TYPE: build_grouped_tool_calls_metadata(all_tcs)
+            },
+        )
         persona.ychat.update_message(msg, trigger_actions=[])
 
     def cancel_pending_tool_calls(

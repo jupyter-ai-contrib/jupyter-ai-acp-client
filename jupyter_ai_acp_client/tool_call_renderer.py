@@ -10,13 +10,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional
 
+from acp.schema import (
+    ContentToolCallContent,
+    FileEditToolCallContent,
+    PermissionOption,
+    TerminalToolCallContent,
+)
 from pydantic import BaseModel
-from acp.schema import PermissionOption, ContentToolCallContent, FileEditToolCallContent, TerminalToolCallContent
 
 
 def ensure_serializable(value: Optional[Any]) -> Optional[Any]:
     """Convert non-JSON-serializable values to strings for Yjs transport."""
-    if value is not None and not isinstance(value, (str, int, float, bool, list, dict)):
+    if value is not None and not isinstance(
+        value, (str, int, float, bool, list, dict)
+    ):
         return str(value)
     return value
 
@@ -43,6 +50,79 @@ class ToolCallState(BaseModel):
     selected_option_id: Optional[str] = None
     session_id: Optional[str] = None
     diffs: Optional[list[ToolCallDiff]] = None
+
+
+CHAT_COMPONENTS_MIME_TYPE = "application/vnd.jupyter.chat.components"
+GROUPED_TOOL_CALLS_COMPONENT = "grouped-tool-calls"
+
+
+def _serialize_permission_option(option: dict[str, Any]) -> dict[str, Any]:
+    """Convert snake_case ACP permission options to chat component props."""
+    payload = {
+        "optionId": option["option_id"],
+        "name": option["name"],
+    }
+
+    if option.get("kind") is not None:
+        payload["kind"] = option["kind"]
+
+    return payload
+
+
+def _serialize_tool_call_diff(diff: dict[str, Any]) -> dict[str, Any]:
+    """Convert snake_case ACP diffs to chat component props."""
+    payload = {
+        "path": diff["path"],
+        "newText": diff["new_text"],
+    }
+
+    if diff.get("old_text") is not None:
+        payload["oldText"] = diff["old_text"]
+
+    return payload
+
+
+def build_grouped_tool_calls_metadata(
+    tool_calls: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Serialize tool call state for the grouped-tool-calls MIME component."""
+    field_map = {
+        "kind": "kind",
+        "status": "status",
+        "raw_input": "rawInput",
+        "raw_output": "rawOutput",
+        "locations": "locations",
+        "permission_status": "permissionStatus",
+        "selected_option_id": "selectedOptionId",
+        "session_id": "sessionId",
+    }
+
+    entries: list[dict[str, Any]] = []
+    for tool_call in tool_calls:
+        entry = {
+            "toolCallId": tool_call["tool_call_id"],
+            "title": tool_call["title"],
+        }
+
+        for source, target in field_map.items():
+            value = tool_call.get(source)
+            if value is not None:
+                entry[target] = value
+
+        permission_options = tool_call.get("permission_options")
+        if permission_options is not None:
+            entry["permissionOptions"] = [
+                _serialize_permission_option(option)
+                for option in permission_options
+            ]
+
+        diffs = tool_call.get("diffs")
+        if diffs is not None:
+            entry["diffs"] = [_serialize_tool_call_diff(diff) for diff in diffs]
+
+        entries.append(entry)
+
+    return {"toolCalls": entries}
 
 
 def _resolve_path(path: str, root_dir: Optional[str]) -> str:
@@ -132,7 +212,9 @@ def extract_diffs(
     for item in content:
         if isinstance(item, FileEditToolCallContent):
             path = _resolve_path(item.path, root_dir)
-            diffs.append(ToolCallDiff(path=path, new_text=item.new_text, old_text=item.old_text))
+            diffs.append(
+                ToolCallDiff(path=path, new_text=item.new_text, old_text=item.old_text)
+            )
     return diffs or None
 
 

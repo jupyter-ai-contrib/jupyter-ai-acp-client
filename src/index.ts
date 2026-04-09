@@ -7,19 +7,21 @@ import {
   IChatCommandProvider,
   IChatCommandRegistry,
   IInputModel,
-  IMessagePreambleRegistry,
   IInputToolbarRegistryFactory,
   InputToolbarRegistry,
   ChatCommand
 } from '@jupyter/chat';
 
-import { ToolCallsComponent } from './tool-calls';
+import { IComponentsRendererFactory } from 'jupyter-chat-components';
 
-import { getAcpSlashCommands } from './request';
+import { getAcpSlashCommands, submitPermissionDecision } from './request';
 import { AcpStopButton } from './stop-button';
+import { getOpenableToolCallPath } from './tool-call-paths';
 
 const SLASH_COMMAND_PROVIDER_ID =
   '@jupyter-ai/acp-client:slash-command-provider';
+const TOOL_CALL_COMPONENTS_PLUGIN_ID =
+  '@jupyter-ai/acp-client:tool-call-components';
 
 /**
  * A command provider that provides completions for slash commands and handles
@@ -129,23 +131,36 @@ export const slashCommandPlugin: JupyterFrontEndPlugin<void> = {
   description: 'Adds support for slash commands in Jupyter AI.',
   autoStart: true,
   requires: [IChatCommandRegistry],
-  optional: [IMessagePreambleRegistry],
+  activate: (_app: JupyterFrontEnd, registry: IChatCommandRegistry) => {
+    registry.addProvider(new SlashCommandProvider());
+  }
+};
+
+/**
+ * Plugin that wires ACP-specific callbacks into jupyter-chat-components so
+ * grouped tool call MIME bundles can open files and resolve permissions.
+ */
+export const toolCallComponentsPlugin: JupyterFrontEndPlugin<void> = {
+  id: TOOL_CALL_COMPONENTS_PLUGIN_ID,
+  description:
+    'Connects ACP grouped tool call actions to jupyter-chat-components.',
+  autoStart: true,
+  requires: [IComponentsRendererFactory],
   activate: (
     app: JupyterFrontEnd,
-    registry: IChatCommandRegistry,
-    preambleRegistry: IMessagePreambleRegistry | null
+    componentsRendererFactory: IComponentsRendererFactory
   ) => {
-    registry.addProvider(new SlashCommandProvider());
-    if (preambleRegistry) {
-      console.warn(
-        '[ACP] Registered ToolCallsComponent with preamble registry'
-      );
-      preambleRegistry.addComponent(ToolCallsComponent);
-    } else {
-      console.warn(
-        '[ACP] IMessagePreambleRegistry not available — tool call UI disabled'
-      );
-    }
+    componentsRendererFactory.toolCallPermissionDecision =
+      submitPermissionDecision;
+    componentsRendererFactory.openToolCallPath = (path: string) => {
+      const openPath = getOpenableToolCallPath(path);
+
+      if (!openPath) {
+        return;
+      }
+
+      void app.commands.execute('docmanager:open', { path: openPath });
+    };
   }
 };
 
@@ -165,7 +180,7 @@ export const toolbarPlugin: JupyterFrontEndPlugin<IInputToolbarRegistryFactory> 
         create: () => {
           // Start with the default toolbar (Send, Attach, Cancel, SaveEdit)
           const registry = InputToolbarRegistry.defaultToolbarRegistry();
-          // Add our stop button (position 90 = just before Send at 100)
+          // Add our stop button near the beginning of the default toolbar.
           registry.addItem('stop', {
             element: AcpStopButton,
             position: 10
@@ -176,6 +191,6 @@ export const toolbarPlugin: JupyterFrontEndPlugin<IInputToolbarRegistryFactory> 
     }
   };
 
-export default [slashCommandPlugin, toolbarPlugin];
+export default [slashCommandPlugin, toolCallComponentsPlugin, toolbarPlugin];
 
 export { stopStreaming } from './request';

@@ -34,7 +34,7 @@ export async function requestAPI<T>(
     try {
       data = JSON.parse(data);
     } catch (error) {
-      console.log('Not a JSON response body.', response);
+      console.warn('Non-JSON response body returned by ACP endpoint.', response);
     }
   }
 
