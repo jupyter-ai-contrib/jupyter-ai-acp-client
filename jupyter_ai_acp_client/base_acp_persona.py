@@ -57,10 +57,18 @@ class BaseAcpPersona(BasePersona):
     This attribute is set automatically by the default ACP client.
     """
 
+    _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
+    """
+    Maximum number of recent messages to include in the history context injected
+    after a stale session recovery. Caps prompt size to avoid exceeding agent
+    context window limits.
+    """
+
     def __init__(self, *args, executable: list[str], **kwargs):
         super().__init__(*args, **kwargs)
 
         self._executable = executable
+        self._recovered_from_stale_session: bool = False
 
         # Ensure each subclass has its own subprocess and client by checking if the
         # class variable is defined directly on this class (not inherited)
@@ -201,6 +209,7 @@ class BaseAcpPersona(BasePersona):
                     existing_session_id,
                     self.__class__.__name__,
                 )
+                self._recovered_from_stale_session = True
                 return await self._create_session(client)
         else:
             return await self._create_session(client)
@@ -250,6 +259,27 @@ class BaseAcpPersona(BasePersona):
         """
         self.send_message("You are not authenticated. Please log in.")
 
+    def _build_history_context(self, exclude_id: str | None = None) -> str:
+        """
+        Builds a plain-text summary of recent chat history for context injection
+        after a stale session recovery. Caps at _MAX_HISTORY_MESSAGES to avoid
+        exceeding agent context window limits.
+        """
+        all_messages = self.ychat.get_messages()
+        recent = [
+            m for m in all_messages
+            if not m.deleted and m.id != exclude_id
+        ][-self._MAX_HISTORY_MESSAGES:]
+        if not recent:
+            return ""
+        users = self.ychat.get_users()
+        lines = []
+        for msg in recent:
+            user = users.get(msg.sender)
+            name = user.display_name if user else msg.sender
+            lines.append(f"{name}: {msg.body}")
+        return "Here is the conversation history so far:\n" + "\n".join(lines)
+
     @auto_emit_event("acp_chat_message")
     async def process_message(self, message: Message) -> None:
         """
@@ -267,6 +297,16 @@ class BaseAcpPersona(BasePersona):
         session_id = await self.get_session_id()
 
         prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
+
+        if self._recovered_from_stale_session:
+            self._recovered_from_stale_session = False
+            history = self._build_history_context(exclude_id=message.id)
+            if history:
+                prompt = history + "\n\n" + prompt
+            self.send_message(
+                "I've lost context from our previous conversation because my session was reset. "
+                "I'll do my best to continue based on the chat history."
+            )
 
         # Resolve attachments from YChat by ID
         attachments: list[dict] | None = None

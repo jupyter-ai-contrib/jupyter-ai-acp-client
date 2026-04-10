@@ -201,7 +201,11 @@ class JaiAcpClient(Client):
         self._loading_sessions[session_id] = self.event_loop.create_task(
             self._load_session_rpc(persona, session_id)
         )
-        return await self._loading_sessions[session_id]
+        try:
+            return await self._loading_sessions[session_id]
+        except Exception:
+            self._loading_sessions.pop(session_id, None)
+            raise
 
     async def _load_session_rpc(self, persona: BasePersona, session_id: str) -> LoadSessionResponse:
         """

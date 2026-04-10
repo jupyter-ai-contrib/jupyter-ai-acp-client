@@ -1,8 +1,14 @@
-"""Tests for attachment resolution in BaseAcpPersona.process_message()."""
+"""Tests for attachment resolution and stale session recovery in BaseAcpPersona."""
 
 from unittest.mock import AsyncMock, MagicMock
 
+from jupyterlab_chat.models import Message, User
+
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
+
+
+def _make_chat_message(id: str, body: str, sender: str, deleted: bool | None = None) -> Message:
+    return Message(id=id, body=body, sender=sender, time=0.0, deleted=deleted)
 
 
 def _make_persona(attachments_map: dict | None = None):
@@ -11,6 +17,7 @@ def _make_persona(attachments_map: dict | None = None):
     persona.get_client = AsyncMock()
     persona.get_session_id = AsyncMock(return_value="sess-1")
     persona.is_authed = AsyncMock(return_value=True)
+    persona._recovered_from_stale_session = False
 
     # as_user() is sync — must return a regular MagicMock
     user_mock = MagicMock()
@@ -20,6 +27,8 @@ def _make_persona(attachments_map: dict | None = None):
     # YChat mock
     ychat = MagicMock()
     ychat.get_attachments.return_value = attachments_map or {}
+    ychat.get_messages.return_value = []
+    ychat.get_users.return_value = {}
     persona.ychat = ychat
 
     # parent.root_dir
@@ -142,3 +151,88 @@ class TestProcessMessageAttachments:
 
         call_kwargs = client.prompt_and_reply.call_args.kwargs
         assert call_kwargs["root_dir"] == "/custom/root"
+
+
+class TestStaleSessionRecovery:
+    """Tests for history injection and flag behavior after stale session recovery."""
+
+    async def test_recovery_flag_resets_after_first_message(self):
+        """History is injected only on the first message after recovery, not subsequent ones."""
+        client = _make_client()
+        persona = _make_persona()
+        persona._recovered_from_stale_session = True
+        persona.get_client.return_value = client
+
+        msg1 = _make_message("@bot first")
+        await BaseAcpPersona.process_message(persona, msg1)
+
+        # Flag must be cleared — second message must NOT get history prepended
+        assert persona._recovered_from_stale_session is False
+
+        msg2 = _make_message("@bot second")
+        await BaseAcpPersona.process_message(persona, msg2)
+
+        second_call_prompt = client.prompt_and_reply.call_args_list[1].kwargs["prompt"]
+        assert not second_call_prompt.startswith("Here is the conversation history")
+
+    def test_build_history_context_excludes_current_message(self):
+        """The current message is not included in the injected history."""
+        persona = _make_persona()
+        persona._MAX_HISTORY_MESSAGES = BaseAcpPersona._MAX_HISTORY_MESSAGES
+        msgs = [
+            _make_chat_message("msg-1", "hello", "user-1"),
+            _make_chat_message("msg-2", "hi there", "bot-1"),
+            _make_chat_message("msg-3", "follow up", "user-1"),  # current message
+        ]
+        persona.ychat.get_messages.return_value = msgs
+        persona.ychat.get_users.return_value = {}
+
+        result = BaseAcpPersona._build_history_context(persona, exclude_id="msg-3")
+
+        assert "follow up" not in result
+        assert "hello" in result
+        assert "hi there" in result
+
+    async def test_recovery_history_injected_into_prompt(self):
+        """History is prepended to the prompt on the first message after recovery."""
+        client = _make_client()
+        persona = _make_persona()
+        persona._recovered_from_stale_session = True
+        persona._MAX_HISTORY_MESSAGES = BaseAcpPersona._MAX_HISTORY_MESSAGES
+        persona.ychat.get_messages.return_value = [
+            _make_chat_message("msg-1", "hello world", "user-1"),
+        ]
+        persona.ychat.get_users.return_value = {}
+        persona.get_client.return_value = client
+        # Delegate to the real method so history is built from ychat
+        persona._build_history_context = lambda **kw: BaseAcpPersona._build_history_context(persona, **kw)
+        msg = _make_message("@bot follow up")
+
+        await BaseAcpPersona.process_message(persona, msg)
+
+        prompt = client.prompt_and_reply.call_args.kwargs["prompt"]
+        assert prompt.startswith("Here is the conversation history")
+        assert "hello world" in prompt
+        assert "follow up" in prompt
+
+    def test_build_history_context_caps_at_max_messages(self):
+        """History is capped at _MAX_HISTORY_MESSAGES to prevent context window overflow."""
+        persona = _make_persona()
+        cap = BaseAcpPersona._MAX_HISTORY_MESSAGES
+        persona._MAX_HISTORY_MESSAGES = cap
+        msgs = [
+            _make_chat_message(f"msg-{i}", f"message {i}", "user-1")
+            for i in range(cap + 10)
+        ]
+        persona.ychat.get_messages.return_value = msgs
+        persona.ychat.get_users.return_value = {}
+
+        result = BaseAcpPersona._build_history_context(persona)
+
+        # Only the last _MAX_HISTORY_MESSAGES messages should appear
+        lines = result.splitlines()
+        message_lines = [l for l in lines if l.startswith("user-1:")]
+        assert len(message_lines) == cap
+        # The oldest messages are trimmed, most recent are kept
+        assert f"message {cap + 9}" in result
+        assert "message 0" not in result

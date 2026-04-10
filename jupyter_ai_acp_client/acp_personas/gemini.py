@@ -91,6 +91,7 @@ class GeminiAcpPersona(BaseAcpPersona):
             self.log.warning(
                 "Gemini load_session failed with internal error; creating a new session.",
             )
+            self._recovered_from_stale_session = True
             client = await self.get_client()
             return await self._create_session(client)
 
