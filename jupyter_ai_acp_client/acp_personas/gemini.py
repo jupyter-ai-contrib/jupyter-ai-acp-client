@@ -4,9 +4,12 @@ import re
 import shutil
 import subprocess
 
+from acp.exceptions import RequestError
 from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
 from jupyterlab_chat.models import Message
 from ..base_acp_persona import BaseAcpPersona
+
+_JSON_RPC_INTERNAL_ERROR_CODE = -32603
 
 # Raise `PersonaRequirementsUnmet` if `gemini` not installed
 if shutil.which("gemini") is None:
@@ -72,14 +75,22 @@ except FileNotFoundError:
 
 
 class GeminiAcpPersona(BaseAcpPersona):
-    # Gemini CLI returns -32603 for stale load_session calls instead of -32002.
-    _load_retry_codes = (-32603,)
     _terminal_opened: bool
 
     def __init__(self, *args, **kwargs):
         executable = ["gemini", "--acp"]
         super().__init__(*args, executable=executable, **kwargs)
         self._terminal_opened = False
+
+    def _is_recoverable_load_session_error(self, error: RequestError) -> bool:
+        """
+        Gemini CLI may return generic -32603 when loading a previously recorded
+        session fails. Keep this quirk scoped to `load_session()` recovery.
+        """
+        return (
+            super()._is_recoverable_load_session_error(error)
+            or error.code == _JSON_RPC_INTERNAL_ERROR_CODE
+        )
 
     @property
     def defaults(self) -> PersonaDefaults:

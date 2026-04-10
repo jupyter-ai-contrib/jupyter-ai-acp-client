@@ -1,4 +1,4 @@
-"""Tests for attachment resolution and stale session recovery in BaseAcpPersona."""
+"""Tests for attachment resolution and load-session recovery in BaseAcpPersona."""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -21,7 +21,7 @@ def _make_persona(attachments_map: dict | None = None):
     persona.get_client = AsyncMock()
     persona.get_session_id = AsyncMock(return_value="sess-1")
     persona.is_authed = AsyncMock(return_value=True)
-    persona._recovered_from_stale_session = False
+    persona._pending_session_recovery_context = False
 
     # as_user() is sync — must return a regular MagicMock
     user_mock = MagicMock()
@@ -57,21 +57,23 @@ def _make_message(body: str, attachment_ids: list[str] | None = None):
     return msg
 
 
-class _BaseRetryCodePersona:
-    """Minimal duck-typed object with only the base load retry codes."""
+class _BaseLoadSessionRecoveryPersona:
+    """Minimal duck-typed object with the base load-session recovery policy."""
 
-    _load_retry_codes: tuple[int, ...] = ()
     id = "test-persona"
 
-    @property
-    def load_retry_codes(self) -> tuple[int, ...]:
-        return BaseAcpPersona.load_retry_codes.fget(self)
+    def _is_recoverable_load_session_error(self, error: RequestError) -> bool:
+        return BaseAcpPersona._is_recoverable_load_session_error(self, error)
 
 
-class _ExtraRetryCodePersona(_BaseRetryCodePersona):
-    """Minimal subclass used to test persona-specific load retry codes."""
+class _ExtraLoadSessionRecoveryPersona(_BaseLoadSessionRecoveryPersona):
+    """Minimal subclass used to test persona-specific recovery semantics."""
 
-    _load_retry_codes = (-32603,)
+    def _is_recoverable_load_session_error(self, error: RequestError) -> bool:
+        return (
+            super()._is_recoverable_load_session_error(error)
+            or error.code == -32603
+        )
 
 
 def _make_session_init_persona(
@@ -79,12 +81,14 @@ def _make_session_init_persona(
     error: Exception | None = None,
     existing_session_id: str | None = "old-session",
     supports_session_load: bool = True,
-    persona_cls: type[_BaseRetryCodePersona] = _BaseRetryCodePersona,
+    persona_cls: type[_BaseLoadSessionRecoveryPersona] = (
+        _BaseLoadSessionRecoveryPersona
+    ),
 ):
     """Create an uninitialized persona wired for _init_client_session tests."""
     persona = persona_cls()
     persona.log = MagicMock()
-    persona._recovered_from_stale_session = False
+    persona._pending_session_recovery_context = False
 
     client = MagicMock()
     capabilities = MagicMock()
@@ -210,8 +214,8 @@ class TestProcessMessageAttachments:
         assert call_kwargs["root_dir"] == "/custom/root"
 
 
-class TestStaleSessionRecovery:
-    """Tests for history injection and flag behavior after stale session recovery."""
+class TestLoadSessionRecovery:
+    """Tests for history injection and flag behavior after load-session recovery."""
 
     async def test_resource_not_found_load_error_creates_new_session(self):
         """ACP ResourceNotFound from load_session is treated as stale session."""
@@ -223,7 +227,7 @@ class TestStaleSessionRecovery:
 
         persona._load_session.assert_awaited_once_with(client, "old-session")
         persona._create_session.assert_awaited_once_with(client)
-        assert persona._recovered_from_stale_session is True
+        assert persona._pending_session_recovery_context is True
 
     async def test_non_retryable_load_error_propagates(self):
         """Non-stale load_session errors are not masked by a new session."""
@@ -235,26 +239,26 @@ class TestStaleSessionRecovery:
             await BaseAcpPersona._init_client_session(persona)
 
         persona._create_session.assert_not_awaited()
-        assert persona._recovered_from_stale_session is False
+        assert persona._pending_session_recovery_context is False
 
-    async def test_subclass_retry_code_only_applies_to_load_session(self):
-        """Persona-specific retry codes recover load_session failures only."""
+    async def test_subclass_recovery_only_applies_to_load_session(self):
+        """Persona-specific recovery handles load_session failures only."""
         persona, client = _make_session_init_persona(
             error=RequestError(-32603, "Internal error"),
-            persona_cls=_ExtraRetryCodePersona,
+            persona_cls=_ExtraLoadSessionRecoveryPersona,
         )
 
         await BaseAcpPersona._init_client_session(persona)
 
         persona._load_session.assert_awaited_once_with(client, "old-session")
         persona._create_session.assert_awaited_once_with(client)
-        assert persona._recovered_from_stale_session is True
+        assert persona._pending_session_recovery_context is True
 
-    async def test_subclass_retry_code_does_not_mask_create_session_error(self):
-        """A retryable load code must not be caught around create_session()."""
+    async def test_subclass_recovery_does_not_mask_create_session_error(self):
+        """Recoverable load-session errors must not mask create_session()."""
         persona, client = _make_session_init_persona(
             existing_session_id=None,
-            persona_cls=_ExtraRetryCodePersona,
+            persona_cls=_ExtraLoadSessionRecoveryPersona,
         )
         error = RequestError(-32603, "Internal error", "create failed")
         persona._create_session.side_effect = error
@@ -265,20 +269,20 @@ class TestStaleSessionRecovery:
         assert exc_info.value is error
         persona._load_session.assert_not_awaited()
         persona._create_session.assert_awaited_once_with(client)
-        assert persona._recovered_from_stale_session is False
+        assert persona._pending_session_recovery_context is False
 
     async def test_recovery_flag_resets_after_first_message(self):
         """History is injected only on the first message after recovery."""
         client = _make_client()
         persona = _make_persona()
-        persona._recovered_from_stale_session = True
+        persona._pending_session_recovery_context = True
         persona.get_client.return_value = client
 
         msg1 = _make_message("@bot first")
         await BaseAcpPersona.process_message(persona, msg1)
 
         # Flag must be cleared — second message must NOT get history prepended
-        assert persona._recovered_from_stale_session is False
+        assert persona._pending_session_recovery_context is False
 
         msg2 = _make_message("@bot second")
         await BaseAcpPersona.process_message(persona, msg2)
@@ -308,7 +312,7 @@ class TestStaleSessionRecovery:
         """History is prepended to the prompt on the first message after recovery."""
         client = _make_client()
         persona = _make_persona()
-        persona._recovered_from_stale_session = True
+        persona._pending_session_recovery_context = True
         persona._MAX_HISTORY_MESSAGES = BaseAcpPersona._MAX_HISTORY_MESSAGES
         persona.ychat.get_messages.return_value = [
             _make_chat_message("msg-1", "hello world", "user-1"),

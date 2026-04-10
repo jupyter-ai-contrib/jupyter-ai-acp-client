@@ -60,20 +60,10 @@ class BaseAcpPersona(BasePersona):
     This attribute is set automatically by the default ACP client.
     """
 
-    _load_retry_codes: ClassVar[tuple[int, ...]] = ()
-    """
-    Additional ACP JSON-RPC error codes that indicate a failed `load_session()`
-    should fall back to `create_session()`.
-
-    `-32002` is always included as the ACP "Resource not found" code. Subclasses
-    should only add codes that are known to mean a stale session for that
-    persona. Broad error codes still risk masking real agent failures.
-    """
-
     _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
     """
     Maximum number of recent messages to include in the history context injected
-    after a stale session recovery. Caps prompt size to avoid exceeding agent
+    after load-session recovery. Caps prompt size to avoid exceeding agent
     context window limits.
     """
 
@@ -81,7 +71,7 @@ class BaseAcpPersona(BasePersona):
         super().__init__(*args, **kwargs)
 
         self._executable = executable
-        self._recovered_from_stale_session: bool = False
+        self._pending_session_recovery_context: bool = False
 
         # Ensure each subclass has its own subprocess and client by checking if the
         # class variable is defined directly on this class (not inherited)
@@ -198,13 +188,15 @@ class BaseAcpPersona(BasePersona):
         self._record_new_session(response.session_id)
         return response
 
-    @property
-    def load_retry_codes(self) -> tuple[int, ...]:
+    def _is_recoverable_load_session_error(self, error: RequestError) -> bool:
         """
-        ACP JSON-RPC error codes that permit creating a replacement session when
-        `load_session()` fails.
+        Return whether a `load_session()` failure should create a new session.
+
+        ACP `-32002` is `Resource not found`, which means the saved session ID
+        no longer resolves in the remote agent. Generic errors should not be
+        treated as recoverable here without persona-specific evidence.
         """
-        return (_RESOURCE_NOT_FOUND_ERROR_CODE, *self._load_retry_codes)
+        return error.code == _RESOURCE_NOT_FOUND_ERROR_CODE
 
     async def _init_client_session(self) -> NewSessionResponse | LoadSessionResponse:
         # get client
@@ -218,7 +210,7 @@ class BaseAcpPersona(BasePersona):
             try:
                 return await self._load_session(client, existing_session_id)
             except RequestError as err:
-                if err.code not in self.load_retry_codes:
+                if not self._is_recoverable_load_session_error(err):
                     self.log.exception(
                         "Failed to load ACP client session for '%s' with ID '%s'.",
                         self.__class__.__name__,
@@ -227,15 +219,15 @@ class BaseAcpPersona(BasePersona):
                     raise
                 self.log.warning(
                     "Treating failed ACP load_session for '%s' with ID '%s' "
-                    "as a stale session because it returned retryable code "
-                    "%s (%s, data=%r); creating a new session.",
+                    "as recoverable by persona policy (code=%s, message=%s, "
+                    "data=%r); creating a new session.",
                     self.__class__.__name__,
                     existing_session_id,
                     err.code,
                     str(err),
                     err.data,
                 )
-                self._recovered_from_stale_session = True
+                self._pending_session_recovery_context = True
                 return await self._create_session(client)
             except Exception:
                 self.log.exception(
@@ -295,7 +287,7 @@ class BaseAcpPersona(BasePersona):
     def _build_history_context(self, exclude_id: str | None = None) -> str:
         """
         Builds a plain-text summary of recent chat history for context injection
-        after a stale session recovery. Caps at _MAX_HISTORY_MESSAGES to avoid
+        after load-session recovery. Caps at _MAX_HISTORY_MESSAGES to avoid
         exceeding agent context window limits.
         """
         all_messages = self.ychat.get_messages()
@@ -337,8 +329,8 @@ class BaseAcpPersona(BasePersona):
 
         prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
 
-        if self._recovered_from_stale_session:
-            self._recovered_from_stale_session = False
+        if self._pending_session_recovery_context:
+            self._pending_session_recovery_context = False
             history = self._build_history_context(exclude_id=message.id)
             if history:
                 prompt = history + "\n\nCurrent user message:\n" + prompt
