@@ -4,7 +4,6 @@ import re
 import shutil
 import subprocess
 
-from acp.exceptions import RequestError
 from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
 from jupyterlab_chat.models import Message
 from ..base_acp_persona import BaseAcpPersona
@@ -71,29 +70,16 @@ except FileNotFoundError:
         " Please ensure gemini CLI is properly installed."
     )
 
+
 class GeminiAcpPersona(BaseAcpPersona):
+    # Gemini CLI returns -32603 for stale load_session calls instead of -32002.
+    _load_retry_codes = (-32603,)
     _terminal_opened: bool
+
     def __init__(self, *args, **kwargs):
-        executable = ["gemini", "--acp"] # For a specific model, use additional entries "-m", "<model_id>"
+        executable = ["gemini", "--acp"]
         super().__init__(*args, executable=executable, **kwargs)
         self._terminal_opened = False
-
-    async def _init_client_session(self):
-        # Gemini CLI returns -32603 (Internal error) for stale sessions instead
-        # of the correct -32002 (Resource not found). Work around this by
-        # catching -32603 from load_session and falling back to a new session.
-        # If the agent is truly broken, _create_session will also fail.
-        try:
-            return await super()._init_client_session()
-        except RequestError as err:
-            if err.code != -32603:
-                raise
-            self.log.warning(
-                "Gemini load_session failed with internal error; creating a new session.",
-            )
-            self._recovered_from_stale_session = True
-            client = await self.get_client()
-            return await self._create_session(client)
 
     @property
     def defaults(self) -> PersonaDefaults:

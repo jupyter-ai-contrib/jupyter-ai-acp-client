@@ -2,12 +2,16 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-from jupyterlab_chat.models import Message, User
+import pytest
+from acp.exceptions import RequestError
+from jupyterlab_chat.models import Message
 
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
 
 
-def _make_chat_message(id: str, body: str, sender: str, deleted: bool | None = None) -> Message:
+def _make_chat_message(
+    id: str, body: str, sender: str, deleted: bool | None = None
+) -> Message:
     return Message(id=id, body=body, sender=sender, time=0.0, deleted=deleted)
 
 
@@ -47,9 +51,62 @@ def _make_client():
 
 def _make_message(body: str, attachment_ids: list[str] | None = None):
     msg = MagicMock()
+    msg.id = "current-msg"
     msg.body = body
     msg.attachments = attachment_ids
     return msg
+
+
+class _BaseRetryCodePersona:
+    """Minimal duck-typed object with only the base load retry codes."""
+
+    _load_retry_codes: tuple[int, ...] = ()
+    id = "test-persona"
+
+    @property
+    def load_retry_codes(self) -> tuple[int, ...]:
+        return BaseAcpPersona.load_retry_codes.fget(self)
+
+
+class _ExtraRetryCodePersona(_BaseRetryCodePersona):
+    """Minimal subclass used to test persona-specific load retry codes."""
+
+    _load_retry_codes = (-32603,)
+
+
+def _make_session_init_persona(
+    *,
+    error: Exception | None = None,
+    existing_session_id: str | None = "old-session",
+    supports_session_load: bool = True,
+    persona_cls: type[_BaseRetryCodePersona] = _BaseRetryCodePersona,
+):
+    """Create an uninitialized persona wired for _init_client_session tests."""
+    persona = persona_cls()
+    persona.log = MagicMock()
+    persona._recovered_from_stale_session = False
+
+    client = MagicMock()
+    capabilities = MagicMock()
+    capabilities.load_session = supports_session_load
+    client.get_agent_capabilities = AsyncMock(return_value=capabilities)
+    persona.get_client = AsyncMock(return_value=client)
+
+    sessions = {}
+    if existing_session_id:
+        sessions[persona.id] = existing_session_id
+    persona._get_existing_sessions = MagicMock(return_value=sessions)
+    persona._load_session = AsyncMock()
+    persona._create_session = AsyncMock(
+        return_value=MagicMock(session_id="new-session")
+    )
+
+    if error:
+        persona._load_session.side_effect = error
+    else:
+        persona._load_session.return_value = MagicMock(session_id=existing_session_id)
+
+    return persona, client
 
 
 class TestProcessMessageAttachments:
@@ -156,8 +213,62 @@ class TestProcessMessageAttachments:
 class TestStaleSessionRecovery:
     """Tests for history injection and flag behavior after stale session recovery."""
 
+    async def test_resource_not_found_load_error_creates_new_session(self):
+        """ACP ResourceNotFound from load_session is treated as stale session."""
+        persona, client = _make_session_init_persona(
+            error=RequestError(-32002, "Resource not found")
+        )
+
+        await BaseAcpPersona._init_client_session(persona)
+
+        persona._load_session.assert_awaited_once_with(client, "old-session")
+        persona._create_session.assert_awaited_once_with(client)
+        assert persona._recovered_from_stale_session is True
+
+    async def test_non_retryable_load_error_propagates(self):
+        """Non-stale load_session errors are not masked by a new session."""
+        persona, _ = _make_session_init_persona(
+            error=RequestError(-32603, "Internal error", "auth failed")
+        )
+
+        with pytest.raises(RequestError):
+            await BaseAcpPersona._init_client_session(persona)
+
+        persona._create_session.assert_not_awaited()
+        assert persona._recovered_from_stale_session is False
+
+    async def test_subclass_retry_code_only_applies_to_load_session(self):
+        """Persona-specific retry codes recover load_session failures only."""
+        persona, client = _make_session_init_persona(
+            error=RequestError(-32603, "Internal error"),
+            persona_cls=_ExtraRetryCodePersona,
+        )
+
+        await BaseAcpPersona._init_client_session(persona)
+
+        persona._load_session.assert_awaited_once_with(client, "old-session")
+        persona._create_session.assert_awaited_once_with(client)
+        assert persona._recovered_from_stale_session is True
+
+    async def test_subclass_retry_code_does_not_mask_create_session_error(self):
+        """A retryable load code must not be caught around create_session()."""
+        persona, client = _make_session_init_persona(
+            existing_session_id=None,
+            persona_cls=_ExtraRetryCodePersona,
+        )
+        error = RequestError(-32603, "Internal error", "create failed")
+        persona._create_session.side_effect = error
+
+        with pytest.raises(RequestError) as exc_info:
+            await BaseAcpPersona._init_client_session(persona)
+
+        assert exc_info.value is error
+        persona._load_session.assert_not_awaited()
+        persona._create_session.assert_awaited_once_with(client)
+        assert persona._recovered_from_stale_session is False
+
     async def test_recovery_flag_resets_after_first_message(self):
-        """History is injected only on the first message after recovery, not subsequent ones."""
+        """History is injected only on the first message after recovery."""
         client = _make_client()
         persona = _make_persona()
         persona._recovered_from_stale_session = True
@@ -173,7 +284,7 @@ class TestStaleSessionRecovery:
         await BaseAcpPersona.process_message(persona, msg2)
 
         second_call_prompt = client.prompt_and_reply.call_args_list[1].kwargs["prompt"]
-        assert not second_call_prompt.startswith("Here is the conversation history")
+        assert not second_call_prompt.startswith("The previous ACP session")
 
     def test_build_history_context_excludes_current_message(self):
         """The current message is not included in the injected history."""
@@ -205,18 +316,20 @@ class TestStaleSessionRecovery:
         persona.ychat.get_users.return_value = {}
         persona.get_client.return_value = client
         # Delegate to the real method so history is built from ychat
-        persona._build_history_context = lambda **kw: BaseAcpPersona._build_history_context(persona, **kw)
+        persona._build_history_context = (
+            lambda **kw: BaseAcpPersona._build_history_context(persona, **kw)
+        )
         msg = _make_message("@bot follow up")
 
         await BaseAcpPersona.process_message(persona, msg)
 
         prompt = client.prompt_and_reply.call_args.kwargs["prompt"]
-        assert prompt.startswith("Here is the conversation history")
+        assert prompt.startswith("The previous ACP session")
         assert "hello world" in prompt
         assert "follow up" in prompt
 
     def test_build_history_context_caps_at_max_messages(self):
-        """History is capped at _MAX_HISTORY_MESSAGES to prevent context window overflow."""
+        """History is capped at _MAX_HISTORY_MESSAGES."""
         persona = _make_persona()
         cap = BaseAcpPersona._MAX_HISTORY_MESSAGES
         persona._MAX_HISTORY_MESSAGES = cap

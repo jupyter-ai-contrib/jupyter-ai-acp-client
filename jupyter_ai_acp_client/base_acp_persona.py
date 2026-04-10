@@ -16,6 +16,9 @@ from .default_acp_client import JaiAcpClient
 from .telemetry import emit_event, auto_emit_event
 
 
+_RESOURCE_NOT_FOUND_ERROR_CODE = -32002
+
+
 class BaseAcpPersona(BasePersona):
     _before_subprocess_future: ClassVar[Task[None] | None] = None
     """
@@ -55,6 +58,16 @@ class BaseAcpPersona(BasePersona):
     """
     List of slash commands broadcast by the ACP agent in the current session.
     This attribute is set automatically by the default ACP client.
+    """
+
+    _load_retry_codes: ClassVar[tuple[int, ...]] = ()
+    """
+    Additional ACP JSON-RPC error codes that indicate a failed `load_session()`
+    should fall back to `create_session()`.
+
+    `-32002` is always included as the ACP "Resource not found" code. Subclasses
+    should only add codes that are known to mean a stale session for that
+    persona. Broad error codes still risk masking real agent failures.
     """
 
     _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
@@ -164,19 +177,15 @@ class BaseAcpPersona(BasePersona):
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "load"})
     async def _load_session(self, client, existing_session_id) -> LoadSessionResponse:
-        try:
-            response = await client.load_session(
-                persona=self, session_id=existing_session_id
-            )
-            self.log.info(
-                "Loaded existing ACP client session for '%s' with ID '%s'.",
-                self.__class__.__name__,
-                existing_session_id,
-            )
-            return response
-        except Exception:
-            self.log.exception("Failed to load client session for %s with ID %s", self.__class__.__name__, existing_session_id)
-            raise
+        response = await client.load_session(
+            persona=self, session_id=existing_session_id
+        )
+        self.log.info(
+            "Loaded existing ACP client session for '%s' with ID '%s'.",
+            self.__class__.__name__,
+            existing_session_id,
+        )
+        return response
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
     async def _create_session(self, client) -> NewSessionResponse:
@@ -188,6 +197,14 @@ class BaseAcpPersona(BasePersona):
         )
         self._record_new_session(response.session_id)
         return response
+
+    @property
+    def load_retry_codes(self) -> tuple[int, ...]:
+        """
+        ACP JSON-RPC error codes that permit creating a replacement session when
+        `load_session()` fails.
+        """
+        return (_RESOURCE_NOT_FOUND_ERROR_CODE, *self._load_retry_codes)
 
     async def _init_client_session(self) -> NewSessionResponse | LoadSessionResponse:
         # get client
@@ -201,16 +218,32 @@ class BaseAcpPersona(BasePersona):
             try:
                 return await self._load_session(client, existing_session_id)
             except RequestError as err:
-                # -32002 = "Resource not found" (stale session after subprocess restart)
-                if err.code != -32002:
+                if err.code not in self.load_retry_codes:
+                    self.log.exception(
+                        "Failed to load ACP client session for '%s' with ID '%s'.",
+                        self.__class__.__name__,
+                        existing_session_id,
+                    )
                     raise
                 self.log.warning(
-                    "Saved ACP session '%s' for '%s' no longer exists remotely; creating a new session.",
-                    existing_session_id,
+                    "Treating failed ACP load_session for '%s' with ID '%s' "
+                    "as a stale session because it returned retryable code "
+                    "%s (%s, data=%r); creating a new session.",
                     self.__class__.__name__,
+                    existing_session_id,
+                    err.code,
+                    str(err),
+                    err.data,
                 )
                 self._recovered_from_stale_session = True
                 return await self._create_session(client)
+            except Exception:
+                self.log.exception(
+                    "Failed to load ACP client session for '%s' with ID '%s'.",
+                    self.__class__.__name__,
+                    existing_session_id,
+                )
+                raise
         else:
             return await self._create_session(client)
 
@@ -278,7 +311,13 @@ class BaseAcpPersona(BasePersona):
             user = users.get(msg.sender)
             name = user.display_name if user else msg.sender
             lines.append(f"{name}: {msg.body}")
-        return "Here is the conversation history so far:\n" + "\n".join(lines)
+        return (
+            "The previous ACP session could not be loaded. Use this recent chat "
+            "transcript as historical context for continuity.\n"
+            "<conversation_history>\n"
+            + "\n".join(lines)
+            + "\n</conversation_history>"
+        )
 
     @auto_emit_event("acp_chat_message")
     async def process_message(self, message: Message) -> None:
@@ -302,10 +341,10 @@ class BaseAcpPersona(BasePersona):
             self._recovered_from_stale_session = False
             history = self._build_history_context(exclude_id=message.id)
             if history:
-                prompt = history + "\n\n" + prompt
+                prompt = history + "\n\nCurrent user message:\n" + prompt
             self.send_message(
-                "I've lost context from our previous conversation because my session was reset. "
-                "I'll do my best to continue based on the chat history."
+                "I couldn't reload my previous ACP session, so I started a new one "
+                "and included recent chat history as context."
             )
 
         # Resolve attachments from YChat by ID
