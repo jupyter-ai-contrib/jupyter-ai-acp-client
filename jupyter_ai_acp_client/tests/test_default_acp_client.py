@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from acp.exceptions import RequestError
 from acp.schema import ResourceContentBlock, TextContentBlock
 
@@ -223,7 +224,7 @@ class TestLoadSessionCleanup:
     async def test_failed_load_session_removes_task_from_loading_sessions(self):
         """A failed load_session cleans up its task so retries can start fresh."""
         client = object.__new__(JaiAcpClient)
-        client.event_loop = asyncio.get_event_loop()
+        client.event_loop = asyncio.get_running_loop()
         client._loading_sessions = {}
 
         persona = MagicMock()
@@ -234,7 +235,6 @@ class TestLoadSessionCleanup:
 
         client._load_session_rpc = _failing_rpc
 
-        import pytest
         with pytest.raises(RequestError):
             await client.load_session(persona, "stale-session-id")
 
