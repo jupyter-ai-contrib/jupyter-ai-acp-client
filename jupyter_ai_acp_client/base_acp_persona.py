@@ -7,16 +7,12 @@ from asyncio.subprocess import Process
 from typing import Any, ClassVar, Optional
 
 from acp import NewSessionResponse, LoadSessionResponse
-from acp.exceptions import RequestError
 from acp.schema import AvailableCommand
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
 
 from .default_acp_client import JaiAcpClient
 from .telemetry import emit_event, auto_emit_event
-
-
-_RESOURCE_NOT_FOUND_ERROR_CODE = -32002
 
 
 class BaseAcpPersona(BasePersona):
@@ -188,16 +184,6 @@ class BaseAcpPersona(BasePersona):
         self._record_new_session(response.session_id)
         return response
 
-    def _is_recoverable_load_session_error(self, error: RequestError) -> bool:
-        """
-        Return whether a `load_session()` failure should create a new session.
-
-        ACP `-32002` is `Resource not found`, which means the saved session ID
-        no longer resolves in the remote agent. Generic errors should not be
-        treated as recoverable here without persona-specific evidence.
-        """
-        return error.code == _RESOURCE_NOT_FOUND_ERROR_CODE
-
     async def _init_client_session(self) -> NewSessionResponse | LoadSessionResponse:
         # get client
         client = await self.get_client()
@@ -209,33 +195,16 @@ class BaseAcpPersona(BasePersona):
         if existing_session_id and supports_session_load:
             try:
                 return await self._load_session(client, existing_session_id)
-            except RequestError as err:
-                if not self._is_recoverable_load_session_error(err):
-                    self.log.exception(
-                        "Failed to load ACP client session for '%s' with ID '%s'.",
-                        self.__class__.__name__,
-                        existing_session_id,
-                    )
-                    raise
+            except Exception:
                 self.log.warning(
-                    "Treating failed ACP load_session for '%s' with ID '%s' "
-                    "as recoverable by persona policy (code=%s, message=%s, "
-                    "data=%r); creating a new session.",
+                    "Failed to load ACP client session for '%s' with ID '%s'; "
+                    "creating a new session.",
                     self.__class__.__name__,
                     existing_session_id,
-                    err.code,
-                    str(err),
-                    err.data,
+                    exc_info=True,
                 )
                 self._pending_session_recovery_context = True
                 return await self._create_session(client)
-            except Exception:
-                self.log.exception(
-                    "Failed to load ACP client session for '%s' with ID '%s'.",
-                    self.__class__.__name__,
-                    existing_session_id,
-                )
-                raise
         else:
             return await self._create_session(client)
 
