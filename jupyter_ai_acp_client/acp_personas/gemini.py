@@ -70,12 +70,10 @@ except FileNotFoundError:
         " Please ensure gemini CLI is properly installed."
     )
 
-
 class GeminiAcpPersona(BaseAcpPersona):
     _terminal_opened: bool
-
     def __init__(self, *args, **kwargs):
-        executable = ["gemini", "--acp"]
+        executable = ["gemini", "--acp"] # For a specific model, use additional entries "-m", "<model_id>"
         super().__init__(*args, executable=executable, **kwargs)
         self._terminal_opened = False
 

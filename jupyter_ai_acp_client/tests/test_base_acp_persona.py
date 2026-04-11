@@ -56,7 +56,12 @@ def _make_message(body: str, attachment_ids: list[str] | None = None):
     return msg
 
 
-def _make_session_init_persona(*, error: Exception | None = None, existing_session_id: str | None = "old-session", supports_session_load: bool = True):
+def _make_session_init_persona(
+    *,
+    error: Exception | None = None,
+    existing_session_id: str | None = "old-session",
+    supports_session_load: bool = True,
+):
     """Create an uninitialized persona wired for _init_client_session tests."""
     persona = MagicMock()
     persona.id = "test-persona"
