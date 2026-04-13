@@ -303,10 +303,6 @@ class BaseAcpPersona(BasePersona):
             history = self._build_history_context(exclude_id=message.id)
             if history:
                 prompt = history + "\n\nCurrent user message:\n" + prompt
-            self.send_message(
-                "I couldn't reload my previous ACP session, so I started a new one "
-                "and included recent chat history as context."
-            )
 
         # Resolve attachments from YChat by ID
         attachments: list[dict] | None = None
