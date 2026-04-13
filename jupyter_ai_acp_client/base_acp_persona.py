@@ -367,9 +367,6 @@ class BaseAcpPersona(BasePersona):
     async def _shutdown(self):
         self.log.info("[shutdown] Starting for '%s'.", self.__class__.__name__)
 
-        if not self.ychat.get_messages():
-            self._remove_session()
-
         # Cancel any pending startup futures to avoid hanging on auth-gated
         # personas (e.g. Kiro, Gemini) that never finished startup.
         for future in [
@@ -398,6 +395,10 @@ class BaseAcpPersona(BasePersona):
                 self.__class__.__name__,
                 exc_info=True,
             )
+
+        if not self.ychat.get_messages():
+            self.log.info("[shutdown] No messages in chat, removing session from metadata for '%s'.", self.__class__.__name__)
+            self._remove_session()
 
         # Skip connection/subprocess teardown if other sessions are still active
         try:
