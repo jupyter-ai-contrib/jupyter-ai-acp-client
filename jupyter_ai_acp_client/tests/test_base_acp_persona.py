@@ -41,6 +41,24 @@ def _make_persona(attachments_map: dict | None = None):
     return persona
 
 
+def _make_shutdown_persona(*, has_messages: bool):
+    """Create a minimal stub suitable for running BaseAcpPersona._shutdown."""
+
+    class _Stub:
+        _before_subprocess_future = None
+        _subprocess_future = None
+        _client_future = None
+
+    stub = _Stub()
+    stub._client_session_future = None
+    stub.ychat = MagicMock()
+    stub.ychat.get_messages.return_value = ["msg"] if has_messages else []
+    stub._remove_session = MagicMock()
+    stub.log = MagicMock()
+    stub.get_client = AsyncMock(side_effect=Exception("no client"))
+    return stub
+
+
 def _make_client():
     """Create an AsyncMock client with prompt_and_reply explicitly async."""
     client = AsyncMock()
@@ -203,6 +221,26 @@ class TestLoadSessionRecovery:
         persona._create_session.assert_awaited_once_with(client)
         assert persona._pending_session_recovery_context is True
 
+    async def test_no_existing_session_creates_new_session(self):
+        """When no session ID is in metadata, _create_session is called directly."""
+        persona, client = _make_session_init_persona(existing_session_id=None)
+
+        await BaseAcpPersona._init_client_session(persona)
+
+        persona._load_session.assert_not_awaited()
+        persona._create_session.assert_awaited_once_with(client)
+        assert persona._pending_session_recovery_context is False
+
+    async def test_agent_without_load_session_creates_new_session(self):
+        """When the agent doesn't support load_session, _create_session is called directly."""
+        persona, client = _make_session_init_persona(supports_session_load=False)
+
+        await BaseAcpPersona._init_client_session(persona)
+
+        persona._load_session.assert_not_awaited()
+        persona._create_session.assert_awaited_once_with(client)
+        assert persona._pending_session_recovery_context is False
+
     async def test_create_session_error_propagates(self):
         """create_session() errors are not swallowed after load_session fails."""
         persona, _ = _make_session_init_persona(error=Exception("load failed"))
@@ -225,14 +263,13 @@ class TestLoadSessionRecovery:
         msg1 = _make_message("@bot first")
         await BaseAcpPersona.process_message(persona, msg1)
 
-        # Flag must be cleared — second message must NOT get history prepended
         assert persona._pending_session_recovery_context is False
 
         msg2 = _make_message("@bot second")
         await BaseAcpPersona.process_message(persona, msg2)
 
         second_call_prompt = client.prompt_and_reply.call_args_list[1].kwargs["prompt"]
-        assert not second_call_prompt.startswith("The previous ACP session")
+        assert second_call_prompt == "second"
 
     def test_build_history_context_excludes_current_message(self):
         """The current message is not included in the injected history."""
@@ -297,3 +334,35 @@ class TestLoadSessionRecovery:
         # The oldest messages are trimmed, most recent are kept
         assert f"message {cap + 9}" in result
         assert "message 0" not in result
+
+
+@pytest.mark.anyio
+class TestSessionMetadataCleanup:
+    """Tests for session ID cleanup on shutdown when no messages were sent."""
+
+    def test_remove_session_clears_metadata(self):
+        """_remove_session removes only this persona's ID, preserving others."""
+        persona = _make_persona()
+        persona.id = "persona-a"
+        persona._get_existing_sessions.return_value = {
+            "persona-a": "sess-1",
+            "persona-b": "sess-2",
+        }
+
+        BaseAcpPersona._remove_session(persona)
+
+        persona.ychat.set_metadata.assert_called_once_with(
+            "acp_session_ids", {"persona-b": "sess-2"}
+        )
+
+    async def test_shutdown_removes_session_if_no_messages(self):
+        """_shutdown removes session from metadata when chat has no messages."""
+        persona = _make_shutdown_persona(has_messages=False)
+        await BaseAcpPersona._shutdown(persona)
+        persona._remove_session.assert_called_once()
+
+    async def test_shutdown_keeps_session_if_messages_exist(self):
+        """_shutdown skips _remove_session when chat has messages."""
+        persona = _make_shutdown_persona(has_messages=True)
+        await BaseAcpPersona._shutdown(persona)
+        persona._remove_session.assert_not_called()

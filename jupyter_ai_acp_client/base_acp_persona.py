@@ -140,11 +140,7 @@ class BaseAcpPersona(BasePersona):
 
     def _get_existing_sessions(self) -> dict[str, str]:
         """
-        Returns a dictionary of existing ACP session IDs within this instance's
-        assigned chat, keyed by persona ID (obtained via `self.id`). Each chat
-        may contain 1 session per ACP persona.
-
-        Obtained from the `ychat._ydoc["metadata"]` shared type internally.
+        Returns ACP session IDs from this chat's metadata, keyed by persona ID.
         """
         sessions = self.ychat.get_metadata().get("acp_session_ids", {})
         return sessions
@@ -159,6 +155,21 @@ class BaseAcpPersona(BasePersona):
         existing_session_ids = self._get_existing_sessions()
         self.ychat.set_metadata(
             "acp_session_ids", {**existing_session_ids, self.id: new_session_id}
+        )
+
+    def _remove_session(self) -> None:
+        """
+        Removes this persona's ACP session ID from chat metadata. Called on
+        shutdown when the chat has no messages, since agents typically do not
+        persist sessions with no activity. Removing the stale ID prevents a
+        spurious load_session failure on the next chat open.
+
+        Updates the `ychat._ydoc["metadata"]` shared type internally.
+        """
+        existing_session_ids = self._get_existing_sessions()
+        self.ychat.set_metadata(
+            "acp_session_ids",
+            {k: v for k, v in existing_session_ids.items() if k != self.id},
         )
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "load"})
@@ -355,6 +366,9 @@ class BaseAcpPersona(BasePersona):
 
     async def _shutdown(self):
         self.log.info("[shutdown] Starting for '%s'.", self.__class__.__name__)
+
+        if not self.ychat.get_messages():
+            self._remove_session()
 
         # Cancel any pending startup futures to avoid hanging on auth-gated
         # personas (e.g. Kiro, Gemini) that never finished startup.
