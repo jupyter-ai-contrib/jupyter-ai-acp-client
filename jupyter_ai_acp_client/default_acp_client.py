@@ -150,7 +150,7 @@ class JaiAcpClient(Client):
         #
         # We need to cast each from the PersonaManager model to the ACP model
         # here. The models are the exact same, but we still need to do this to
-        # avoid a Pydantic error. 
+        # avoid a Pydantic error.
         mcp_settings = persona.get_mcp_settings()
         mcp_servers: list[AcpMcpServerStdio | AcpMcpServerHttp] = []
         if mcp_settings:
@@ -161,7 +161,7 @@ class JaiAcpClient(Client):
                 # agent capabilities returned on session init
                 elif agent_capabilities.mcp_capabilities.http:
                     mcp_servers.append(AcpMcpServerHttp(**mcp_server.model_dump()))
-        
+
         return mcp_servers
 
     async def create_session(self, persona: BasePersona) -> NewSessionResponse:
@@ -172,12 +172,10 @@ class JaiAcpClient(Client):
         """
         conn = await self.get_connection()
         mcp_servers = await self._get_mcp_servers(persona)
-
-        # TODO: change this to chat parent dir
-        session = await conn.new_session(mcp_servers=mcp_servers, cwd=os.getcwd())
+        session = await conn.new_session(persona.get_chat_dir(), mcp_servers)
         self._personas_by_session[session.session_id] = persona
         return session
-    
+
     def _is_session_loading(self, session_id: str) -> bool:
         task = self._loading_sessions.get(session_id)
         return task is not None and not task.done()
@@ -210,11 +208,7 @@ class JaiAcpClient(Client):
         """
         conn = await self.get_connection()
         mcp_servers = await self._get_mcp_servers(persona)
-        response = await conn.load_session(
-            cwd=os.getcwd(),
-            mcp_servers=mcp_servers,
-            session_id=session_id,
-        )
+        response = await conn.load_session(persona.get_chat_dir(), session_id, mcp_servers)
         self._personas_by_session[session_id] = persona
         return response
 
@@ -240,7 +234,7 @@ class JaiAcpClient(Client):
         """
         assert session_id in self._personas_by_session
         lock = self._prompt_locks_by_session.setdefault(session_id, asyncio.Lock())
-        # Signal cancellation before cleanup so that any in-flight session_update 
+        # Signal cancellation before cleanup so that any in-flight session_update
         # callbacks are suppressed and don't overwrite the failed status.
         self._cancel_requested[session_id] = True
         self._cancel_pending_work(session_id)
@@ -394,7 +388,7 @@ class JaiAcpClient(Client):
         # Skip message/tool events when cancellation has been requested
         if self._cancel_requested.get(session_id, False):
             if isinstance(update, (ToolCallStart, ToolCallProgress)):
-                pass 
+                pass
             else:
                 return
 
@@ -709,6 +703,3 @@ class JaiAcpClient(Client):
             persona.log.info(
                 f"_cancel_pending_work: auto-rejected {rejected} pending permission(s) for session {session_id}"
             )
-
-
-
