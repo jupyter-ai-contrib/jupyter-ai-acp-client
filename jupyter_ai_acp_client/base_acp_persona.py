@@ -322,45 +322,56 @@ class BaseAcpPersona(BasePersona):
             await self.handle_no_auth(message)
             return
 
-        # Block until fully initialized
-        await self.ensure_initialized()
+        # Show writing indicator immediately, before init may block.
+        # NOTE: This reuses the "isWriting" awareness state to show "{agent} is
+        # typing..." during initialization. Ideally, the UI would show a
+        # distinct status (e.g. "starting up..."), but that requires a richer
+        # awareness protocol and changes in jupyter-chat.
+        self.awareness.set_local_state_field("isWriting", True)
 
-        client = await self.get_client()
-        session_id = await self.get_session_id()
+        try:
+            # Block until fully initialized
+            await self.ensure_initialized()
 
-        prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
+            client = await self.get_client()
+            session_id = await self.get_session_id()
 
-        if self._pending_session_recovery_context:
-            self._pending_session_recovery_context = False
-            history = self._build_history_context(exclude_id=message.id)
-            if history:
-                emit_event(
-                    self.event_logger,
-                    "acp_session_recovery",
-                    "success",
-                    {"persona_class": self.__class__.__name__},
-                )
-                prompt = history + "\n\nCurrent user message:\n" + prompt
+            prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
 
-        # Resolve attachments from YChat by ID
-        attachments: list[dict] | None = None
-        if message.attachments:
-            all_attachments = self.ychat.get_attachments()
-            resolved = []
-            for aid in message.attachments:
-                raw = all_attachments.get(aid)
-                if raw is None:
-                    self.log.warning("Attachment %s not found in YChat", aid)
-                    continue
-                resolved.append(raw)
-            attachments = resolved or None
+            if self._pending_session_recovery_context:
+                self._pending_session_recovery_context = False
+                history = self._build_history_context(exclude_id=message.id)
+                if history:
+                    emit_event(
+                        self.event_logger,
+                        "acp_session_recovery",
+                        "success",
+                        {"persona_class": self.__class__.__name__},
+                    )
+                    prompt = history + "\n\nCurrent user message:\n" + prompt
 
-        await client.prompt_and_reply(
-            session_id=session_id,
-            prompt=prompt,
-            attachments=attachments,
-            root_dir=self.parent.root_dir,
-        )
+            # Resolve attachments from YChat by ID
+            attachments: list[dict] | None = None
+            if message.attachments:
+                all_attachments = self.ychat.get_attachments()
+                resolved = []
+                for aid in message.attachments:
+                    raw = all_attachments.get(aid)
+                    if raw is None:
+                        self.log.warning("Attachment %s not found in YChat", aid)
+                        continue
+                    resolved.append(raw)
+                attachments = resolved or None
+
+            await client.prompt_and_reply(
+                session_id=session_id,
+                prompt=prompt,
+                attachments=attachments,
+                root_dir=self.parent.root_dir,
+            )
+        except Exception:
+            self.awareness.set_local_state_field("isWriting", False)
+            raise
 
     @property
     def acp_slash_commands(self) -> list[AvailableCommand]:
