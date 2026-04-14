@@ -157,21 +157,6 @@ class BaseAcpPersona(BasePersona):
             "acp_session_ids", {**existing_session_ids, self.id: new_session_id}
         )
 
-    def _remove_session(self) -> None:
-        """
-        Removes this persona's ACP session ID from chat metadata. Called on
-        shutdown when the chat has no messages, since agents typically do not
-        persist sessions with no activity. Removing the stale ID prevents a
-        spurious load_session failure on the next chat open.
-
-        Updates the `ychat._ydoc["metadata"]` shared type internally.
-        """
-        existing_session_ids = self._get_existing_sessions()
-        self.ychat.set_metadata(
-            "acp_session_ids",
-            {k: v for k, v in existing_session_ids.items() if k != self.id},
-        )
-
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "load"})
     async def _load_session(self, client, existing_session_id) -> LoadSessionResponse:
         response = await client.load_session(
@@ -401,10 +386,6 @@ class BaseAcpPersona(BasePersona):
                 self.__class__.__name__,
                 exc_info=True,
             )
-
-        if not self.ychat.get_messages():
-            self.log.info("[shutdown] No messages in chat, removing session from metadata for '%s'.", self.__class__.__name__)
-            self._remove_session()
 
         # Skip connection/subprocess teardown if other sessions are still active
         try:
