@@ -313,6 +313,12 @@ class BaseAcpPersona(BasePersona):
             self._pending_session_recovery_context = False
             history = self._build_history_context(exclude_id=message.id)
             if history:
+                emit_event(
+                    self.event_logger,
+                    "acp_session_recovery",
+                    "success",
+                    {"persona_class": self.__class__.__name__},
+                )
                 prompt = history + "\n\nCurrent user message:\n" + prompt
 
         # Resolve attachments from YChat by ID
