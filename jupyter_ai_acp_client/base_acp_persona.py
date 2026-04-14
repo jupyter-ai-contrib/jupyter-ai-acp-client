@@ -42,10 +42,11 @@ class BaseAcpPersona(BasePersona):
     Developers should always use `self.get_client()`.
     """
 
-    _client_session_future: Task[NewSessionResponse | LoadSessionResponse]
+    _client_session_future: Task[NewSessionResponse | LoadSessionResponse] | None
     """
     The future that yields the ACP client session info. Each instance of an ACP
     persona has a unique session ID, i.e. each chat reserves a unique session.
+    Set to `None` until initialization is triggered (lazy init).
 
     Developers should always call `self.get_session_response()` or `self.get_session_id()`.
     """
@@ -63,14 +64,33 @@ class BaseAcpPersona(BasePersona):
     context window limits.
     """
 
+    _initialized: bool
+    """Whether this persona instance has completed full initialization."""
+
     def __init__(self, *args, executable: list[str], **kwargs):
         super().__init__(*args, **kwargs)
 
         self._executable = executable
         self._pending_session_recovery_context: bool = False
+        self._client_session_future = None
+        self._initialized = False
+        self._acp_slash_commands = []
 
-        # Ensure each subclass has its own subprocess and client by checking if the
-        # class variable is defined directly on this class (not inherited)
+        # Eagerly initialize if this is the default persona or has an existing
+        # session from a previous chat open.
+        should_eager_init = (
+            self.parent.default_persona_id == self.id
+            or self.id in self._get_existing_sessions()
+        )
+        if should_eager_init:
+            self.event_loop.create_task(self.ensure_initialized())
+
+    def _start_auth_check(self) -> None:
+        """
+        Non-blocking: starts only the before_agent_subprocess future so that
+        auth-gated personas (Kiro, Gemini) begin polling. Does not start the
+        agent subprocess, client, or session.
+        """
         if (
             "_before_subprocess_future" not in self.__class__.__dict__
             or self.__class__._before_subprocess_future is None
@@ -78,6 +98,15 @@ class BaseAcpPersona(BasePersona):
             self.__class__._before_subprocess_future = self.event_loop.create_task(
                 self.before_agent_subprocess()
             )
+
+    async def ensure_initialized(self) -> None:
+        """
+        Idempotent method that starts the subprocess → client → session chain
+        and awaits completion. Safe to call multiple times.
+        """
+        if self._initialized:
+            return
+        self._start_auth_check()
         if (
             "_subprocess_future" not in self.__class__.__dict__
             or self.__class__._subprocess_future is None
@@ -92,11 +121,12 @@ class BaseAcpPersona(BasePersona):
             self.__class__._client_future = self.event_loop.create_task(
                 self._init_client()
             )
-
-        self._client_session_future = self.event_loop.create_task(
-            self._init_client_session()
-        )
-        self._acp_slash_commands = []
+        if self._client_session_future is None:
+            self._client_session_future = self.event_loop.create_task(
+                self._init_client_session()
+            )
+        await self._client_session_future
+        self._initialized = True
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -284,10 +314,16 @@ class BaseAcpPersona(BasePersona):
 
         This method may be overriden by child classes.
         """
+        # Kick off auth check (non-blocking) so auth polling starts
+        self._start_auth_check()
+
         # If not authenticated, return early
         if not await self.is_authed():
             await self.handle_no_auth(message)
             return
+
+        # Block until fully initialized
+        await self.ensure_initialized()
 
         client = await self.get_client()
         session_id = await self.get_session_id()
@@ -357,6 +393,14 @@ class BaseAcpPersona(BasePersona):
 
     async def _shutdown(self):
         self.log.info("[shutdown] Starting for '%s'.", self.__class__.__name__)
+
+        # Skip shutdown if this persona was never initialized
+        if self._client_session_future is None:
+            self.log.info(
+                "[shutdown] Persona '%s' was never initialized, skipping.",
+                self.__class__.__name__,
+            )
+            return
 
         # Cancel any pending startup futures to avoid hanging on auth-gated
         # personas (e.g. Kiro, Gemini) that never finished startup.

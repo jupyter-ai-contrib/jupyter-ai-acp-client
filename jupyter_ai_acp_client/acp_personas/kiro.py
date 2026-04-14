@@ -52,7 +52,7 @@ try:
     required_version = (1, 25, 0)
     current_version = tuple(version_parts)
 
-    if current_version < required_version or current_version[0] >= 2:
+    if current_version < required_version or current_version[0] >= 3:
         raise PersonaRequirementsUnmet(
             f"kiro-cli version {version_str} is installed, but version >=1.25.0,<2 is required."
             " Please upgrade kiro-cli. See https://kiro.dev for instructions."
@@ -118,10 +118,8 @@ class KiroAcpPersona(BaseAcpPersona):
             self.send_message("Thanks for signing in! I'm ready to help.")
     
     async def is_authed(self) -> bool:
-        # In Kiro, the user remains signed in even if they sign out while the
-        # ACP agent server is running. Therefore we can just return the status
-        # of the `before_agent_subprocess()` task to check if the user is
-        # authenticated.
+        if self._before_subprocess_future is None:
+            return False
         return self._before_subprocess_future.done()
     
     async def handle_no_auth(self, message: Message) -> None:

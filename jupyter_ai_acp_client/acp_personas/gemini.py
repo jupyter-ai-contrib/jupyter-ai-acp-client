@@ -117,13 +117,10 @@ class GeminiAcpPersona(BaseAcpPersona):
             self.send_message("Thanks for signing in! I'm ready to help.")
 
     async def is_authed(self) -> bool:
-        # Check if the before_subprocess task is done (subprocess has started)
+        if self._before_subprocess_future is None:
+            return False
         if not self._before_subprocess_future.done():
             return False
-
-        # In Gemini, configuration can change at runtime (e.g., if settings.json
-        # is deleted), so we need to verify that Gemini is still properly
-        # configured before processing each message. Use a fast file check.
         return await self._check_gemini_auth_fast()
 
     async def handle_no_auth(self, message: Message) -> None:
