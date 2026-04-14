@@ -1,8 +1,17 @@
-"""Tests for attachment resolution in BaseAcpPersona.process_message()."""
+"""Tests for attachment resolution and load-session recovery in BaseAcpPersona."""
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+from jupyterlab_chat.models import Message
+
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
+
+
+def _make_chat_message(
+    id: str, body: str, sender: str, deleted: bool | None = None
+) -> Message:
+    return Message(id=id, body=body, sender=sender, time=0.0, deleted=deleted)
 
 
 def _make_persona(attachments_map: dict | None = None):
@@ -11,6 +20,7 @@ def _make_persona(attachments_map: dict | None = None):
     persona.get_client = AsyncMock()
     persona.get_session_id = AsyncMock(return_value="sess-1")
     persona.is_authed = AsyncMock(return_value=True)
+    persona._pending_session_recovery_context = False
 
     # as_user() is sync — must return a regular MagicMock
     user_mock = MagicMock()
@@ -20,6 +30,8 @@ def _make_persona(attachments_map: dict | None = None):
     # YChat mock
     ychat = MagicMock()
     ychat.get_attachments.return_value = attachments_map or {}
+    ychat.get_messages.return_value = []
+    ychat.get_users.return_value = {}
     persona.ychat = ychat
 
     # parent.root_dir
@@ -27,6 +39,7 @@ def _make_persona(attachments_map: dict | None = None):
     persona.parent.root_dir = "/home/user/notebooks"
 
     return persona
+
 
 
 def _make_client():
@@ -38,9 +51,43 @@ def _make_client():
 
 def _make_message(body: str, attachment_ids: list[str] | None = None):
     msg = MagicMock()
+    msg.id = "current-msg"
     msg.body = body
     msg.attachments = attachment_ids
     return msg
+
+
+def _make_session_init_persona(
+    *,
+    error: Exception | None = None,
+    existing_session_id: str | None = "old-session",
+    supports_session_load: bool = True,
+):
+    """Create an uninitialized persona wired for _init_client_session tests."""
+    persona = MagicMock()
+    persona.id = "test-persona"
+    persona.log = MagicMock()
+    persona._pending_session_recovery_context = False
+
+    client = MagicMock()
+    capabilities = MagicMock()
+    capabilities.load_session = supports_session_load
+    client.get_agent_capabilities = AsyncMock(return_value=capabilities)
+    persona.get_client = AsyncMock(return_value=client)
+
+    sessions = {}
+    if existing_session_id:
+        sessions[persona.id] = existing_session_id
+    persona._get_existing_sessions = MagicMock(return_value=sessions)
+    persona._load_session = AsyncMock()
+    persona._create_session = AsyncMock(return_value=MagicMock(session_id="new-session"))
+
+    if error:
+        persona._load_session.side_effect = error
+    else:
+        persona._load_session.return_value = MagicMock(session_id=existing_session_id)
+
+    return persona, client
 
 
 class TestProcessMessageAttachments:
@@ -142,3 +189,133 @@ class TestProcessMessageAttachments:
 
         call_kwargs = client.prompt_and_reply.call_args.kwargs
         assert call_kwargs["root_dir"] == "/custom/root"
+
+
+class TestLoadSessionRecovery:
+    """Tests for load-session recovery, history injection, and flag behavior."""
+
+    async def test_any_load_session_error_creates_new_session(self):
+        """Any load_session failure falls back to a new session."""
+        persona, client = _make_session_init_persona(error=Exception("load failed"))
+
+        await BaseAcpPersona._init_client_session(persona)
+
+        persona._load_session.assert_awaited_once_with(client, "old-session")
+        persona._create_session.assert_awaited_once_with(client)
+        assert persona._pending_session_recovery_context is True
+
+    async def test_no_existing_session_creates_new_session(self):
+        """When no session ID is in metadata, _create_session is called directly."""
+        persona, client = _make_session_init_persona(existing_session_id=None)
+
+        await BaseAcpPersona._init_client_session(persona)
+
+        persona._load_session.assert_not_awaited()
+        persona._create_session.assert_awaited_once_with(client)
+        assert persona._pending_session_recovery_context is False
+
+    async def test_agent_without_load_session_creates_new_session(self):
+        """When the agent doesn't support load_session, _create_session is called directly."""
+        persona, client = _make_session_init_persona(supports_session_load=False)
+
+        await BaseAcpPersona._init_client_session(persona)
+
+        persona._load_session.assert_not_awaited()
+        persona._create_session.assert_awaited_once_with(client)
+        assert persona._pending_session_recovery_context is False
+
+    async def test_create_session_error_propagates(self):
+        """create_session() errors are not swallowed after load_session fails."""
+        persona, _ = _make_session_init_persona(error=Exception("load failed"))
+        create_error = Exception("create failed")
+        persona._create_session.side_effect = create_error
+
+        with pytest.raises(Exception) as exc_info:
+            await BaseAcpPersona._init_client_session(persona)
+
+        assert exc_info.value is create_error
+        assert persona._pending_session_recovery_context is True
+
+    async def test_recovery_flag_resets_after_first_message(self):
+        """History is injected only on the first message after recovery."""
+        client = _make_client()
+        persona = _make_persona()
+        persona._pending_session_recovery_context = True
+        persona.get_client.return_value = client
+
+        msg1 = _make_message("@bot first")
+        await BaseAcpPersona.process_message(persona, msg1)
+
+        assert persona._pending_session_recovery_context is False
+
+        msg2 = _make_message("@bot second")
+        await BaseAcpPersona.process_message(persona, msg2)
+
+        second_call_prompt = client.prompt_and_reply.call_args_list[1].kwargs["prompt"]
+        assert second_call_prompt == "second"
+
+    def test_build_history_context_excludes_current_message(self):
+        """The current message is not included in the injected history."""
+        persona = _make_persona()
+        persona._MAX_HISTORY_MESSAGES = BaseAcpPersona._MAX_HISTORY_MESSAGES
+        msgs = [
+            _make_chat_message("msg-1", "hello", "user-1"),
+            _make_chat_message("msg-2", "hi there", "bot-1"),
+            _make_chat_message("msg-3", "follow up", "user-1"),  # current message
+        ]
+        persona.ychat.get_messages.return_value = msgs
+        persona.ychat.get_users.return_value = {}
+
+        result = BaseAcpPersona._build_history_context(persona, exclude_id="msg-3")
+
+        assert "follow up" not in result
+        assert "hello" in result
+        assert "hi there" in result
+
+    async def test_recovery_history_injected_into_prompt(self):
+        """History is prepended to the prompt on the first message after recovery."""
+        client = _make_client()
+        persona = _make_persona()
+        persona._pending_session_recovery_context = True
+        persona._MAX_HISTORY_MESSAGES = BaseAcpPersona._MAX_HISTORY_MESSAGES
+        persona.ychat.get_messages.return_value = [
+            _make_chat_message("msg-1", "hello world", "user-1"),
+        ]
+        persona.ychat.get_users.return_value = {}
+        persona.get_client.return_value = client
+        # Delegate to the real method so history is built from ychat
+        persona._build_history_context = (
+            lambda **kw: BaseAcpPersona._build_history_context(persona, **kw)
+        )
+        msg = _make_message("@bot follow up")
+
+        await BaseAcpPersona.process_message(persona, msg)
+
+        prompt = client.prompt_and_reply.call_args.kwargs["prompt"]
+        assert prompt.startswith("The previous ACP session")
+        assert "hello world" in prompt
+        assert "follow up" in prompt
+
+    def test_build_history_context_caps_at_max_messages(self):
+        """History is capped at _MAX_HISTORY_MESSAGES."""
+        persona = _make_persona()
+        cap = BaseAcpPersona._MAX_HISTORY_MESSAGES
+        persona._MAX_HISTORY_MESSAGES = cap
+        msgs = [
+            _make_chat_message(f"msg-{i}", f"message {i}", "user-1")
+            for i in range(cap + 10)
+        ]
+        persona.ychat.get_messages.return_value = msgs
+        persona.ychat.get_users.return_value = {}
+
+        result = BaseAcpPersona._build_history_context(persona)
+
+        # Only the last _MAX_HISTORY_MESSAGES messages should appear
+        lines = result.splitlines()
+        message_lines = [l for l in lines if l.startswith("user-1:")]
+        assert len(message_lines) == cap
+        # The oldest messages are trimmed, most recent are kept
+        assert f"message {cap + 9}" in result
+        assert "message 0" not in result
+
+

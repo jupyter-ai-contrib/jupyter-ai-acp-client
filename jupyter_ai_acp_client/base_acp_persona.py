@@ -56,10 +56,18 @@ class BaseAcpPersona(BasePersona):
     This attribute is set automatically by the default ACP client.
     """
 
+    _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
+    """
+    Maximum number of recent messages to include in the history context injected
+    after load-session recovery. Caps prompt size to avoid exceeding agent
+    context window limits.
+    """
+
     def __init__(self, *args, executable: list[str], **kwargs):
         super().__init__(*args, **kwargs)
 
         self._executable = executable
+        self._pending_session_recovery_context: bool = False
 
         # Ensure each subclass has its own subprocess and client by checking if the
         # class variable is defined directly on this class (not inherited)
@@ -132,11 +140,7 @@ class BaseAcpPersona(BasePersona):
 
     def _get_existing_sessions(self) -> dict[str, str]:
         """
-        Returns a dictionary of existing ACP session IDs within this instance's
-        assigned chat, keyed by persona ID (obtained via `self.id`). Each chat
-        may contain 1 session per ACP persona.
-
-        Obtained from the `ychat._ydoc["metadata"]` shared type internally.
+        Returns ACP session IDs from this chat's metadata, keyed by persona ID.
         """
         sessions = self.ychat.get_metadata().get("acp_session_ids", {})
         return sessions
@@ -155,19 +159,15 @@ class BaseAcpPersona(BasePersona):
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "load"})
     async def _load_session(self, client, existing_session_id) -> LoadSessionResponse:
-        try:
-            response = await client.load_session(
-                persona=self, session_id=existing_session_id
-            )
-            self.log.info(
-                "Loaded existing ACP client session for '%s' with ID '%s'.",
-                self.__class__.__name__,
-                existing_session_id,
-            )
-            return response
-        except:
-            self.log.exception("Failed to load client session for %s with ID %s", self.__class__.__name__, existing_session_id)
-            raise
+        response = await client.load_session(
+            persona=self, session_id=existing_session_id
+        )
+        self.log.info(
+            "Loaded existing ACP client session for '%s' with ID '%s'.",
+            self.__class__.__name__,
+            existing_session_id,
+        )
+        return response
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
     async def _create_session(self, client) -> NewSessionResponse:
@@ -189,7 +189,18 @@ class BaseAcpPersona(BasePersona):
         supports_session_load = (await client.get_agent_capabilities()).load_session
 
         if existing_session_id and supports_session_load:
-            return await self._load_session(client, existing_session_id)
+            try:
+                return await self._load_session(client, existing_session_id)
+            except Exception:
+                self.log.warning(
+                    "Failed to load ACP client session for '%s' with ID '%s'; "
+                    "creating a new session.",
+                    self.__class__.__name__,
+                    existing_session_id,
+                    exc_info=True,
+                )
+                self._pending_session_recovery_context = True
+                return await self._create_session(client)
         else:
             return await self._create_session(client)
 
@@ -238,6 +249,33 @@ class BaseAcpPersona(BasePersona):
         """
         self.send_message("You are not authenticated. Please log in.")
 
+    def _build_history_context(self, exclude_id: str | None = None) -> str:
+        """
+        Builds a plain-text summary of recent chat history for context injection
+        after load-session recovery. Caps at _MAX_HISTORY_MESSAGES to avoid
+        exceeding agent context window limits.
+        """
+        all_messages = self.ychat.get_messages()
+        recent = [
+            m for m in all_messages
+            if not m.deleted and m.id != exclude_id
+        ][-self._MAX_HISTORY_MESSAGES:]
+        if not recent:
+            return ""
+        users = self.ychat.get_users()
+        lines = []
+        for msg in recent:
+            user = users.get(msg.sender)
+            name = user.display_name if user else msg.sender
+            lines.append(f"{name}: {msg.body}")
+        return (
+            "The previous ACP session could not be loaded. Use this recent chat "
+            "transcript as historical context for continuity.\n"
+            "<conversation_history>\n"
+            + "\n".join(lines)
+            + "\n</conversation_history>"
+        )
+
     @auto_emit_event("acp_chat_message")
     async def process_message(self, message: Message) -> None:
         """
@@ -255,6 +293,18 @@ class BaseAcpPersona(BasePersona):
         session_id = await self.get_session_id()
 
         prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
+
+        if self._pending_session_recovery_context:
+            self._pending_session_recovery_context = False
+            history = self._build_history_context(exclude_id=message.id)
+            if history:
+                emit_event(
+                    self.event_logger,
+                    "acp_session_recovery",
+                    "success",
+                    {"persona_class": self.__class__.__name__},
+                )
+                prompt = history + "\n\nCurrent user message:\n" + prompt
 
         # Resolve attachments from YChat by ID
         attachments: list[dict] | None = None

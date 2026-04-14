@@ -1,8 +1,11 @@
-"""Tests for content block building in JaiAcpClient.prompt_and_reply()."""
+"""Tests for content block building and session management in JaiAcpClient."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+from acp.exceptions import RequestError
 from acp.schema import ResourceContentBlock, TextContentBlock
 
 from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
@@ -213,3 +216,26 @@ class TestPromptAndReplyContentBlocks:
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
         assert blocks[1].uri == "../../../etc/passwd"
+
+
+class TestLoadSessionCleanup:
+    """Tests for _loading_sessions cleanup on failure."""
+
+    async def test_failed_load_session_removes_task_from_loading_sessions(self):
+        """A failed load_session cleans up its task so retries can start fresh."""
+        client = object.__new__(JaiAcpClient)
+        client.event_loop = asyncio.get_running_loop()
+        client._loading_sessions = {}
+
+        persona = MagicMock()
+        error = RequestError(-32002, "Resource not found")
+
+        async def _failing_rpc(*args, **kwargs):
+            raise error
+
+        client._load_session_rpc = _failing_rpc
+
+        with pytest.raises(RequestError):
+            await client.load_session(persona, "stale-session-id")
+
+        assert "stale-session-id" not in client._loading_sessions

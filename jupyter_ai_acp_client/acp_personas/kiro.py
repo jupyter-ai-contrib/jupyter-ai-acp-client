@@ -72,11 +72,12 @@ except FileNotFoundError:
 
 class KiroAcpPersona(BaseAcpPersona):
     _terminal_opened: bool
+
     def __init__(self, *args, **kwargs):
         executable = ["kiro-cli", "acp"]
         super().__init__(*args, executable=executable, **kwargs)
         self._terminal_opened = False
-    
+
     @property
     def defaults(self) -> PersonaDefaults:
         avatar_path = str(os.path.abspath(
