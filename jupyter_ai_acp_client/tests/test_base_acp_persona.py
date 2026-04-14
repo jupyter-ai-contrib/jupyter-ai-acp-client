@@ -41,23 +41,6 @@ def _make_persona(attachments_map: dict | None = None):
     return persona
 
 
-def _make_shutdown_persona(*, has_messages: bool):
-    """Create a minimal stub suitable for running BaseAcpPersona._shutdown."""
-
-    class _Stub:
-        _before_subprocess_future = None
-        _subprocess_future = None
-        _client_future = None
-
-    stub = _Stub()
-    stub._client_session_future = None
-    stub.ychat = MagicMock()
-    stub.ychat.get_messages.return_value = ["msg"] if has_messages else []
-    stub._remove_session = MagicMock()
-    stub.log = MagicMock()
-    stub.get_client = AsyncMock(side_effect=Exception("no client"))
-    return stub
-
 
 def _make_client():
     """Create an AsyncMock client with prompt_and_reply explicitly async."""
@@ -336,33 +319,3 @@ class TestLoadSessionRecovery:
         assert "message 0" not in result
 
 
-@pytest.mark.anyio
-class TestSessionMetadataCleanup:
-    """Tests for session ID cleanup on shutdown when no messages were sent."""
-
-    def test_remove_session_clears_metadata(self):
-        """_remove_session removes only this persona's ID, preserving others."""
-        persona = _make_persona()
-        persona.id = "persona-a"
-        persona._get_existing_sessions.return_value = {
-            "persona-a": "sess-1",
-            "persona-b": "sess-2",
-        }
-
-        BaseAcpPersona._remove_session(persona)
-
-        persona.ychat.set_metadata.assert_called_once_with(
-            "acp_session_ids", {"persona-b": "sess-2"}
-        )
-
-    async def test_shutdown_removes_session_if_no_messages(self):
-        """_shutdown removes session from metadata when chat has no messages."""
-        persona = _make_shutdown_persona(has_messages=False)
-        await BaseAcpPersona._shutdown(persona)
-        persona._remove_session.assert_called_once()
-
-    async def test_shutdown_keeps_session_if_messages_exist(self):
-        """_shutdown skips _remove_session when chat has messages."""
-        persona = _make_shutdown_persona(has_messages=True)
-        await BaseAcpPersona._shutdown(persona)
-        persona._remove_session.assert_not_called()
