@@ -120,18 +120,25 @@ class KiroAcpPersona(BaseAcpPersona):
     async def is_authed(self) -> bool:
         # Start auth polling if not already started (idempotent).
         self._start_auth_check()
-        if self.__class__._before_subprocess_future.done():
-            return True
+        future = self.__class__._before_subprocess_future
+
         # Future not yet resolved — wait up to one polling cycle.
-        # kiro-cli whoami is fast when authenticated, so this resolves quickly.
+        # _start_auth_check() is fast when authenticated.
         try:
             await asyncio.wait_for(
-                asyncio.shield(self.__class__._before_subprocess_future),
+                asyncio.shield(future),
                 timeout=2.0,
             )
-            return True
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except asyncio.TimeoutError:
             return False
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.log.warning("[Kiro] Auth check failed.", exc_info=True)
+            self.__class__._before_subprocess_future = None
+            return False
+
+        return True
     
     async def handle_no_auth(self, message: Message) -> None:
         # Determine which command to show
