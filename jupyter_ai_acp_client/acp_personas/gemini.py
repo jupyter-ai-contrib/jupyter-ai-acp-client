@@ -117,10 +117,26 @@ class GeminiAcpPersona(BaseAcpPersona):
             self.send_message("Thanks for signing in! I'm ready to help.")
 
     async def is_authed(self) -> bool:
-        if self._before_subprocess_future is None:
+        if not await self._check_gemini_auth_fast():
             return False
-        if not self._before_subprocess_future.done():
+
+        self._start_auth_check()
+        future = self.__class__._before_subprocess_future
+
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(future),
+                timeout=5.0,
+            )
+        except asyncio.TimeoutError:
             return False
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.log.warning("[Gemini] Auth check failed.", exc_info=True)
+            self.__class__._before_subprocess_future = None
+            return False
+
         return await self._check_gemini_auth_fast()
 
     async def handle_no_auth(self, message: Message) -> None:
