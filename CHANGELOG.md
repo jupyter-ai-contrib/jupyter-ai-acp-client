@@ -2,6 +2,26 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## 0.1.3a0
+
+([Full Changelog](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/compare/v0.1.2...60202bcb73b69b82964c1ad98042cdcbed9da3f2))
+
+### Enhancements made
+
+- Update kiro-cli version [#99](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/99) ([@3coins](https://github.com/3coins), [@andrii-i](https://github.com/andrii-i))
+- Add `load_session()` fallback in `_init_client_session()` to recover from stale sessions [#94](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/94) ([@andrii-i](https://github.com/andrii-i), [@3coins](https://github.com/3coins), [@dlqqq](https://github.com/dlqqq))
+
+### Contributors to this release
+
+The following people contributed discussions, new ideas, code and documentation contributions, and review.
+See [our definition of contributors](https://github-activity.readthedocs.io/en/latest/use/#how-does-this-tool-define-contributions-in-the-reports).
+
+([GitHub contributors page for this release](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/graphs/contributors?from=2026-04-07&to=2026-04-16&type=c))
+
+@3coins ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3A3coins+updated%3A2026-04-07..2026-04-16&type=Issues)) | @andrii-i ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Aandrii-i+updated%3A2026-04-07..2026-04-16&type=Issues)) | @dlqqq ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Adlqqq+updated%3A2026-04-07..2026-04-16&type=Issues))
+
+<!-- <END NEW CHANGELOG ENTRY> -->
+
 ## 0.1.2
 
 ([Full Changelog](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/compare/v0.1.1...aeb5aa5cb89c45319269ec9c38c7305dee3c691d))
@@ -18,8 +38,6 @@ See [our definition of contributors](https://github-activity.readthedocs.io/en/l
 ([GitHub contributors page for this release](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/graphs/contributors?from=2026-04-03&to=2026-04-07&type=c))
 
 @andrii-i ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Aandrii-i+updated%3A2026-04-03..2026-04-07&type=Issues)) | @dlqqq ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Adlqqq+updated%3A2026-04-03..2026-04-07&type=Issues))
-
-<!-- <END NEW CHANGELOG ENTRY> -->
 
 ## 0.1.1
 
