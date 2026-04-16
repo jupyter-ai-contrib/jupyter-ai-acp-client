@@ -52,7 +52,7 @@ try:
     required_version = (1, 25, 0)
     current_version = tuple(version_parts)
 
-    if current_version < required_version or current_version[0] >= 2:
+    if current_version < required_version or current_version[0] >= 3:
         raise PersonaRequirementsUnmet(
             f"kiro-cli version {version_str} is installed, but version >=1.25.0,<2 is required."
             " Please upgrade kiro-cli. See https://kiro.dev for instructions."
