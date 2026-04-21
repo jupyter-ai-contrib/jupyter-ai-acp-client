@@ -20,6 +20,8 @@ def _make_persona(attachments_map: dict | None = None):
     persona.get_client = AsyncMock()
     persona.get_session_id = AsyncMock(return_value="sess-1")
     persona.is_authed = AsyncMock(return_value=True)
+    persona.ensure_initialized = AsyncMock()
+    persona._start_auth_check = MagicMock()
     persona._pending_session_recovery_context = False
 
     # as_user() is sync — must return a regular MagicMock
