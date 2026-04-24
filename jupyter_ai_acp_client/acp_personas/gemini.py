@@ -150,39 +150,13 @@ class GeminiAcpPersona(BaseAcpPersona):
 
     async def _check_gemini_auth(self) -> bool:
         """
-        Thorough authentication check that tests if Gemini CLI is properly configured.
+        Authentication check that verifies Gemini CLI is properly configured.
         Used during startup polling to wait for initial configuration.
+
+        Uses the fast file-based check only, avoiding `gemini --prompt` which
+        triggers a full LLM inference call and delays subprocess startup.
         """
-        # First check files exist
-        if not await self._check_gemini_auth_fast():
-            return False
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "gemini", "--prompt", "test",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            _, stderr = await asyncio.wait_for(process.communicate(), timeout=5.0)
-
-            # Check if the command succeeded and didn't return auth/config errors
-            if process.returncode == 0:
-                return True
-
-            # Check stderr for configuration/auth errors
-            stderr_text = stderr.decode('utf-8', errors='ignore').lower()
-            if any(err in stderr_text for err in ['api key', 'not configured', 'authentication', 'sign in', 'login']):
-                return False
-
-            # If it failed for another reason, assume it's configured
-            return True
-
-        except asyncio.TimeoutError:
-            # If it times out, assume auth is working (command is just slow)
-            return True
-        except Exception:
-            # If command fails to run, assume not configured
-            return False
+        return await self._check_gemini_auth_fast()
 
     async def _open_gemini_login_terminal(self) -> bool:
         """
