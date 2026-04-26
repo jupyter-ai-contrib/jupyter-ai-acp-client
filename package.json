@@ -60,13 +60,11 @@
         "@jupyterlab/application": "^4.0.0",
         "@jupyterlab/coreutils": "^6.0.0",
         "@jupyterlab/services": "^7.0.0",
-        "clsx": "^2.1.1",
-        "diff": "^8.0.0"
+        "jupyter-chat-components": "^0.4.0"
     },
     "devDependencies": {
         "@jupyterlab/builder": "^4.0.0",
         "@jupyterlab/testutils": "^4.0.0",
-        "@types/diff": "^7.0.0",
         "@types/jest": "^29.2.0",
         "@types/json-schema": "^7.0.11",
         "@types/react": "^18.0.26",
@@ -121,6 +119,10 @@
         ],
         "sharedPackages": {
             "@jupyter/chat": {
+                "bundled": false,
+                "singleton": true
+            },
+            "jupyter-chat-components": {
                 "bundled": false,
                 "singleton": true
             }

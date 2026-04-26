@@ -10,13 +10,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional
 
+from acp.schema import (
+    ContentToolCallContent,
+    FileEditToolCallContent,
+    PermissionOption,
+    TerminalToolCallContent,
+)
 from pydantic import BaseModel
-from acp.schema import PermissionOption, ContentToolCallContent, FileEditToolCallContent, TerminalToolCallContent
 
 
 def ensure_serializable(value: Optional[Any]) -> Optional[Any]:
     """Convert non-JSON-serializable values to strings for Yjs transport."""
-    if value is not None and not isinstance(value, (str, int, float, bool, list, dict)):
+    if value is not None and not isinstance(
+        value, (str, int, float, bool, list, dict)
+    ):
         return str(value)
     return value
 
@@ -43,7 +50,6 @@ class ToolCallState(BaseModel):
     selected_option_id: Optional[str] = None
     session_id: Optional[str] = None
     diffs: Optional[list[ToolCallDiff]] = None
-
 
 def _resolve_path(path: str, root_dir: Optional[str]) -> str:
     """Normalize a file path to an absolute path using root_dir if needed."""
@@ -132,7 +138,9 @@ def extract_diffs(
     for item in content:
         if isinstance(item, FileEditToolCallContent):
             path = _resolve_path(item.path, root_dir)
-            diffs.append(ToolCallDiff(path=path, new_text=item.new_text, old_text=item.old_text))
+            diffs.append(
+                ToolCallDiff(path=path, new_text=item.new_text, old_text=item.old_text)
+            )
     return diffs or None
 
 

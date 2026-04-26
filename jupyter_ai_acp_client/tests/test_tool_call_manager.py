@@ -17,7 +17,10 @@ def make_persona(message_id_seq: list[str] | str | None = None) -> MagicMock:
         persona.ychat.add_message.return_value = message_id_seq
     else:
         persona.ychat.add_message.side_effect = list(message_id_seq)
-    persona.ychat.get_message.return_value = MagicMock()
+    message = MagicMock()
+    message.metadata = None
+    message.mime_model = None
+    persona.ychat.get_message.return_value = message
     return persona
 
 
@@ -481,6 +484,7 @@ class TestFlushToolCall:
         flushed_msg = persona.ychat.update_message.call_args[0][0]
         assert len(flushed_msg.metadata["tool_calls"]) == 1
         assert flushed_msg.metadata["tool_calls"][0]["tool_call_id"] == "tc-1"
+        assert flushed_msg.mime_model is None
 
     def test_noop_when_session_missing(self):
         mgr = ToolCallManager()
