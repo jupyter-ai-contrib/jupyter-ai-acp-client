@@ -207,8 +207,30 @@ class BaseAcpPersona(BasePersona):
     async def get_agent_subprocess(self) -> asyncio.subprocess.Process:
         """
         Safely returns the ACP agent subprocess for this persona.
+
+        If the subprocess has exited (e.g. crash, OOM, external kill),
+        automatically respawns it along with a new client and connection.
+        Without this, a dead subprocess leaves the persona permanently
+        unresponsive until the entire JupyterLab server is restarted.
         """
-        return await self.__class__._subprocess_future
+        process = await self.__class__._subprocess_future
+        if process.returncode is not None:
+            self.log.warning(
+                "ACP agent subprocess for '%s' exited with code %s. Respawning.",
+                self.__class__.__name__,
+                process.returncode,
+            )
+            self.__class__._before_subprocess_future = self.event_loop.create_task(
+                self.before_agent_subprocess()
+            )
+            self.__class__._subprocess_future = self.event_loop.create_task(
+                self._init_agent_subprocess()
+            )
+            self.__class__._client_future = self.event_loop.create_task(
+                self._init_client()
+            )
+            process = await self.__class__._subprocess_future
+        return process
 
     async def get_client(self) -> JaiAcpClient:
         """
@@ -289,8 +311,24 @@ class BaseAcpPersona(BasePersona):
             await self.handle_no_auth(message)
             return
 
-        client = await self.get_client()
-        session_id = await self.get_session_id()
+        # Ensure subprocess is alive (respawns if dead via get_agent_subprocess)
+        await self.get_agent_subprocess()
+
+        try:
+            client = await self.get_client()
+            session_id = await self.get_session_id()
+        except Exception:
+            # After a subprocess respawn, the old client/session are invalid.
+            # Re-initialize the session against the new client.
+            self.log.warning(
+                "Client or session invalid for '%s', re-initializing after respawn.",
+                self.__class__.__name__,
+            )
+            self._client_session_future = self.event_loop.create_task(
+                self._init_client_session()
+            )
+            client = await self.get_client()
+            session_id = await self.get_session_id()
 
         prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
 
