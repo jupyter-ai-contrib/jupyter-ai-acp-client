@@ -2,24 +2,22 @@ import os
 import re
 import shutil
 import subprocess
+from asyncio.subprocess import Process
+from pathlib import Path
+from typing import NamedTuple
 
 from acp.exceptions import RequestError
 from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
 from jupyterlab_chat.models import Message
+import yaml
 
 from ..base_acp_persona import BaseAcpPersona
 
+_DEFAULT_GOOSE_MODE = "approve"
+
 
 def _is_setup_error(error: Exception) -> bool:
-    """Check if error indicates Goose needs provider configuration.
-
-    Source-verified against block/goose (server.rs):
-    - Session creation errors: -32603 with data prefixed "Failed to set provider:"
-      or "Failed to create session/agent:"
-    - Framework errors: -32603 with data=None (sacp dispatch layer)
-    - Goose never sends -32000, but we handle it for forward compatibility.
-    - Prompt-time provider errors are streamed as text, not RequestError.
-    """
+    """Return whether an error indicates Goose still needs setup."""
     if not isinstance(error, RequestError):
         return False
     if error.code == -32000:
@@ -29,10 +27,14 @@ def _is_setup_error(error: Exception) -> bool:
     data = str(error.data or "").lower()
     if not data:
         return True  # framework error, likely during session init
-    return "failed to set provider" in data or "failed to create" in data
+    return (
+        "failed to set provider" in data
+        or "failed to create" in data
+        or "authentication" in data
+    )
 
 
-def _check_goose():
+def _check_goose() -> None:
     """Verify goose is installed and has ACP support (>= 1.8.0, < 2)."""
     if shutil.which("goose") is None:
         raise PersonaRequirementsUnmet(
@@ -66,8 +68,7 @@ def _check_goose():
             )
 
         version_str = version_match.group(1)
-        version_parts = [int(x) for x in version_str.split(".")]
-        current_version = tuple(version_parts)
+        current_version = tuple(int(x) for x in version_str.split("."))
         required_version = (1, 8, 0)
 
         if current_version < required_version or current_version[0] >= 2:
@@ -92,6 +93,88 @@ def _check_goose():
 _check_goose()
 
 
+def _get_user_config_path() -> Path:
+    """Return the Goose config path for the current platform."""
+    goose_path_root = os.environ.get("GOOSE_PATH_ROOT")
+    if goose_path_root:
+        return Path(goose_path_root) / "config" / "config.yaml"
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "Block" / "goose" / "config" / "config.yaml"
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if config_home:
+        return Path(config_home) / "goose" / "config.yaml"
+    return Path.home() / ".config" / "goose" / "config.yaml"
+
+
+def _parse_goose_config(config_text: str) -> dict[str, object] | None:
+    """Parse Goose config YAML into a top-level mapping."""
+    try:
+        config = yaml.safe_load(config_text)
+    except yaml.YAMLError:
+        return None
+    return config if isinstance(config, dict) else None
+
+
+def _get_config_value(key: str) -> str | None:
+    """Return a scalar value from Goose config, if present."""
+    config_path = _get_user_config_path()
+    if not config_path.exists():
+        return None
+    try:
+        config = _parse_goose_config(config_path.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    if config is None:
+        return None
+    value = config.get(key)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _get_config_mode() -> str | None:
+    """Return the explicit GOOSE_MODE from Goose config, if present."""
+    return _get_config_value("GOOSE_MODE")
+
+
+def _get_explicit_provider() -> str | None:
+    """Return the explicit Goose provider from env or config."""
+    return os.environ.get("GOOSE_PROVIDER") or _get_config_value("GOOSE_PROVIDER")
+
+
+def _get_explicit_mode() -> str | None:
+    """Return the explicit Goose mode from env or config."""
+    return os.environ.get("GOOSE_MODE") or _get_config_mode()
+
+
+class _GooseModeDecision(NamedTuple):
+    mode: str
+    env: dict[str, str] | None
+    explicit: bool
+
+
+def _resolve_mode_decision() -> _GooseModeDecision:
+    """Resolve the mode Goose ACP should run with."""
+    explicit_mode = _get_explicit_mode()
+    if explicit_mode is not None:
+        return _GooseModeDecision(
+            mode=explicit_mode,
+            env=None,
+            explicit=True,
+        )
+
+    env = os.environ.copy()
+    env["GOOSE_MODE"] = _DEFAULT_GOOSE_MODE
+    return _GooseModeDecision(
+        mode=_DEFAULT_GOOSE_MODE,
+        env=env,
+        explicit=False,
+    )
+
+
 class GooseAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["goose", "acp"]
@@ -113,6 +196,20 @@ class GooseAcpPersona(BaseAcpPersona):
             avatar_path=avatar_path,
             system_prompt="unused",
         )
+
+    async def _init_agent_subprocess(self) -> Process:
+        decision = _resolve_mode_decision()
+        if decision.explicit:
+            self.log.info("[Goose] Respecting explicit GOOSE_MODE=%s.", decision.mode)
+        else:
+            self.log.info(
+                "[Goose] Defaulting GOOSE_MODE=%s for ACP permission flow.",
+                decision.mode,
+            )
+        return await super()._init_agent_subprocess(env=decision.env)
+
+    async def is_authed(self) -> bool:
+        return _get_explicit_provider() is not None
 
     async def process_message(self, message: Message) -> None:
         try:

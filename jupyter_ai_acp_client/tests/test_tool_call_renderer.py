@@ -830,6 +830,18 @@ class TestParseUnifiedDiff:
 
 
 class TestExtractDiffsFromRawInput:
+    def test_path_and_content(self):
+        raw = {
+            "path": "foo.py",
+            "content": "print('hello')\n",
+        }
+        result = extract_diffs_from_raw_input(raw, root_dir="/srv/project")
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].path == "/srv/project/foo.py"
+        assert result[0].new_text == "print('hello')\n"
+        assert result[0].old_text is None
+
     def test_filepath_and_diff(self):
         raw = {
             "filepath": "/tmp/foo.py",
