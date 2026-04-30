@@ -42,7 +42,7 @@ class BaseAcpPersona(BasePersona):
     Developers should always use `self.get_client()`.
     """
 
-    _client_session_future: Task[NewSessionResponse | LoadSessionResponse]
+    _client_session_future: Task[NewSessionResponse | LoadSessionResponse] | None
     """
     The future that yields the ACP client session info. Each instance of an ACP
     persona has a unique session ID, i.e. each chat reserves a unique session.
@@ -93,9 +93,11 @@ class BaseAcpPersona(BasePersona):
                 self._init_client()
             )
 
-        self._client_session_future = self.event_loop.create_task(
-            self._init_client_session()
-        )
+        # Session creation is deferred to the first process_message call
+        # (via _ensure_client_session) rather than started here eagerly.
+        # This gives the frontend time to sync YChat metadata — including
+        # the file browser cwd — over Y.js before the session reads it.
+        self._client_session_future = None
         self._acp_slash_commands = []
 
     async def before_agent_subprocess(self) -> None:
@@ -216,17 +218,30 @@ class BaseAcpPersona(BasePersona):
         """
         return await self.__class__._client_future
 
+    async def _ensure_client_session(self):
+        """Lazily create the ACP session on first access.
+
+        Session creation is deferred from __init__ so that YChat metadata
+        (e.g. the file browser cwd set by the frontend) has time to sync
+        over Y.js before the session's working directory is resolved.
+        """
+        if self._client_session_future is None:
+            self._client_session_future = self.event_loop.create_task(
+                self._init_client_session()
+            )
+        return await self._client_session_future
+
     async def get_session_response(self) -> NewSessionResponse | LoadSessionResponse:
         """
         Safely returns the ACP session response for this chat.
         """
-        return await self._client_session_future
+        return await self._ensure_client_session()
 
     async def get_session_id(self) -> str:
         """
         Safely returns the ACP session ID assigned to this chat.
         """
-        await self._client_session_future
+        await self._ensure_client_session()
         # session ID should always be stored in chat metadata after client
         # session was created or loaded.
         session_ids = self._get_existing_sessions()
