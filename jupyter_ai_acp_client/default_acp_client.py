@@ -171,7 +171,8 @@ class JaiAcpClient(Client):
         """
         conn = await self.get_connection()
         mcp_servers = await self._get_mcp_servers(persona)
-        session = await conn.new_session(cwd=persona.get_chat_dir(), mcp_servers=mcp_servers)
+        cwd = persona.parent.root_dir or persona.get_chat_dir()
+        session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
         self._personas_by_session[session.session_id] = persona
         return session
 
@@ -211,7 +212,8 @@ class JaiAcpClient(Client):
         """
         conn = await self.get_connection()
         mcp_servers = await self._get_mcp_servers(persona)
-        response = await conn.load_session(cwd=persona.get_chat_dir(), session_id=session_id, mcp_servers=mcp_servers)
+        cwd = persona.parent.root_dir or persona.get_chat_dir()
+        response = await conn.load_session(cwd=cwd, session_id=session_id, mcp_servers=mcp_servers)
         self._personas_by_session[session_id] = persona
         return response
 

@@ -239,3 +239,55 @@ class TestLoadSessionCleanup:
             await client.load_session(persona, "stale-session-id")
 
         assert "stale-session-id" not in client._loading_sessions
+
+
+class TestSessionCwd:
+    """Tests for session cwd resolution in create_session and _load_session_rpc."""
+
+    async def test_create_session_uses_root_dir(self):
+        """create_session uses persona.parent.root_dir as cwd."""
+        client, conn, _ = _make_client_and_persona()
+        client._get_mcp_servers = AsyncMock(return_value=[])
+
+        persona = MagicMock()
+        persona.parent.root_dir = "/home/user/notebooks"
+        persona.get_chat_dir.return_value = "/home/user/notebooks/.jupyter/chats"
+
+        conn.new_session = AsyncMock(return_value=MagicMock(session_id="s1"))
+
+        await client.create_session(persona)
+
+        conn.new_session.assert_called_once()
+        assert conn.new_session.call_args.kwargs["cwd"] == "/home/user/notebooks"
+
+    async def test_create_session_falls_back_to_chat_dir(self):
+        """create_session falls back to get_chat_dir() when root_dir is None."""
+        client, conn, _ = _make_client_and_persona()
+        client._get_mcp_servers = AsyncMock(return_value=[])
+
+        persona = MagicMock()
+        persona.parent.root_dir = None
+        persona.get_chat_dir.return_value = "/home/user/.jupyter/chats"
+
+        conn.new_session = AsyncMock(return_value=MagicMock(session_id="s1"))
+
+        await client.create_session(persona)
+
+        conn.new_session.assert_called_once()
+        assert conn.new_session.call_args.kwargs["cwd"] == "/home/user/.jupyter/chats"
+
+    async def test_load_session_uses_root_dir(self):
+        """_load_session_rpc uses persona.parent.root_dir as cwd."""
+        client, conn, _ = _make_client_and_persona()
+        client._get_mcp_servers = AsyncMock(return_value=[])
+
+        persona = MagicMock()
+        persona.parent.root_dir = "/home/user/notebooks"
+        persona.get_chat_dir.return_value = "/home/user/notebooks/.jupyter/chats"
+
+        conn.load_session = AsyncMock(return_value=MagicMock(session_id="s1"))
+
+        await client._load_session_rpc(persona, "s1")
+
+        conn.load_session.assert_called_once()
+        assert conn.load_session.call_args.kwargs["cwd"] == "/home/user/notebooks"
