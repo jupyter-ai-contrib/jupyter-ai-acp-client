@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any, Awaitable
 from time import time
@@ -163,6 +164,13 @@ class JaiAcpClient(Client):
 
         return mcp_servers
 
+    def _resolve_cwd(self, persona: BasePersona) -> str:
+        root_dir = persona.parent.root_dir
+        chat_cwd = persona.ychat.get_metadata().get("cwd")
+        if root_dir and chat_cwd and chat_cwd != "/":
+            return os.path.join(root_dir, chat_cwd)
+        return root_dir or persona.get_chat_dir()
+
     async def create_session(self, persona: BasePersona) -> NewSessionResponse:
         """
         Create an ACP agent session through this client scoped to a
@@ -171,7 +179,8 @@ class JaiAcpClient(Client):
         """
         conn = await self.get_connection()
         mcp_servers = await self._get_mcp_servers(persona)
-        session = await conn.new_session(cwd=persona.get_chat_dir(), mcp_servers=mcp_servers)
+        cwd = self._resolve_cwd(persona)
+        session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
         self._personas_by_session[session.session_id] = persona
         return session
 
@@ -211,7 +220,8 @@ class JaiAcpClient(Client):
         """
         conn = await self.get_connection()
         mcp_servers = await self._get_mcp_servers(persona)
-        response = await conn.load_session(cwd=persona.get_chat_dir(), session_id=session_id, mcp_servers=mcp_servers)
+        cwd = self._resolve_cwd(persona)
+        response = await conn.load_session(cwd=cwd, session_id=session_id, mcp_servers=mcp_servers)
         self._personas_by_session[session_id] = persona
         return response
 
