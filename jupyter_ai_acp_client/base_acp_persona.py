@@ -42,10 +42,11 @@ class BaseAcpPersona(BasePersona):
     Developers should always use `self.get_client()`.
     """
 
-    _client_session_future: Task[NewSessionResponse | LoadSessionResponse]
+    _client_session_future: Task[NewSessionResponse | LoadSessionResponse] | None
     """
     The future that yields the ACP client session info. Each instance of an ACP
     persona has a unique session ID, i.e. each chat reserves a unique session.
+    Set to `None` until initialization is triggered (lazy init).
 
     Developers should always call `self.get_session_response()` or `self.get_session_id()`.
     """
@@ -63,14 +64,33 @@ class BaseAcpPersona(BasePersona):
     context window limits.
     """
 
+    _initialized: bool
+    """Whether this persona instance has completed full initialization."""
+
     def __init__(self, *args, executable: list[str], **kwargs):
         super().__init__(*args, **kwargs)
 
         self._executable = executable
         self._pending_session_recovery_context: bool = False
+        self._client_session_future = None
+        self._initialized = False
+        self._acp_slash_commands = []
 
-        # Ensure each subclass has its own subprocess and client by checking if the
-        # class variable is defined directly on this class (not inherited)
+        # Eagerly initialize if this is the default persona or has an existing
+        # session from a previous chat open.
+        should_eager_init = (
+            self.parent.default_persona_id == self.id
+            or self.id in self._get_existing_sessions()
+        )
+        if should_eager_init:
+            self.event_loop.create_task(self.ensure_initialized())
+
+    def _start_auth_check(self) -> None:
+        """
+        Non-blocking: starts only the before_agent_subprocess future so that
+        auth-gated personas (Kiro, Gemini) begin polling. Does not start the
+        agent subprocess, client, or session.
+        """
         if (
             "_before_subprocess_future" not in self.__class__.__dict__
             or self.__class__._before_subprocess_future is None
@@ -78,6 +98,15 @@ class BaseAcpPersona(BasePersona):
             self.__class__._before_subprocess_future = self.event_loop.create_task(
                 self.before_agent_subprocess()
             )
+
+    async def ensure_initialized(self) -> None:
+        """
+        Idempotent method that starts the subprocess → client → session chain
+        and awaits completion. Safe to call multiple times.
+        """
+        if self._initialized:
+            return
+        self._start_auth_check()
         if (
             "_subprocess_future" not in self.__class__.__dict__
             or self.__class__._subprocess_future is None
@@ -92,11 +121,12 @@ class BaseAcpPersona(BasePersona):
             self.__class__._client_future = self.event_loop.create_task(
                 self._init_client()
             )
-
-        self._client_session_future = self.event_loop.create_task(
-            self._init_client_session()
-        )
-        self._acp_slash_commands = []
+        if self._client_session_future is None:
+            self._client_session_future = self.event_loop.create_task(
+                self._init_client_session()
+            )
+        await self._client_session_future
+        self._initialized = True
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -284,47 +314,64 @@ class BaseAcpPersona(BasePersona):
 
         This method may be overriden by child classes.
         """
+        # Kick off auth check (non-blocking) so auth polling starts
+        self._start_auth_check()
+
         # If not authenticated, return early
         if not await self.is_authed():
             await self.handle_no_auth(message)
             return
 
-        client = await self.get_client()
-        session_id = await self.get_session_id()
+        # Show writing indicator immediately, before init may block.
+        # NOTE: This reuses the "isWriting" awareness state to show "{agent} is
+        # typing..." during initialization. Ideally, the UI would show a
+        # distinct status (e.g. "starting up..."), but that requires a richer
+        # awareness protocol and changes in jupyter-chat.
+        self.awareness.set_local_state_field("isWriting", True)
 
-        prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
+        try:
+            # Block until fully initialized
+            await self.ensure_initialized()
 
-        if self._pending_session_recovery_context:
-            self._pending_session_recovery_context = False
-            history = self._build_history_context(exclude_id=message.id)
-            if history:
-                emit_event(
-                    self.event_logger,
-                    "acp_session_recovery",
-                    "success",
-                    {"persona_class": self.__class__.__name__},
-                )
-                prompt = history + "\n\nCurrent user message:\n" + prompt
+            client = await self.get_client()
+            session_id = await self.get_session_id()
 
-        # Resolve attachments from YChat by ID
-        attachments: list[dict] | None = None
-        if message.attachments:
-            all_attachments = self.ychat.get_attachments()
-            resolved = []
-            for aid in message.attachments:
-                raw = all_attachments.get(aid)
-                if raw is None:
-                    self.log.warning("Attachment %s not found in YChat", aid)
-                    continue
-                resolved.append(raw)
-            attachments = resolved or None
+            prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
 
-        await client.prompt_and_reply(
-            session_id=session_id,
-            prompt=prompt,
-            attachments=attachments,
-            root_dir=self.parent.root_dir,
-        )
+            if self._pending_session_recovery_context:
+                self._pending_session_recovery_context = False
+                history = self._build_history_context(exclude_id=message.id)
+                if history:
+                    emit_event(
+                        self.event_logger,
+                        "acp_session_recovery",
+                        "success",
+                        {"persona_class": self.__class__.__name__},
+                    )
+                    prompt = history + "\n\nCurrent user message:\n" + prompt
+
+            # Resolve attachments from YChat by ID
+            attachments: list[dict] | None = None
+            if message.attachments:
+                all_attachments = self.ychat.get_attachments()
+                resolved = []
+                for aid in message.attachments:
+                    raw = all_attachments.get(aid)
+                    if raw is None:
+                        self.log.warning("Attachment %s not found in YChat", aid)
+                        continue
+                    resolved.append(raw)
+                attachments = resolved or None
+
+            await client.prompt_and_reply(
+                session_id=session_id,
+                prompt=prompt,
+                attachments=attachments,
+                root_dir=self.parent.root_dir,
+            )
+        except Exception:
+            self.awareness.set_local_state_field("isWriting", False)
+            raise
 
     @property
     def acp_slash_commands(self) -> list[AvailableCommand]:
@@ -357,6 +404,14 @@ class BaseAcpPersona(BasePersona):
 
     async def _shutdown(self):
         self.log.info("[shutdown] Starting for '%s'.", self.__class__.__name__)
+
+        # Skip shutdown if this persona was never initialized
+        if self._client_session_future is None:
+            self.log.info(
+                "[shutdown] Persona '%s' was never initialized, skipping.",
+                self.__class__.__name__,
+            )
+            return
 
         # Cancel any pending startup futures to avoid hanging on auth-gated
         # personas (e.g. Kiro, Gemini) that never finished startup.
