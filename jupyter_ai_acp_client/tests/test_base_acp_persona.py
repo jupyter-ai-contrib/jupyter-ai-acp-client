@@ -93,6 +93,25 @@ def _make_session_init_persona(
 class TestProcessMessageAttachments:
     """Tests for how process_message resolves attachments and calls prompt_and_reply."""
 
+    async def test_empty_message(self):
+        """
+        Ensure that bare @-mentions messages include content.
+        Prevents #111.
+        """
+        client = _make_client()
+        persona = _make_persona()
+        persona.get_client.return_value = client
+        msg = _make_message("@bot")
+
+        await BaseAcpPersona.process_message(persona, msg)
+
+        client.prompt_and_reply.assert_called_once_with(
+            session_id="sess-1",
+            prompt="@bot",
+            attachments=None,
+            root_dir="/home/user/notebooks",
+        )
+
     async def test_no_attachments(self):
         """When message has no attachments, prompt_and_reply is called without them."""
         client = _make_client()
@@ -104,7 +123,7 @@ class TestProcessMessageAttachments:
 
         client.prompt_and_reply.assert_called_once_with(
             session_id="sess-1",
-            prompt="hello",
+            prompt="@bot hello",
             attachments=None,
             root_dir="/home/user/notebooks",
         )
@@ -252,7 +271,7 @@ class TestLoadSessionRecovery:
         await BaseAcpPersona.process_message(persona, msg2)
 
         second_call_prompt = client.prompt_and_reply.call_args_list[1].kwargs["prompt"]
-        assert second_call_prompt == "second"
+        assert second_call_prompt == "@bot second"
 
     def test_build_history_context_excludes_current_message(self):
         """The current message is not included in the injected history."""
