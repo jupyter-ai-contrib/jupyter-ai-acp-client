@@ -291,8 +291,7 @@ class BaseAcpPersona(BasePersona):
 
         client = await self.get_client()
         session_id = await self.get_session_id()
-
-        prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
+        prompt = message.body.strip()
 
         if self._pending_session_recovery_context:
             self._pending_session_recovery_context = False
