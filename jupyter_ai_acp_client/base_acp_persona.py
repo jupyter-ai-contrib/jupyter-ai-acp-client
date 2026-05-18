@@ -68,6 +68,7 @@ class BaseAcpPersona(BasePersona):
 
         self._executable = executable
         self._pending_session_recovery_context: bool = False
+        self._was_initially_unauthenticated: bool = False
 
         # Ensure each subclass has its own subprocess and client by checking if the
         # class variable is defined directly on this class (not inherited)
@@ -202,7 +203,49 @@ class BaseAcpPersona(BasePersona):
                 self._pending_session_recovery_context = True
                 return await self._create_session(client)
         else:
-            return await self._create_session(client)
+            response = await self._create_session(client)
+
+            # After creating a new session, if the user was initially
+            # unauthenticated, proactively ask if they want to continue with
+            # their original request. Only the first instance to reach here
+            # should send the resume prompt.
+            if self._was_initially_unauthenticated:
+                self._was_initially_unauthenticated = False
+                await self._resume_after_auth(client, response.session_id)
+
+            return response
+
+    async def _resume_after_auth(
+        self, client: JaiAcpClient, session_id: str
+    ) -> None:
+        """
+        After the user signs in, send a hidden prompt with chat history so the
+        agent can proactively offer to continue with the user's original request.
+        """
+        history = self._build_history_context(
+            preamble=(
+                "You just became available after the user signed in. "
+                "Here are the messages they sent while you were unavailable:"
+            )
+        )
+        if history:
+            prompt = (
+                history + "\n\n"
+                "If the user made a request, ask them if they'd like you to "
+                "proceed with it. Otherwise, greet them and let them know "
+                "you're ready to help."
+            )
+        else:
+            prompt = (
+                "You just became available after the user signed in. "
+                "Greet them and let them know you're ready to help."
+            )
+
+        await client.prompt_and_reply(
+            session_id=session_id,
+            prompt=prompt,
+            root_dir=self.parent.root_dir,
+        )
 
     async def get_agent_subprocess(self) -> asyncio.subprocess.Process:
         """
@@ -243,17 +286,30 @@ class BaseAcpPersona(BasePersona):
     async def handle_no_auth(self, message: Message) -> None:
         """
         Method called when the persona receives a message while the user is not
-        authenticated. This method should return a canned response to the chat
-        asking the user to log in. Subclasses may override this method to
-        customize the help message sent.
-        """
-        self.send_message("You are not authenticated. Please log in.")
+        authenticated. Sets the `_was_initially_unauthenticated` flag so the
+        agent can proactively resume the user's request after signing in.
 
-    def _build_history_context(self, exclude_id: str | None = None) -> str:
+        Subclasses should call `await super().handle_no_auth(message)` first,
+        then send a custom message asking the user to log in and perform any
+        additional setup (e.g. opening a login terminal).
         """
-        Builds a plain-text summary of recent chat history for context injection
-        after load-session recovery. Caps at _MAX_HISTORY_MESSAGES to avoid
-        exceeding agent context window limits.
+        self._was_initially_unauthenticated = True
+        self.log.warning(
+            "[%s] Received message while unauthenticated.", self.__class__.__name__
+        )
+
+    def _build_history_context(
+        self,
+        exclude_id: str | None = None,
+        preamble: str = (
+            "The previous ACP session could not be loaded. Use this recent chat "
+            "transcript as historical context for continuity."
+        ),
+    ) -> str:
+        """
+        Builds a plain-text summary of recent chat history for context injection.
+        Caps at _MAX_HISTORY_MESSAGES to avoid exceeding agent context window
+        limits.
         """
         all_messages = self.ychat.get_messages()
         recent = [
@@ -269,8 +325,7 @@ class BaseAcpPersona(BasePersona):
             name = user.display_name if user else msg.sender
             lines.append(f"{name}: {msg.body}")
         return (
-            "The previous ACP session could not be loaded. Use this recent chat "
-            "transcript as historical context for continuity.\n"
+            preamble + "\n"
             "<conversation_history>\n"
             + "\n".join(lines)
             + "\n</conversation_history>"

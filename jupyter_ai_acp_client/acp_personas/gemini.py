@@ -111,11 +111,6 @@ class GeminiAcpPersona(BaseAcpPersona):
         # Reaching this point := user is authenticated
         self.log.info("[Gemini] User is signed in.")
 
-        # If initially signed out, send a message letting the user know they are
-        # now signed in.
-        if failed_auth_check:
-            self.send_message("Thanks for signing in! I'm ready to help.")
-
     async def is_authed(self) -> bool:
         # Check if the before_subprocess task is done (subprocess has started)
         if not self._before_subprocess_future.done():
@@ -127,6 +122,8 @@ class GeminiAcpPersona(BaseAcpPersona):
         return await self._check_gemini_auth_fast()
 
     async def handle_no_auth(self, message: Message) -> None:
+        await super().handle_no_auth(message)
+
         # Return canned reply with setup instructions
         self.send_message("You're not configured to use Gemini yet. Please run the following command in a terminal to complete the setup:\n\n```\ngemini\n```")
 
