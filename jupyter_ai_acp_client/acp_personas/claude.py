@@ -64,6 +64,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
         # canned response and let the user choose for themselves.
         self.send_message(
             "You're not authenticated with Claude."
-            "\n\n- If you want to log in with a Claude.ai account, you may log in via `claude /login` in a new terminal."
+            "\n\n- If you want to log in with a Claude.ai account, run the following in a new terminal:"
+            "\n\n```\nclaude /login\n```"
             "\n\n- For cloud provider authentication and other options, see the [Claude.ai documentation](https://code.claude.com/docs/en/authentication)."
         )

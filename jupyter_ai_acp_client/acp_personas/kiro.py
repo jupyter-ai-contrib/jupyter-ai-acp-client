@@ -130,7 +130,7 @@ class KiroAcpPersona(BaseAcpPersona):
         command = "kiro-cli login --use-device-flow" if use_device_flow else "kiro-cli login"
         
         # Return canned reply with appropriate command
-        self.send_message(f"You're not signed in to Kiro yet. Please run `{command}` in a terminal to sign in.")
+        self.send_message(f"You're not signed in to Kiro yet. Please run the following command in a terminal to sign in:\n\n```\n{command}\n```")
 
         # Open the terminal to help the user login
         if not self._terminal_opened:
