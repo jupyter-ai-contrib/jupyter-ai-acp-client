@@ -68,6 +68,7 @@ def _make_session_init_persona(
     persona.id = "test-persona"
     persona.log = MagicMock()
     persona._pending_session_recovery_context = False
+    persona._was_initially_unauthenticated = False
 
     client = MagicMock()
     capabilities = MagicMock()

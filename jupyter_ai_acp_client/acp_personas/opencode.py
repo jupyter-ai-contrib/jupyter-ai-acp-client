@@ -146,6 +146,7 @@ class OpenCodeAcpPersona(BaseAcpPersona):
             await self.handle_no_auth(message)
 
     async def handle_no_auth(self, message: Message) -> None:
+        await super().handle_no_auth(message)
         self.send_message(
             "OpenCode isn't configured yet."
             "\n\n- Run `opencode auth` in a terminal to configure your LLM provider."

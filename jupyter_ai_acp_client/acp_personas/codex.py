@@ -49,6 +49,7 @@ class CodexAcpPersona(BaseAcpPersona):
             await self.handle_no_auth(message)
 
     async def handle_no_auth(self, message: Message) -> None:
+        await super().handle_no_auth(message)
         self.send_message(
             "Codex isn't configured yet."
             "\n\n- Set `OPENAI_API_KEY` (or `CODEX_API_KEY`) before starting JupyterLab."

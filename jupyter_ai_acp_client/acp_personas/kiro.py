@@ -111,11 +111,6 @@ class KiroAcpPersona(BaseAcpPersona):
         
         # Reaching this point := user is authenticated
         self.log.info("[Kiro] User is signed in.")
-
-        # If initially signed out, send a message letting the user know they are
-        # now signed in.
-        if failed_auth_check:
-            self.send_message("Thanks for signing in! I'm ready to help.")
     
     async def is_authed(self) -> bool:
         # In Kiro, the user remains signed in even if they sign out while the
@@ -125,6 +120,8 @@ class KiroAcpPersona(BaseAcpPersona):
         return self._before_subprocess_future.done()
     
     async def handle_no_auth(self, message: Message) -> None:
+        await super().handle_no_auth(message)
+
         # Determine which command to show
         use_device_flow = await self._should_use_device_flow()
         command = "kiro-cli login --use-device-flow" if use_device_flow else "kiro-cli login"
