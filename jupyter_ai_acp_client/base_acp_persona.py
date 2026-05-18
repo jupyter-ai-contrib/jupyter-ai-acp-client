@@ -205,10 +205,9 @@ class BaseAcpPersona(BasePersona):
         else:
             response = await self._create_session(client)
 
-            # After creating a new session, if the user was initially
-            # unauthenticated, proactively ask if they want to continue with
-            # their original request. Only the first instance to reach here
-            # should send the resume prompt.
+            # If the user was initially unauthenticated and the session was
+            # blocked on auth (e.g. Kiro, Gemini), proactively resume their
+            # original request now that the session is ready.
             if self._was_initially_unauthenticated:
                 self._was_initially_unauthenticated = False
                 await self._resume_after_auth(client, response.session_id)
@@ -342,6 +341,15 @@ class BaseAcpPersona(BasePersona):
         # If not authenticated, return early
         if not await self.is_authed():
             await self.handle_no_auth(message)
+            return
+
+        # If the user was previously unauthenticated, proactively resume their
+        # original request instead of processing this message normally.
+        if self._was_initially_unauthenticated:
+            self._was_initially_unauthenticated = False
+            client = await self.get_client()
+            session_id = await self.get_session_id()
+            await self._resume_after_auth(client, session_id)
             return
 
         client = await self.get_client()
