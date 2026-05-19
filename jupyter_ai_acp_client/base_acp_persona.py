@@ -220,7 +220,16 @@ class BaseAcpPersona(BasePersona):
         """
         After the user signs in, send a hidden prompt with chat history so the
         agent can proactively offer to continue with the user's original request.
+
+        For agents with pre-existing sessions (e.g. Codex, Copilot), the
+        subprocess may have been started before auth. If so, we restart it
+        first so it picks up the fresh auth state.
         """
+        if not self._needs_auth_before_subprocess():
+            await self._restart_agent()
+            client = await self.get_client()
+            session_id = await self.get_session_id()
+
         history = self._build_history_context(
             preamble=(
                 "You just became available after the user signed in. "
@@ -244,6 +253,45 @@ class BaseAcpPersona(BasePersona):
             session_id=session_id,
             prompt=prompt,
             root_dir=self.parent.root_dir,
+        )
+
+    def _needs_auth_before_subprocess(self) -> bool:
+        """
+        Returns True if this agent blocks subprocess startup until auth passes
+        (e.g. Kiro, Gemini). Returns False for agents with pre-existing sessions
+        that start regardless of auth (e.g. Claude, Codex, Copilot).
+
+        Subclasses that gate subprocess startup on auth should override this
+        to return True.
+        """
+        return False
+
+    async def _restart_agent(self) -> None:
+        """
+        Kills the current ACP agent subprocess and client, then starts fresh
+        ones. Used when the subprocess was started before authentication and
+        needs to pick up new credentials after the user signs in.
+        """
+        self.log.info("[%s] Restarting agent subprocess to pick up new credentials.", self.__class__.__name__)
+
+        # Kill old subprocess
+        old_process = await self.__class__._subprocess_future
+        try:
+            old_process.terminate()
+            await asyncio.wait_for(old_process.wait(), timeout=5.0)
+        except (ProcessLookupError, asyncio.TimeoutError):
+            old_process.kill()
+
+        # Reset class-level futures so new ones are created
+        self.__class__._subprocess_future = self.event_loop.create_task(
+            self._init_agent_subprocess()
+        )
+        self.__class__._client_future = self.event_loop.create_task(
+            self._init_client()
+        )
+        # Create a new session on the fresh subprocess
+        self._client_session_future = self.event_loop.create_task(
+            self._init_client_session()
         )
 
     async def get_agent_subprocess(self) -> asyncio.subprocess.Process:

@@ -119,6 +119,9 @@ class KiroAcpPersona(BaseAcpPersona):
         # authenticated.
         return self._before_subprocess_future.done()
     
+    def _needs_auth_before_subprocess(self) -> bool:
+        return True
+
     async def handle_no_auth(self, message: Message) -> None:
         await super().handle_no_auth(message)
 
