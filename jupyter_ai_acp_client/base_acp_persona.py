@@ -220,7 +220,15 @@ class BaseAcpPersona(BasePersona):
         """
         After the user signs in, send a hidden prompt with chat history so the
         agent can proactively offer to continue with the user's original request.
+
+        For agents with pre-existing sessions (e.g. Codex, Copilot), the
+        subprocess may have been started before auth. We restart it first.
         """
+        if not self._needs_auth_before_subprocess():
+            await self._restart_agent()
+            client = await self.get_client()
+            session_id = await self.get_session_id()
+
         history = self._build_history_context(
             preamble=(
                 "You just became available after the user signed in. "
@@ -244,6 +252,38 @@ class BaseAcpPersona(BasePersona):
             session_id=session_id,
             prompt=prompt,
             root_dir=self.parent.root_dir,
+        )
+
+    def _needs_auth_before_subprocess(self) -> bool:
+        """
+        Returns True if this agent blocks subprocess startup until auth passes.
+        Subclasses that gate subprocess startup on auth should override this.
+        """
+        return False
+
+    async def _restart_agent(self) -> None:
+        """
+        Kills the current ACP agent subprocess and client, then starts fresh
+        ones. Used when the subprocess was started before authentication and
+        needs to pick up new credentials after the user signs in.
+        """
+        self.log.info("[%s] Restarting agent subprocess to pick up new credentials.", self.__class__.__name__)
+
+        old_process = await self.__class__._subprocess_future
+        try:
+            old_process.terminate()
+            await asyncio.wait_for(old_process.wait(), timeout=5.0)
+        except (ProcessLookupError, asyncio.TimeoutError):
+            old_process.kill()
+
+        self.__class__._subprocess_future = self.event_loop.create_task(
+            self._init_agent_subprocess()
+        )
+        self.__class__._client_future = self.event_loop.create_task(
+            self._init_client()
+        )
+        self._client_session_future = self.event_loop.create_task(
+            self._init_client_session()
         )
 
     async def get_agent_subprocess(self) -> asyncio.subprocess.Process:
