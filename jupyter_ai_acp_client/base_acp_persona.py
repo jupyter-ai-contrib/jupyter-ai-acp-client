@@ -230,9 +230,10 @@ class BaseAcpPersona(BasePersona):
         if history:
             prompt = (
                 history + "\n\n"
-                "If the user made a request, ask them if they'd like you to "
-                "proceed with it. Otherwise, greet them and let them know "
-                "you're ready to help."
+                "If the user made a request, proceed with answering or "
+                "fulfilling it directly. Do not ask for confirmation — just "
+                "start helping. If no clear request was made, greet them and "
+                "let them know you're ready to help."
             )
         else:
             prompt = (
