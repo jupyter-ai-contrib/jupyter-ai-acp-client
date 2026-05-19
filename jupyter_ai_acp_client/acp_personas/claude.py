@@ -13,6 +13,25 @@ from jupyterlab_chat.models import Message
 from acp.exceptions import RequestError
 
 from ..base_acp_persona import BaseAcpPersona
+
+
+def _is_auth_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return any(
+        keyword in message
+        for keyword in (
+            "auth",
+            "login",
+            "not signed in",
+            "not authenticated",
+            "token",
+            "credential",
+            "forbidden",
+            "unauthorized",
+        )
+    )
+
+
 class ClaudeAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["claude-agent-acp"]
@@ -52,7 +71,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
         try:
             await super().process_message(message)
         except RequestError as e:
-            if "Authentication required" in str(e):
+            if _is_auth_error(e):
                 self.log.info("[Claude] User is not logged in.")
                 await self.handle_no_auth(message)
             else:
@@ -60,6 +79,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
 
 
     async def handle_no_auth(self, message: Message) -> None:
+        await super().handle_no_auth(message)
         # Claude supports several authentication options so we just send a
         # canned response and let the user choose for themselves.
         self.send_message(

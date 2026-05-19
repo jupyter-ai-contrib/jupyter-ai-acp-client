@@ -76,6 +76,7 @@ class CopilotAcpPersona(BaseAcpPersona):
             await self.handle_no_auth(message)
 
     async def handle_no_auth(self, message: Message) -> None:
+        await super().handle_no_auth(message)
         self.send_message(
             "GitHub Copilot isn't configured yet."
             "\n\n- Run the following in a terminal to sign in with GitHub:"

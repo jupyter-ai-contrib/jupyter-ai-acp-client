@@ -21,6 +21,7 @@ def _make_persona(attachments_map: dict | None = None):
     persona.get_session_id = AsyncMock(return_value="sess-1")
     persona.is_authed = AsyncMock(return_value=True)
     persona._pending_session_recovery_context = False
+    persona._was_initially_unauthenticated = False
 
     # as_user() is sync — must return a regular MagicMock
     user_mock = MagicMock()
@@ -68,6 +69,7 @@ def _make_session_init_persona(
     persona.id = "test-persona"
     persona.log = MagicMock()
     persona._pending_session_recovery_context = False
+    persona._was_initially_unauthenticated = False
 
     client = MagicMock()
     capabilities = MagicMock()
@@ -338,3 +340,108 @@ class TestLoadSessionRecovery:
         assert "message 0" not in result
 
 
+
+
+class TestResumeAfterAuth:
+    """Tests for proactive resume after user signs in.
+
+    There are two categories of ACP agents with respect to authentication:
+
+    **Agents with auth-gated sessions** (e.g. Kiro, Gemini): These agents cannot
+    start their ACP subprocess until the user is authenticated. The subprocess
+    startup is blocked in `before_agent_subprocess()`, which means
+    `_init_client_session()` does not complete until auth passes. Once the user
+    signs in, the session is created automatically and `_resume_after_auth()`
+    fires immediately — no new user message is needed to trigger it.
+
+    **Agents without auth-gated sessions** (e.g. Claude, Codex, Copilot): These
+    agents can start their subprocess and create a session without
+    authentication. Auth errors are only detected at prompt time — when
+    `process_message()` calls `prompt_and_reply()` and the agent raises a
+    RequestError. Because the session already exists, `_init_client_session()`
+    has long since completed. The resume logic must therefore run in
+    `process_message()`: on the first message after auth succeeds (i.e. the flag
+    is set and `is_authed()` returns True), `_resume_after_auth()` fires instead
+    of processing the message normally.
+    """
+
+    async def test_resume_for_agents_without_auth_gated_sessions(self):
+        """Agents without auth-gated sessions resume via process_message,
+        and the prompt includes the user's original message from chat history."""
+        client = _make_client()
+        persona = _make_persona()
+        persona._was_initially_unauthenticated = True
+        persona._MAX_HISTORY_MESSAGES = BaseAcpPersona._MAX_HISTORY_MESSAGES
+        persona.get_client.return_value = client
+        # Simulate chat history: the user's original request is already in ychat,
+        # along with the new message that triggered process_message()
+        persona.ychat.get_messages.return_value = [
+            _make_chat_message("msg-1", "@Kiro generate a fibonacci file", "user-1"),
+            _make_chat_message("msg-2", "You're not signed in.", "bot-1"),
+            _make_chat_message("msg-3", "@Kiro hello again", "user-1"),
+        ]
+        persona.ychat.get_users.return_value = {}
+        persona._build_history_context = (
+            lambda **kw: BaseAcpPersona._build_history_context(persona, **kw)
+        )
+        # Let _resume_after_auth run for real (not mocked)
+        persona._resume_after_auth = (
+            lambda client, session_id: BaseAcpPersona._resume_after_auth(
+                persona, client, session_id
+            )
+        )
+
+        # This message triggers process_message after auth passes
+        msg = _make_message("@bot hello again")
+        await BaseAcpPersona.process_message(persona, msg)
+
+        # prompt_and_reply was called with a prompt containing all chat history
+        # including the original request AND the latest triggering message
+        client.prompt_and_reply.assert_awaited_once()
+        prompt = client.prompt_and_reply.call_args.kwargs["prompt"]
+        assert "generate a fibonacci file" in prompt
+        assert "You're not signed in." in prompt
+        assert "hello again" in prompt
+        assert persona._was_initially_unauthenticated is False
+
+    async def test_resume_only_fires_once_for_agents_without_auth_gated_sessions(self):
+        """The resume prompt only fires on the first message after auth."""
+        client = _make_client()
+        persona = _make_persona()
+        persona._was_initially_unauthenticated = True
+        persona.get_client.return_value = client
+        persona._resume_after_auth = AsyncMock()
+
+        msg1 = _make_message("@bot first")
+        await BaseAcpPersona.process_message(persona, msg1)
+
+        msg2 = _make_message("@bot second")
+        await BaseAcpPersona.process_message(persona, msg2)
+
+        # Resume called once, then normal prompt_and_reply on second message
+        persona._resume_after_auth.assert_awaited_once()
+        client.prompt_and_reply.assert_awaited_once()
+
+    async def test_resume_for_agents_with_auth_gated_sessions(self):
+        """
+        Agents with auth-gated sessions automatically resume via
+        _init_client_session after session creation.
+        """
+        persona, client = _make_session_init_persona(existing_session_id=None)
+        persona._was_initially_unauthenticated = True
+        persona._resume_after_auth = AsyncMock()
+
+        await BaseAcpPersona._init_client_session(persona)
+
+        persona._resume_after_auth.assert_awaited_once_with(client, "new-session")
+        assert persona._was_initially_unauthenticated is False
+
+    async def test_no_resume_when_not_initially_unauthenticated(self):
+        """No resume prompt when the user was authenticated from the start."""
+        persona, client = _make_session_init_persona(existing_session_id=None)
+        persona._was_initially_unauthenticated = False
+        persona._resume_after_auth = AsyncMock()
+
+        await BaseAcpPersona._init_client_session(persona)
+
+        persona._resume_after_auth.assert_not_awaited()
