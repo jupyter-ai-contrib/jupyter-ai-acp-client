@@ -4,7 +4,7 @@ import signal
 import sys
 from asyncio import Task
 from asyncio.subprocess import Process
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar, Optional, TYPE_CHECKING, Union
 
 from acp import NewSessionResponse, LoadSessionResponse
 from acp.schema import AvailableCommand
@@ -13,6 +13,9 @@ from jupyterlab_chat.models import Message
 
 from .default_acp_client import JaiAcpClient
 from .telemetry import emit_event, auto_emit_event
+
+if TYPE_CHECKING:
+    from ._win32_subprocess import WindowsProcess
 
 
 class BaseAcpPersona(BasePersona):
@@ -125,7 +128,21 @@ class BaseAcpPersona(BasePersona):
         )
         if env is not None:
             kwargs["env"] = env
-        process = await asyncio.create_subprocess_exec(*self._executable, **kwargs)
+        try:
+            process = await asyncio.create_subprocess_exec(*self._executable, **kwargs)
+        except NotImplementedError:
+            # Windows with SelectorEventLoop (e.g. Tornado) doesn't support
+            # asyncio subprocess creation. Fall back to Popen-based wrapper.
+            from ._win32_subprocess import create_subprocess_windows
+
+            self.log.info(
+                "asyncio subprocess not supported on this event loop; "
+                "using Windows fallback for '%s'.",
+                self.__class__.__name__,
+            )
+            process = await create_subprocess_windows(
+                *self._executable, stderr=sys.stderr, env=env
+            )
         self.log.info("Spawned ACP agent subprocess for '%s'.", self.__class__.__name__)
         return process
 
@@ -204,7 +221,7 @@ class BaseAcpPersona(BasePersona):
         else:
             return await self._create_session(client)
 
-    async def get_agent_subprocess(self) -> asyncio.subprocess.Process:
+    async def get_agent_subprocess(self) -> Union[Process, "WindowsProcess"]:
         """
         Safely returns the ACP agent subprocess for this persona.
         """
@@ -420,21 +437,36 @@ class BaseAcpPersona(BasePersona):
         # Step 3: Stop the subprocess gracefully, falling back to SIGKILL
         try:
             subprocess = await self.get_agent_subprocess()
-            pgid = os.getpgid(subprocess.pid)
-            os.killpg(pgid, signal.SIGINT)
-            os.killpg(pgid, signal.SIGTERM)
-            try:
-                await asyncio.wait_for(subprocess.wait(), timeout=5.0)
-                self.log.info(
-                    "[shutdown] Step 3: subprocess terminated for '%s'.",
-                    self.__class__.__name__,
-                )
-            except asyncio.TimeoutError:
-                os.killpg(pgid, signal.SIGKILL)
-                self.log.info(
-                    "[shutdown] Step 3: subprocess killed after timeout for '%s'.",
-                    self.__class__.__name__,
-                )
+            if sys.platform == "win32":
+                subprocess.terminate()
+                try:
+                    await asyncio.wait_for(subprocess.wait(), timeout=5.0)
+                    self.log.info(
+                        "[shutdown] Step 3: subprocess terminated for '%s'.",
+                        self.__class__.__name__,
+                    )
+                except asyncio.TimeoutError:
+                    subprocess.kill()
+                    self.log.info(
+                        "[shutdown] Step 3: subprocess killed after timeout for '%s'.",
+                        self.__class__.__name__,
+                    )
+            else:
+                pgid = os.getpgid(subprocess.pid)
+                os.killpg(pgid, signal.SIGINT)
+                os.killpg(pgid, signal.SIGTERM)
+                try:
+                    await asyncio.wait_for(subprocess.wait(), timeout=5.0)
+                    self.log.info(
+                        "[shutdown] Step 3: subprocess terminated for '%s'.",
+                        self.__class__.__name__,
+                    )
+                except asyncio.TimeoutError:
+                    os.killpg(pgid, signal.SIGKILL)
+                    self.log.info(
+                        "[shutdown] Step 3: subprocess killed after timeout for '%s'.",
+                        self.__class__.__name__,
+                    )
         except asyncio.CancelledError:
             pass
         except (ProcessLookupError, PermissionError, OSError):

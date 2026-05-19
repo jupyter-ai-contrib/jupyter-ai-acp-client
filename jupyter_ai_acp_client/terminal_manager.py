@@ -5,6 +5,7 @@ import logging
 import os
 import shlex
 import signal as signal_module
+import sys
 import uuid
 from asyncio.subprocess import Process
 from dataclasses import dataclass, field
@@ -302,6 +303,24 @@ class TerminalManager:
                 stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
                 start_new_session=True,  # New process group for clean kill
             )
+        except NotImplementedError:
+            # Windows with SelectorEventLoop (e.g. Tornado) doesn't support
+            # asyncio subprocess creation. Fall back to subprocess.Popen.
+            import subprocess as _subprocess
+
+            popen_kwargs: dict[str, Any] = dict(
+                cwd=cwd,
+                env=env_dict,
+                stdin=_subprocess.DEVNULL,
+                stdout=_subprocess.PIPE,
+                stderr=_subprocess.STDOUT,
+                bufsize=0,
+                creationflags=getattr(_subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            popen_proc = _subprocess.Popen(cmd_args, **popen_kwargs)
+            from ._win32_subprocess import WindowsProcess
+
+            process = WindowsProcess(popen_proc, self._event_loop)
         except FileNotFoundError:
             raise RequestError.invalid_params(
                 {"command": f"command not found: {command}"}
@@ -395,7 +414,10 @@ class TerminalManager:
         if info.process.returncode is None:
             # Kill the entire process group so child processes are cleaned up.
             try:
-                os.killpg(os.getpgid(info.process.pid), signal_module.SIGKILL)
+                if sys.platform == "win32":
+                    info.process.kill()
+                else:
+                    os.killpg(os.getpgid(info.process.pid), signal_module.SIGKILL)
             except (ProcessLookupError, PermissionError, OSError):
                 # Process already exited or is inaccessible — fall back to
                 # direct kill which is a no-op if already dead.
@@ -418,7 +440,10 @@ class TerminalManager:
         # Kill process if still running
         if info.process.returncode is None:
             try:
-                os.killpg(os.getpgid(info.process.pid), signal_module.SIGKILL)
+                if sys.platform == "win32":
+                    info.process.kill()
+                else:
+                    os.killpg(os.getpgid(info.process.pid), signal_module.SIGKILL)
             except (ProcessLookupError, PermissionError, OSError):
                 info.process.kill()
             await info.process.wait()
