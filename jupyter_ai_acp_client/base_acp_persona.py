@@ -413,18 +413,42 @@ class BaseAcpPersona(BasePersona):
         self._acp_slash_commands = commands
 
     async def handle_uncaught_exception(self, exc: Exception) -> None:
-        """Show structured error info for ACP RequestError instead of raw tracebacks."""
+        """Show structured error info for ACP RequestError inside the standard dropdown."""
         if not isinstance(exc, RequestError):
             await super().handle_uncaught_exception(exc)
             return
 
-        parts = [f"**Error {exc.code}**: {html.escape(str(exc))}"]
-        if exc.data is not None:
-            parts.append(f"\n\n**Details**: `{html.escape(str(exc.data))}`")
+        import json
+        import traceback
 
-        self.send_message(
-            "An error occurred while processing your message.\n\n" + "".join(parts)
+        tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        error_msg = str(exc)
+        if len(error_msg) > 120:
+            error_msg = error_msg[:120] + "…"
+        summary = f"Error {exc.code}: {html.escape(error_msg)}"
+
+        # Build inner content
+        sections = [f"**Error code:** {exc.code}\n\n**Message:** {html.escape(str(exc))}"]
+
+        if exc.data is not None:
+            try:
+                data_str = json.dumps(exc.data, indent=2)
+            except (TypeError, ValueError):
+                data_str = str(exc.data)
+            sections.append(f"**Data:**\n\n```json\n{data_str}\n```")
+
+        sections.append(f"**Traceback:**\n\n```\n{tb}```")
+
+        inner = "\n\n".join(sections)
+
+        body = (
+            f"An error occurred while processing your message.\n\n"
+            f'<details class="jp-jai-error-details">\n'
+            f"<summary>Error details ({summary})</summary>\n\n"
+            f"{inner}\n"
+            f"</details>"
         )
+        self.send_message(body)
 
     async def shutdown(self):
         if getattr(self, "_shutting_down", False):

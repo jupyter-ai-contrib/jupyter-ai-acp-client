@@ -460,7 +460,8 @@ class TestHandleUncaughtException:
         await BaseAcpPersona.handle_uncaught_exception(persona, exc)
 
         body = persona.send_message.call_args[0][0]
-        assert "**Error -32603**" in body
+        assert "jp-jai-error-details" in body
+        assert "Error -32603" in body
         assert "Internal error" in body
 
     async def test_request_error_shows_data(self):
@@ -473,7 +474,7 @@ class TestHandleUncaughtException:
         await BaseAcpPersona.handle_uncaught_exception(persona, exc)
 
         body = persona.send_message.call_args[0][0]
-        assert "**Details**" in body
+        assert "```json" in body
         assert "/tmp/x" in body
 
     async def test_request_error_without_data(self):
@@ -486,8 +487,9 @@ class TestHandleUncaughtException:
         await BaseAcpPersona.handle_uncaught_exception(persona, exc)
 
         body = persona.send_message.call_args[0][0]
-        assert "**Error -32000**" in body
-        assert "**Details**" not in body
+        assert "Error -32000" in body
+        assert "```json" not in body
+        assert "**Traceback:**" in body
 
     async def test_non_request_error_delegates_to_super(self):
         """Non-RequestError exceptions should not use the structured format."""
@@ -495,19 +497,11 @@ class TestHandleUncaughtException:
         persona.send_message = MagicMock()
 
         exc = RuntimeError("something broke")
-        # super().handle_uncaught_exception() calls send_message with a
-        # <details> element containing the traceback. Since we can't easily
-        # call super() with a MagicMock, just verify that our method does NOT
-        # produce the structured "Error <code>" format for non-RequestError.
-        # We need a real-ish persona for super() to work, so just verify the
-        # isinstance check by confirming send_message is NOT called with our format.
         try:
             await BaseAcpPersona.handle_uncaught_exception(persona, exc)
         except TypeError:
-            # super() fails with MagicMock — that's expected and proves we
-            # attempted to delegate to the parent class.
+            # super() fails with MagicMock — proves we delegated
             pass
-        # Confirm our structured format was NOT used
         if persona.send_message.called:
             body = persona.send_message.call_args[0][0]
-            assert "**Error" not in body
+            assert "**Error code:**" not in body
