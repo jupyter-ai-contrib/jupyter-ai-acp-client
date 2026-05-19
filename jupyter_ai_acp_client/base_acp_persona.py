@@ -1,4 +1,5 @@
 import asyncio
+import html
 import os
 import signal
 import sys
@@ -7,6 +8,7 @@ from asyncio.subprocess import Process
 from typing import Any, ClassVar, Optional
 
 from acp import NewSessionResponse, LoadSessionResponse
+from acp.exceptions import RequestError
 from acp.schema import AvailableCommand
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
@@ -409,6 +411,20 @@ class BaseAcpPersona(BasePersona):
             self.parent.room_id,
         )
         self._acp_slash_commands = commands
+
+    async def handle_uncaught_exception(self, exc: Exception) -> None:
+        """Show structured error info for ACP RequestError instead of raw tracebacks."""
+        if not isinstance(exc, RequestError):
+            await super().handle_uncaught_exception(exc)
+            return
+
+        parts = [f"**Error {exc.code}**: {html.escape(str(exc))}"]
+        if exc.data is not None:
+            parts.append(f"\n\n**Details**: `{html.escape(str(exc.data))}`")
+
+        self.send_message(
+            "An error occurred while processing your message.\n\n" + "".join(parts)
+        )
 
     async def shutdown(self):
         if getattr(self, "_shutting_down", False):
