@@ -78,7 +78,8 @@ class CopilotAcpPersona(BaseAcpPersona):
     async def handle_no_auth(self, message: Message) -> None:
         self.send_message(
             "GitHub Copilot isn't configured yet."
-            "\n\n- Run `copilot login` in a terminal to sign in with GitHub."
+            "\n\n- Run the following in a terminal to sign in with GitHub:"
+            "\n\n```\ncopilot login\n```"
             "\n\n- On headless or non-interactive setups, set `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` before starting JupyterLab."
             "\n\n- Restart the JupyterLab server after changing Copilot CLI authentication or environment variables."
         )

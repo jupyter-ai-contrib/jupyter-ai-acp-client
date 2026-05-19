@@ -52,7 +52,9 @@ class CodexAcpPersona(BaseAcpPersona):
         self.send_message(
             "Codex isn't configured yet."
             "\n\n- Set `OPENAI_API_KEY` (or `CODEX_API_KEY`) before starting JupyterLab."
-            "\n\n- Or install the Codex CLI (`npm i -g @openai/codex`)"
-            " and run `codex login` to log in with your ChatGPT account."
+            "\n\n- Or install the Codex CLI:"
+            "\n\n```\nnpm i -g @openai/codex\n```"
+            "\n\nThen log in with your ChatGPT account:"
+            "\n\n```\ncodex login\n```"
             "\n\nRestart the JupyterLab server after either step."
         )

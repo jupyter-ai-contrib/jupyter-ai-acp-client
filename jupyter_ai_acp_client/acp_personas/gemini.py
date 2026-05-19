@@ -128,7 +128,7 @@ class GeminiAcpPersona(BaseAcpPersona):
 
     async def handle_no_auth(self, message: Message) -> None:
         # Return canned reply with setup instructions
-        self.send_message("You're not configured to use Gemini yet. Please run `gemini` in a terminal to complete the setup.")
+        self.send_message("You're not configured to use Gemini yet. Please run the following command in a terminal to complete the setup:\n\n```\ngemini\n```")
 
         # Open the terminal to help the user with setup
         if not self._terminal_opened:
