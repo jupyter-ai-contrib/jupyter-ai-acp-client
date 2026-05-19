@@ -121,6 +121,9 @@ class GeminiAcpPersona(BaseAcpPersona):
         # configured before processing each message. Use a fast file check.
         return await self._check_gemini_auth_fast()
 
+    def _needs_auth_before_subprocess(self) -> bool:
+        return True
+
     async def handle_no_auth(self, message: Message) -> None:
         await super().handle_no_auth(message)
 
