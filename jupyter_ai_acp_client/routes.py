@@ -118,6 +118,44 @@ class StopStreamingHandler(APIHandler):
         self.finish({"status": "stopped", "stopped": stopped})
 
 
+class RestartSubprocessHandler(APIHandler):
+    """
+    REST endpoint to restart an ACP agent subprocess.
+    POST /ai/acp/restart?chat_path=<path>
+    Restarts the subprocess for all ACP personas in the given chat room.
+    """
+
+    @property
+    def file_id_manager(self) -> BaseFileIdManager:
+        manager = self.serverapp.web_app.settings["file_id_manager"]
+        assert manager
+        return manager
+
+    @tornado.web.authenticated
+    async def post(self):
+        chat_path = self.get_argument('chat_path', None)
+        if not chat_path:
+            raise tornado.web.HTTPError(400, "chat_path is required as a URL query parameter")
+
+        file_id = self.file_id_manager.get_id(chat_path)
+        if not file_id:
+            raise tornado.web.HTTPError(404, f"Chat not found: {chat_path}")
+        room_id = f"text:chat:{file_id}"
+
+        persona_manager: PersonaManager | None = self.serverapp.web_app.settings.get("jupyter-ai", {}).get("persona-managers", {}).get(room_id, None)
+        if not persona_manager:
+            raise tornado.web.HTTPError(404, f"Chat not initialized: {chat_path}")
+
+        restarted = []
+        for p in persona_manager.personas.values():
+            if not isinstance(p, BaseAcpPersona):
+                continue
+            await p.restart()
+            restarted.append(p.as_user().mention_name)
+
+        self.finish({"status": "restarted", "restarted": restarted})
+
+
 class PermissionHandler(APIHandler):
     """
     REST endpoint for permission decisions. The frontend POSTs the user's

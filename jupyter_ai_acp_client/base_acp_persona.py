@@ -410,6 +410,71 @@ class BaseAcpPersona(BasePersona):
         )
         self._acp_slash_commands = commands
 
+    async def restart(self) -> None:
+        """
+        Restart the ACP agent subprocess shared by all instances of this persona
+        class. Kills the existing subprocess, resets class-level futures, and
+        re-initializes the subprocess, client, and sessions for all active
+        persona instances.
+        """
+        self.log.info("[restart] Starting for '%s'.", self.__class__.__name__)
+
+        # Collect all persona instances that share this subprocess before teardown
+        siblings: list[BaseAcpPersona] = []
+        try:
+            client = await self.get_client()
+            for persona in client._personas_by_session.values():
+                if isinstance(persona, BaseAcpPersona) and persona not in siblings:
+                    siblings.append(persona)
+        except (asyncio.CancelledError, Exception):
+            siblings = [self]
+
+        # Step 1: Close connection
+        try:
+            client = await self.get_client()
+            conn = await client.get_connection()
+            await conn.close()
+        except (asyncio.CancelledError, Exception):
+            self.log.warning("[restart] Failed to close connection.", exc_info=True)
+
+        # Step 2: Kill subprocess
+        try:
+            subprocess = await self.get_agent_subprocess()
+            pgid = os.getpgid(subprocess.pid)
+            os.killpg(pgid, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(subprocess.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                os.killpg(pgid, signal.SIGKILL)
+        except (asyncio.CancelledError, ProcessLookupError, PermissionError, OSError):
+            pass
+        except Exception:
+            self.log.warning("[restart] Failed to kill subprocess.", exc_info=True)
+
+        # Step 3: Reset class-level futures
+        self.__class__._before_subprocess_future = None
+        self.__class__._subprocess_future = None
+        self.__class__._client_future = None
+
+        # Step 4: Re-initialize subprocess and client (class-level, done once)
+        self.__class__._before_subprocess_future = self.event_loop.create_task(
+            self.before_agent_subprocess()
+        )
+        self.__class__._subprocess_future = self.event_loop.create_task(
+            self._init_agent_subprocess()
+        )
+        self.__class__._client_future = self.event_loop.create_task(
+            self._init_client()
+        )
+
+        # Step 5: Re-initialize sessions for all sibling persona instances
+        for persona in siblings:
+            persona._client_session_future = persona.event_loop.create_task(
+                persona._init_client_session()
+            )
+
+        self.log.info("[restart] Complete for '%s'.", self.__class__.__name__)
+
     async def shutdown(self):
         if getattr(self, "_shutting_down", False):
             return
