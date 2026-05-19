@@ -395,13 +395,11 @@ class TestResumeAfterAuth:
         msg = _make_message("@bot hello again")
         await BaseAcpPersona.process_message(persona, msg)
 
-        # prompt_and_reply was called with a prompt containing all chat history
-        # including the original request AND the latest triggering message
+        # prompt_and_reply was called with chat history + prescribed template
         client.prompt_and_reply.assert_awaited_once()
         prompt = client.prompt_and_reply.call_args.kwargs["prompt"]
         assert "generate a fibonacci file" in prompt
-        assert "You're not signed in." in prompt
-        assert "hello again" in prompt
+        assert "Would you like me to help you with this now?" in prompt
         assert persona._was_initially_unauthenticated is False
 
     async def test_resume_only_fires_once_for_agents_without_auth_gated_sessions(self):

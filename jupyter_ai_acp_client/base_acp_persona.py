@@ -218,8 +218,8 @@ class BaseAcpPersona(BasePersona):
         self, client: JaiAcpClient, session_id: str
     ) -> None:
         """
-        After the user signs in, send a hidden prompt with chat history so the
-        agent can proactively offer to continue with the user's original request.
+        After the user signs in, send a hidden prompt with chat history and a
+        prescribed message template for the agent to follow.
         """
         history = self._build_history_context(
             preamble=(
@@ -230,15 +230,15 @@ class BaseAcpPersona(BasePersona):
         if history:
             prompt = (
                 history + "\n\n"
-                "If the user made a request, proceed with answering or "
-                "fulfilling it directly. Do not ask for confirmation — just "
-                "start helping. If no clear request was made, greet them and "
-                "let them know you're ready to help."
+                "Display the following message to the user, filling in the "
+                "bracketed section with a brief summary of their request:\n\n"
+                "\"I'm logged in now. I see you asked about [brief summary of "
+                "their request]. Would you like me to help you with this now?\""
             )
         else:
             prompt = (
-                "You just became available after the user signed in. "
-                "Greet them and let them know you're ready to help."
+                "Display the following message to the user exactly as written:\n\n"
+                "\"I'm logged in now and ready to help. What can I do for you?\""
             )
 
         await client.prompt_and_reply(
