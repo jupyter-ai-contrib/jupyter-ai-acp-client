@@ -239,3 +239,127 @@ class TestLoadSessionCleanup:
             await client.load_session(persona, "stale-session-id")
 
         assert "stale-session-id" not in client._loading_sessions
+
+
+class TestSessionCwd:
+    """Tests for session cwd resolution in create_session and _load_session_rpc.
+
+    The session cwd determines the working directory for the ACP agent
+    subprocess (e.g. where Claude Code starts). It's resolved by
+    ``JaiAcpClient._resolve_cwd()`` using this priority:
+
+    1. ``chat_cwd`` from YChat metadata joined with ``root_dir`` — the file
+       browser path at the time the chat was opened. Set by the frontend in
+       jupyterlab-chat-extension (see jupyterlab/jupyter-chat#420).
+    2. ``root_dir`` alone — the Jupyter server's root directory, used when
+       the chat has no cwd metadata (e.g. older chats created before this
+       feature).
+    3. ``get_chat_dir()`` — the parent directory of the chat file, used as
+       a last resort when root_dir is also unavailable.
+
+    Each test mocks ``persona.ychat.get_metadata()`` to simulate different
+    chat metadata states, and ``persona.parent.root_dir`` to simulate the
+    server's root directory. The assertion checks what ``cwd`` kwarg was
+    passed to the ACP ``new_session`` or ``load_session`` RPC call.
+    """
+
+    async def test_create_session_uses_chat_metadata_cwd(self):
+        """When the chat has cwd metadata, join it with root_dir.
+
+        Simulates a user who opened the chat while browsing projects/my-repo
+        in the file browser. The session should start in that subdirectory.
+        """
+        client, conn, _ = _make_client_and_persona()
+        client._get_mcp_servers = AsyncMock(return_value=[])
+
+        persona = MagicMock()
+        persona.parent.root_dir = "/home/user/notebooks"
+        persona.ychat.get_metadata.return_value = {"cwd": "projects/my-repo"}
+        persona.get_chat_dir.return_value = "/home/user/notebooks/.jupyter/chats"
+
+        conn.new_session = AsyncMock(return_value=MagicMock(session_id="s1"))
+
+        await client.create_session(persona)
+
+        conn.new_session.assert_called_once()
+        assert conn.new_session.call_args.kwargs["cwd"] == "/home/user/notebooks/projects/my-repo"
+
+    async def test_create_session_uses_root_dir_when_no_chat_cwd(self):
+        """When the chat has no cwd metadata, fall back to root_dir.
+
+        This covers older chats created before the frontend started writing
+        cwd metadata, or chats created without a file browser (e.g. via API).
+        """
+        client, conn, _ = _make_client_and_persona()
+        client._get_mcp_servers = AsyncMock(return_value=[])
+
+        persona = MagicMock()
+        persona.parent.root_dir = "/home/user/notebooks"
+        persona.ychat.get_metadata.return_value = {}
+        persona.get_chat_dir.return_value = "/home/user/notebooks/.jupyter/chats"
+
+        conn.new_session = AsyncMock(return_value=MagicMock(session_id="s1"))
+
+        await client.create_session(persona)
+
+        conn.new_session.assert_called_once()
+        assert conn.new_session.call_args.kwargs["cwd"] == "/home/user/notebooks"
+
+    async def test_create_session_uses_root_dir_when_chat_cwd_is_root(self):
+        """When the chat cwd is "/", treat it as the file browser root.
+
+        The JupyterLab file browser reports "/" when at the top level.
+        os.path.join(root_dir, "/") would incorrectly return "/" (the
+        filesystem root), so we skip the join and use root_dir directly.
+        """
+        client, conn, _ = _make_client_and_persona()
+        client._get_mcp_servers = AsyncMock(return_value=[])
+
+        persona = MagicMock()
+        persona.parent.root_dir = "/home/user/notebooks"
+        persona.ychat.get_metadata.return_value = {"cwd": "/"}
+        persona.get_chat_dir.return_value = "/home/user/notebooks/.jupyter/chats"
+
+        conn.new_session = AsyncMock(return_value=MagicMock(session_id="s1"))
+
+        await client.create_session(persona)
+
+        conn.new_session.assert_called_once()
+        assert conn.new_session.call_args.kwargs["cwd"] == "/home/user/notebooks"
+
+    async def test_create_session_falls_back_to_chat_dir(self):
+        """When root_dir is unavailable, fall back to get_chat_dir().
+
+        This is the last resort — the directory containing the chat file.
+        """
+        client, conn, _ = _make_client_and_persona()
+        client._get_mcp_servers = AsyncMock(return_value=[])
+
+        persona = MagicMock()
+        persona.parent.root_dir = None
+        persona.ychat.get_metadata.return_value = {}
+        persona.get_chat_dir.return_value = "/home/user/.jupyter/chats"
+
+        conn.new_session = AsyncMock(return_value=MagicMock(session_id="s1"))
+
+        await client.create_session(persona)
+
+        conn.new_session.assert_called_once()
+        assert conn.new_session.call_args.kwargs["cwd"] == "/home/user/.jupyter/chats"
+
+    async def test_load_session_uses_chat_metadata_cwd(self):
+        """load_session resolves cwd the same way as create_session."""
+        client, conn, _ = _make_client_and_persona()
+        client._get_mcp_servers = AsyncMock(return_value=[])
+
+        persona = MagicMock()
+        persona.parent.root_dir = "/home/user/notebooks"
+        persona.ychat.get_metadata.return_value = {"cwd": "projects/my-repo"}
+        persona.get_chat_dir.return_value = "/home/user/notebooks/.jupyter/chats"
+
+        conn.load_session = AsyncMock(return_value=MagicMock(session_id="s1"))
+
+        await client._load_session_rpc(persona, "s1")
+
+        conn.load_session.assert_called_once()
+        assert conn.load_session.call_args.kwargs["cwd"] == "/home/user/notebooks/projects/my-repo"
