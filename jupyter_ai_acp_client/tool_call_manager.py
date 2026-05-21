@@ -175,7 +175,12 @@ class ToolCallManager:
             for tc_id in tc_ids
             if tc_id in session.tool_calls
         ]
-        msg.metadata = {"tool_calls": all_tcs}
+        metadata = dict(msg.metadata or {})
+        metadata["tool_calls"] = all_tcs
+        msg.metadata = metadata
+        # `mime_model` cannot be updated in place by the current jupyter-chat
+        # shared model, so keep tool call state in message metadata and render
+        # it through the chat preamble registry on the frontend.
         persona.ychat.update_message(msg, trigger_actions=[])
 
     def cancel_pending_tool_calls(

@@ -13,13 +13,15 @@ import {
   ChatCommand
 } from '@jupyter/chat';
 
-import { ToolCallsComponent } from './tool-calls';
-
-import { getAcpSlashCommands } from './request';
+import { getAcpSlashCommands, submitPermissionDecision } from './request';
 import { AcpStopButton } from './stop-button';
+import { createToolCallsPreamble } from './tool-call-preamble';
+import { getOpenableToolCallPath } from './tool-call-paths';
 
 const SLASH_COMMAND_PROVIDER_ID =
   '@jupyter-ai/acp-client:slash-command-provider';
+const TOOL_CALL_COMPONENTS_PLUGIN_ID =
+  '@jupyter-ai/acp-client:tool-call-components';
 
 /**
  * A command provider that provides completions for slash commands and handles
@@ -129,23 +131,45 @@ export const slashCommandPlugin: JupyterFrontEndPlugin<void> = {
   description: 'Adds support for slash commands in Jupyter AI.',
   autoStart: true,
   requires: [IChatCommandRegistry],
+  activate: (_app: JupyterFrontEnd, registry: IChatCommandRegistry) => {
+    registry.addProvider(new SlashCommandProvider());
+  }
+};
+
+/**
+ * Plugin that renders ACP tool calls using jupyter-chat-components through the
+ * chat preamble registry.
+ */
+export const toolCallComponentsPlugin: JupyterFrontEndPlugin<void> = {
+  id: TOOL_CALL_COMPONENTS_PLUGIN_ID,
+  description: 'Renders ACP grouped tool calls with jupyter-chat-components.',
+  autoStart: true,
   optional: [IMessagePreambleRegistry],
   activate: (
     app: JupyterFrontEnd,
-    registry: IChatCommandRegistry,
     preambleRegistry: IMessagePreambleRegistry | null
   ) => {
-    registry.addProvider(new SlashCommandProvider());
-    if (preambleRegistry) {
+    if (!preambleRegistry) {
       console.warn(
-        '[ACP] Registered ToolCallsComponent with preamble registry'
+        '[ACP] IMessagePreambleRegistry not available; tool call UI disabled.'
       );
-      preambleRegistry.addComponent(ToolCallsComponent);
-    } else {
-      console.warn(
-        '[ACP] IMessagePreambleRegistry not available — tool call UI disabled'
-      );
+      return;
     }
+
+    preambleRegistry.addComponent(
+      createToolCallsPreamble({
+        openToolCallPath: (path: string) => {
+          const openPath = getOpenableToolCallPath(path);
+
+          if (!openPath) {
+            return;
+          }
+
+          void app.commands.execute('docmanager:open', { path: openPath });
+        },
+        toolCallPermissionDecision: submitPermissionDecision
+      })
+    );
   }
 };
 
@@ -165,7 +189,7 @@ export const toolbarPlugin: JupyterFrontEndPlugin<IInputToolbarRegistryFactory> 
         create: () => {
           // Start with the default toolbar (Send, Attach, Cancel, SaveEdit)
           const registry = InputToolbarRegistry.defaultToolbarRegistry();
-          // Add our stop button (position 90 = just before Send at 100)
+          // Add our stop button near the beginning of the default toolbar.
           registry.addItem('stop', {
             element: AcpStopButton,
             position: 10
@@ -176,6 +200,6 @@ export const toolbarPlugin: JupyterFrontEndPlugin<IInputToolbarRegistryFactory> 
     }
   };
 
-export default [slashCommandPlugin, toolbarPlugin];
+export default [slashCommandPlugin, toolCallComponentsPlugin, toolbarPlugin];
 
 export { stopStreaming } from './request';
