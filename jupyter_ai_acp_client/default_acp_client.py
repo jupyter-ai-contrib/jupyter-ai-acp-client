@@ -55,6 +55,10 @@ from jupyter_ai_persona_manager import BasePersona, McpServerStdio
 from jupyterlab_chat.models import Message
 from jupyterlab_chat.utils import find_mentions
 from asyncio.subprocess import Process
+from typing import Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ._win32_subprocess import WindowsProcess
 
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
@@ -70,7 +74,7 @@ class JaiAcpClient(Client):
     exactly one ACP client (an instance of this class).
     """
 
-    agent_subprocess: Process
+    agent_subprocess: Union[Process, "WindowsProcess"]
     _connection_future: Awaitable[tuple[ClientSideConnection, InitializeResponse]]
     event_loop: asyncio.AbstractEventLoop
     _personas_by_session: dict[str, BasePersona]
@@ -87,13 +91,13 @@ class JaiAcpClient(Client):
     def __init__(
             self,
             *args,
-            agent_subprocess: Awaitable[Process],
+            agent_subprocess: Union[Process, "WindowsProcess"],
             event_loop: asyncio.AbstractEventLoop,
             **kwargs,
     ):
         """
         :param agent_subprocess: The ACP agent subprocess
-        (`asyncio.subprocess.Process`) assigned to this client.
+        (`asyncio.subprocess.Process` or `WindowsProcess`) assigned to this client.
 
         :param event_loop: The `asyncio` event loop running this process.
         """
