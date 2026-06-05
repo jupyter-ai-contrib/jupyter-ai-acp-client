@@ -90,7 +90,12 @@ class ToolCallManager:
         session.current_message_id = message_id
         session.all_message_ids.append(message_id)
         persona.log.info(f"Created message {message_id} for session {session_id}")
-        persona.awareness.set_local_state_field("isWriting", message_id)
+        # Guard against a race with non-streaming adapters (e.g. agy-acp): the
+        # session/update notification may be dispatched after prompt_and_reply's
+        # finally block has already cleared isWriting to False. Don't overwrite it.
+        current_state = persona.awareness.get_local_state() or {}
+        if current_state.get("isWriting") is not False:
+            persona.awareness.set_local_state_field("isWriting", message_id)
 
         return message_id
 
