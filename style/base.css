@@ -276,7 +276,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 16ch;
+  max-width: 22ch;
   display: inline-block;
   vertical-align: bottom;
 }

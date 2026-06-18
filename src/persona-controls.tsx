@@ -73,11 +73,13 @@ export function AcpPersonaControls(
 
   // An ACP persona's models load asynchronously while its agent session
   // initializes. If the active persona is an ACP persona but no models have
-  // arrived yet, retry a few times until they do.
+  // arrived yet, retry a few times until they do. Depend on primitive flags,
+  // not the personas/models array references (which change on every refresh),
+  // so unrelated refreshes do not restart the retry timer.
+  const activeIsAcp = personas.find(p => p.id === activeId)?.is_acp ?? false;
+  const hasModels = models.length > 0;
   useEffect(() => {
-    const activeIsAcp =
-      personas.find(p => p.id === activeId)?.is_acp ?? false;
-    if (!activeIsAcp || models.length > 0 || modelRetries >= 6) {
+    if (!activeIsAcp || hasModels || modelRetries >= 6) {
       return;
     }
     const timer = window.setTimeout(() => {
@@ -85,7 +87,7 @@ export function AcpPersonaControls(
       refresh();
     }, 1500);
     return () => window.clearTimeout(timer);
-  }, [personas, activeId, models, modelRetries, refresh]);
+  }, [activeIsAcp, hasModels, modelRetries, refresh]);
 
   // No personas in the chat: nothing to show.
   if (!personas.length) {
