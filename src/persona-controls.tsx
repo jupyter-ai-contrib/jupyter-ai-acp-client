@@ -42,6 +42,7 @@ export function AcpPersonaControls(
   const [currentModelId, setCurrentModelId] = useState<string | null>(null);
   const [personaAnchor, setPersonaAnchor] = useState<HTMLElement | null>(null);
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
+  const [modelRetries, setModelRetries] = useState(0);
 
   const chatPath = chatModel?.name ?? null;
 
@@ -64,6 +65,27 @@ export function AcpPersonaControls(
       chatModel?.messagesUpdated?.disconnect(refresh);
     };
   }, [chatModel, refresh]);
+
+  // Reset the model retry counter whenever the active persona changes.
+  useEffect(() => {
+    setModelRetries(0);
+  }, [activeId]);
+
+  // An ACP persona's models load asynchronously while its agent session
+  // initializes. If the active persona is an ACP persona but no models have
+  // arrived yet, retry a few times until they do.
+  useEffect(() => {
+    const activeIsAcp =
+      personas.find(p => p.id === activeId)?.is_acp ?? false;
+    if (!activeIsAcp || models.length > 0 || modelRetries >= 6) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setModelRetries(r => r + 1);
+      refresh();
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [personas, activeId, models, modelRetries, refresh]);
 
   // No personas in the chat: nothing to show.
   if (!personas.length) {
