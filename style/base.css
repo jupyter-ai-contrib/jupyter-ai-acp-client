@@ -238,7 +238,14 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   cursor: not-allowed;
 }
 
-/* Model selector (chat input toolbar) */
+/* Active-persona controls (chat input toolbar) */
+.jp-jupyter-ai-acp-client-modelSelector-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
 .jp-ThemedContainer .jp-jupyter-ai-acp-client-modelSelector {
   text-transform: none;
   font-family: var(--jp-ui-font-family);
@@ -256,32 +263,73 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   color: var(--jp-ui-font-color1);
 }
 
+/* persona name: the addressee, slightly emphasized */
 .jp-jupyter-ai-acp-client-modelSelector-persona {
   font-weight: 600;
   color: var(--jp-ui-font-color1);
+  white-space: nowrap;
 }
 
-.jp-jupyter-ai-acp-client-modelSelector-sep {
-  margin: 0 4px;
-  opacity: 0.5;
+/* model name: secondary, muted, truncated when long */
+.jp-jupyter-ai-acp-client-modelSelector-model {
+  color: var(--jp-ui-font-color2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16ch;
+  display: inline-block;
+  vertical-align: bottom;
+}
+
+.jp-ThemedContainer
+  .jp-jupyter-ai-acp-client-modelSelector-persona-btn
+  .MuiButton-startIcon {
+  margin-right: 6px;
+  margin-left: 0;
+}
+
+.jp-jupyter-ai-acp-client-modelSelector-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.jp-jupyter-ai-acp-client-modelSelector-avatar-spacer {
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.jp-jupyter-ai-acp-client-modelSelector-divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--jp-border-color2);
+  margin: 0 2px;
+  flex-shrink: 0;
 }
 
 .jp-jupyter-ai-acp-client-modelSelector-arrow {
   font-size: 18px !important;
   margin-left: -4px;
+  opacity: 0.7;
 }
 
-/* Model selector dropdown menu (rendered in a portal) */
+/* Dropdown menus (rendered in a portal) */
 .jp-jupyter-ai-acp-client-modelMenu-paper {
   max-height: 60vh;
+  min-width: 220px;
   background-color: var(--jp-layout-color1);
   border: 1px solid var(--jp-border-color2);
   box-shadow: var(--jp-elevation-z6);
 }
 
 .jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root {
-  padding-top: 4px;
-  padding-bottom: 4px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  gap: 8px;
 }
 
 .jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root:hover,

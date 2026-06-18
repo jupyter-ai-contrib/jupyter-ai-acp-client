@@ -117,6 +117,7 @@ export type ActivePersonaInfo = {
   name: string;
   mention_name: string;
   is_acp: boolean;
+  avatar_url: string | null;
 };
 
 export type ActivePersonaResponse = {

@@ -172,6 +172,7 @@ class ActivePersonaInfo(BaseModel):
     name: str
     mention_name: str
     is_acp: bool
+    avatar_url: str | None = None
 
 class ActivePersonaResponse(BaseModel):
     # Every persona in the chat, for the selector.
@@ -218,6 +219,7 @@ class ActivePersonaHandler(APIHandler):
                 name=p.name,
                 mention_name=p.as_user().mention_name,
                 is_acp=isinstance(p, BaseAcpPersona),
+                avatar_url=p.as_user().avatar_url,
             )
             for p in persona_manager.personas.values()
         ]

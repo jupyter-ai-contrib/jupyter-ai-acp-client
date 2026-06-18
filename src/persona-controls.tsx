@@ -16,10 +16,20 @@ const MENU_CLASS = 'jp-jupyter-ai-acp-client-modelMenu';
 const NO_ONE_LABEL = 'No one';
 
 /**
+ * A small round avatar image, or a same-sized spacer to keep labels aligned.
+ */
+function Avatar(props: { url: string | null | undefined }): JSX.Element {
+  if (!props.url) {
+    return <span className={`${SELECTOR_CLASS}-avatar-spacer`} />;
+  }
+  return <img className={`${SELECTOR_CLASS}-avatar`} src={props.url} alt="" />;
+}
+
+/**
  * The active-persona control for the chat input toolbar. Shows which persona
- * replies (or "No one"), lets the user switch it, and, when the active persona
- * is an ACP persona, shows its model selector next to it. Hides itself when the
- * chat has no personas.
+ * replies (with its avatar), lets the user switch it, and, when the active
+ * persona is an ACP persona, shows its model selector next to it. Hides itself
+ * when the chat has no personas.
  */
 export function AcpPersonaControls(
   props: InputToolbarRegistry.IToolbarItemProps
@@ -60,6 +70,7 @@ export function AcpPersonaControls(
     return null;
   }
 
+  const activeAvatar = personas.find(p => p.id === activeId)?.avatar_url ?? null;
   const personaLabel = activeName ?? NO_ONE_LABEL;
   const currentModelName =
     models.find(m => m.model_id === currentModelId)?.name ??
@@ -85,12 +96,13 @@ export function AcpPersonaControls(
   };
 
   return (
-    <>
+    <div className={`${SELECTOR_CLASS}-group`}>
       <Button
-        className={SELECTOR_CLASS}
+        className={`${SELECTOR_CLASS} ${SELECTOR_CLASS}-persona-btn`}
         size="small"
         variant="text"
         disableRipple
+        startIcon={<Avatar url={activeAvatar} />}
         endIcon={<ArrowDropDownIcon className={`${SELECTOR_CLASS}-arrow`} />}
         onClick={event => {
           setPersonaAnchor(event.currentTarget);
@@ -114,6 +126,7 @@ export function AcpPersonaControls(
             selected={p.id === activeId}
             onClick={() => handlePersona(p.id)}
           >
+            <Avatar url={p.avatar_url} />
             <ListItemText
               primary={p.name}
               classes={{ primary: `${MENU_CLASS}-name` }}
@@ -127,6 +140,7 @@ export function AcpPersonaControls(
           selected={activeId === null}
           onClick={() => handlePersona(null)}
         >
+          <Avatar url={null} />
           <ListItemText
             primary={NO_ONE_LABEL}
             classes={{ primary: `${MENU_CLASS}-name` }}
@@ -139,8 +153,9 @@ export function AcpPersonaControls(
 
       {models.length ? (
         <>
+          <span className={`${SELECTOR_CLASS}-divider`} />
           <Button
-            className={SELECTOR_CLASS}
+            className={`${SELECTOR_CLASS} ${SELECTOR_CLASS}-model-btn`}
             size="small"
             variant="text"
             disableRipple
@@ -186,6 +201,6 @@ export function AcpPersonaControls(
           </Menu>
         </>
       ) : null}
-    </>
+    </div>
   );
 }
