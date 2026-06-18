@@ -103,8 +103,8 @@ export async function getAcpModels(
   try {
     const path =
       personaMentionName === null
-        ? `/models?chat_path=${chatPath}`
-        : `/models/${personaMentionName}?chat_path=${chatPath}`;
+        ? `/models?chat_path=${encodeURIComponent(chatPath)}`
+        : `/models/${encodeURIComponent(personaMentionName)}?chat_path=${encodeURIComponent(chatPath)}`;
     return await requestAPI<AcpModelsResponse>(path);
   } catch (e) {
     console.warn('Error retrieving ACP models: ', e);
@@ -143,7 +143,7 @@ export async function getActivePersona(
   };
   try {
     return await requestAPI<ActivePersonaResponse>(
-      `/active_persona?chat_path=${chatPath}`
+      `/active_persona?chat_path=${encodeURIComponent(chatPath)}`
     );
   } catch (e) {
     console.warn('Error retrieving active persona: ', e);
@@ -159,7 +159,7 @@ export async function setActivePersona(
   personaId: string | null
 ): Promise<void> {
   try {
-    await requestAPI(`/active_persona?chat_path=${chatPath}`, {
+    await requestAPI(`/active_persona?chat_path=${encodeURIComponent(chatPath)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ persona_id: personaId })
@@ -180,8 +180,8 @@ export async function setAcpModel(
   try {
     const path =
       personaMentionName === null
-        ? `/models?chat_path=${chatPath}`
-        : `/models/${personaMentionName}?chat_path=${chatPath}`;
+        ? `/models?chat_path=${encodeURIComponent(chatPath)}`
+        : `/models/${encodeURIComponent(personaMentionName)}?chat_path=${encodeURIComponent(chatPath)}`;
     await requestAPI(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

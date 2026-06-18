@@ -200,7 +200,12 @@ class BaseAcpPersona(BasePersona):
         # Reapply a previously selected model so the choice survives session
         # recreation (e.g. a server restart that creates a fresh ACP session).
         stored_model_id = self._get_stored_model_choice()
-        if stored_model_id and stored_model_id != self._acp_current_model_id:
+        advertised_ids = {m.model_id for m in self._acp_models}
+        if (
+            stored_model_id
+            and stored_model_id != self._acp_current_model_id
+            and stored_model_id in advertised_ids
+        ):
             try:
                 await client.set_session_model(stored_model_id, response.session_id)
                 self._acp_current_model_id = stored_model_id
