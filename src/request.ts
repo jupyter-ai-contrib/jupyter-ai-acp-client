@@ -74,6 +74,124 @@ export async function getAcpSlashCommands(
 
   return response.commands;
 }
+export type AcpModel = {
+  model_id: string;
+  name: string;
+  description: string | null;
+};
+
+export type AcpModelsResponse = {
+  persona: string | null;
+  models: AcpModel[];
+  current_model_id: string | null;
+};
+
+/**
+ * Fetch the addressed ACP persona's available models and current model. The
+ * backend resolves the persona from the optional mention name, else the
+ * last-mentioned or default persona.
+ */
+export async function getAcpModels(
+  chatPath: string,
+  personaMentionName: string | null = null
+): Promise<AcpModelsResponse> {
+  const empty: AcpModelsResponse = {
+    persona: null,
+    models: [],
+    current_model_id: null
+  };
+  try {
+    const path =
+      personaMentionName === null
+        ? `/models?chat_path=${chatPath}`
+        : `/models/${personaMentionName}?chat_path=${chatPath}`;
+    return await requestAPI<AcpModelsResponse>(path);
+  } catch (e) {
+    console.warn('Error retrieving ACP models: ', e);
+    return empty;
+  }
+}
+
+export type ActivePersonaInfo = {
+  id: string;
+  name: string;
+  mention_name: string;
+  is_acp: boolean;
+};
+
+export type ActivePersonaResponse = {
+  personas: ActivePersonaInfo[];
+  active_id: string | null;
+  active_name: string | null;
+  models: AcpModel[];
+  current_model_id: string | null;
+};
+
+/**
+ * Fetch the chat's personas, which one is active, and the active persona's
+ * models, in one call.
+ */
+export async function getActivePersona(
+  chatPath: string
+): Promise<ActivePersonaResponse> {
+  const empty: ActivePersonaResponse = {
+    personas: [],
+    active_id: null,
+    active_name: null,
+    models: [],
+    current_model_id: null
+  };
+  try {
+    return await requestAPI<ActivePersonaResponse>(
+      `/active_persona?chat_path=${chatPath}`
+    );
+  } catch (e) {
+    console.warn('Error retrieving active persona: ', e);
+    return empty;
+  }
+}
+
+/**
+ * Set the active persona (who replies). A null personaId means "no one".
+ */
+export async function setActivePersona(
+  chatPath: string,
+  personaId: string | null
+): Promise<void> {
+  try {
+    await requestAPI(`/active_persona?chat_path=${chatPath}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona_id: personaId })
+    });
+  } catch (e) {
+    console.warn('Error setting active persona: ', e);
+  }
+}
+
+/**
+ * Set the model for the addressed ACP persona.
+ */
+export async function setAcpModel(
+  chatPath: string,
+  personaMentionName: string | null,
+  modelId: string
+): Promise<void> {
+  try {
+    const path =
+      personaMentionName === null
+        ? `/models?chat_path=${chatPath}`
+        : `/models/${personaMentionName}?chat_path=${chatPath}`;
+    await requestAPI(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_id: modelId })
+    });
+  } catch (e) {
+    console.warn('Error setting ACP model: ', e);
+  }
+}
+
 /**
  * Send the user's permission decision to the backend.
  */

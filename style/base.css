@@ -237,3 +237,73 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Model selector (chat input toolbar) */
+.jp-ThemedContainer .jp-jupyter-ai-acp-client-modelSelector {
+  text-transform: none;
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 400;
+  color: var(--jp-ui-font-color2);
+  min-width: 0;
+  padding: 1px 6px;
+  border-radius: var(--jp-border-radius);
+  line-height: 1.5;
+}
+
+.jp-ThemedContainer .jp-jupyter-ai-acp-client-modelSelector:hover {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-jupyter-ai-acp-client-modelSelector-persona {
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-jupyter-ai-acp-client-modelSelector-sep {
+  margin: 0 4px;
+  opacity: 0.5;
+}
+
+.jp-jupyter-ai-acp-client-modelSelector-arrow {
+  font-size: 18px !important;
+  margin-left: -4px;
+}
+
+/* Model selector dropdown menu (rendered in a portal) */
+.jp-jupyter-ai-acp-client-modelMenu-paper {
+  max-height: 60vh;
+  background-color: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color2);
+  box-shadow: var(--jp-elevation-z6);
+}
+
+.jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root:hover,
+.jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root.Mui-selected,
+.jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root.Mui-selected:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-jupyter-ai-acp-client-modelMenu-name {
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-jupyter-ai-acp-client-modelMenu-desc {
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-jupyter-ai-acp-client-modelMenu-check {
+  color: var(--jp-brand-color1);
+  margin-left: 12px;
+  flex-shrink: 0;
+}

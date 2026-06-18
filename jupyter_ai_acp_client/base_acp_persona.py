@@ -9,7 +9,7 @@ from typing import Any, ClassVar, Optional
 
 from acp import NewSessionResponse, LoadSessionResponse
 from acp.exceptions import RequestError
-from acp.schema import AvailableCommand
+from acp.schema import AvailableCommand, ModelInfo, SessionModelState
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
 
@@ -58,6 +58,17 @@ class BaseAcpPersona(BasePersona):
     This attribute is set automatically by the default ACP client.
     """
 
+    _acp_models: list[ModelInfo]
+    """
+    Models the ACP agent advertises for the current session. Set by the persona
+    when a session is created or loaded.
+    """
+
+    _acp_current_model_id: Optional[str]
+    """
+    The model ID currently selected for the ACP session, if any.
+    """
+
     _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
     """
     Maximum number of recent messages to include in the history context injected
@@ -100,6 +111,8 @@ class BaseAcpPersona(BasePersona):
             self._init_client_session()
         )
         self._acp_slash_commands = []
+        self._acp_models = []
+        self._acp_current_model_id = None
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -170,6 +183,7 @@ class BaseAcpPersona(BasePersona):
             self.__class__.__name__,
             existing_session_id,
         )
+        self._set_acp_model_state(response.models)
         return response
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
@@ -181,6 +195,22 @@ class BaseAcpPersona(BasePersona):
             response.session_id,
         )
         self._record_new_session(response.session_id)
+        self._set_acp_model_state(response.models)
+
+        # Reapply a previously selected model so the choice survives session
+        # recreation (e.g. a server restart that creates a fresh ACP session).
+        stored_model_id = self._get_stored_model_choice()
+        if stored_model_id and stored_model_id != self._acp_current_model_id:
+            try:
+                await client.set_session_model(stored_model_id, response.session_id)
+                self._acp_current_model_id = stored_model_id
+            except Exception:
+                self.log.warning(
+                    "Failed to reapply stored model '%s' for '%s'.",
+                    stored_model_id,
+                    self.__class__.__name__,
+                    exc_info=True,
+                )
         return response
 
     async def _init_client_session(self) -> NewSessionResponse | LoadSessionResponse:
@@ -412,6 +442,51 @@ class BaseAcpPersona(BasePersona):
             self.parent.room_id,
         )
         self._acp_slash_commands = commands
+
+    @property
+    def acp_models(self) -> list[ModelInfo]:
+        """
+        Models the ACP agent advertises for the current session. Empty when the
+        agent does not advertise any. Set by the persona on session create/load.
+        """
+        return self._acp_models
+
+    @property
+    def acp_current_model_id(self) -> Optional[str]:
+        """The model ID currently selected for the ACP session, if any."""
+        return self._acp_current_model_id
+
+    def _set_acp_model_state(self, models: Optional[SessionModelState]) -> None:
+        """
+        Store the model state from a `session/new` or `session/load` response.
+        `models` is `None` when the agent does not advertise models.
+        """
+        if models is None:
+            self._acp_models = []
+            self._acp_current_model_id = None
+            return
+        self._acp_models = models.available_models
+        self._acp_current_model_id = models.current_model_id
+
+    async def set_acp_model(self, model_id: str) -> None:
+        """
+        Select a model for this persona's ACP session and persist the choice
+        with the chat so it survives session recreation.
+        """
+        client = await self.get_client()
+        session_id = await self.get_session_id()
+        await client.set_session_model(model_id, session_id)
+        self._acp_current_model_id = model_id
+        self._record_model_choice(model_id)
+
+    def _record_model_choice(self, model_id: str) -> None:
+        """Persist the selected model in chat metadata, keyed by persona ID."""
+        existing = self.ychat.get_metadata().get("acp_models", {})
+        self.ychat.set_metadata("acp_models", {**existing, self.id: model_id})
+
+    def _get_stored_model_choice(self) -> Optional[str]:
+        """Return the model previously selected for this persona in this chat."""
+        return self.ychat.get_metadata().get("acp_models", {}).get(self.id)
 
     async def handle_uncaught_exception(self, exc: Exception) -> None:
         """Show structured error info for ACP RequestError inside the standard dropdown."""

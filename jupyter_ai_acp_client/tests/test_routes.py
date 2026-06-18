@@ -38,7 +38,7 @@ def _make_handler_and_serverapp(personas: dict):
 
     persona_manager = MagicMock()
     persona_manager.personas = personas
-    persona_manager.last_mentioned_persona = None
+    persona_manager.active_persona = None
     persona_manager.default_persona = None
 
     serverapp.web_app.settings = {

@@ -54,7 +54,7 @@ class AcpSlashCommandsHandler(APIHandler):
                 # raise HTTP error: persona not found
                 raise tornado.web.HTTPError(404, f"Persona not found: @{persona_mention_name}")
         else:
-            persona = persona_manager.last_mentioned_persona or persona_manager.default_persona
+            persona = persona_manager.active_persona
 
         # Return early with empty response if either:
         # 1. no default persona, or
@@ -78,6 +78,180 @@ class AcpSlashCommandsHandler(APIHandler):
 
         response = AcpSlashCommandsResponse(commands=commands)
         self.finish(response.model_dump())
+
+
+class AcpModel(BaseModel):
+    model_id: str
+    name: str
+    description: str | None = None
+
+class AcpModelsResponse(BaseModel):
+    # Display name of the persona the models belong to, or `None` when no ACP
+    # persona is addressed.
+    persona: str | None = None
+    models: list[AcpModel] = []
+    current_model_id: str | None = None
+
+class AcpModelsHandler(APIHandler):
+    """
+    REST endpoint for the per-persona model selector. GET returns the addressed
+    ACP persona's available models and current model; POST sets the model. The
+    persona is resolved the same way slash commands are: by mention name, else
+    the last-mentioned or default persona.
+    """
+
+    @property
+    def file_id_manager(self) -> BaseFileIdManager:
+        manager = self.serverapp.web_app.settings["file_id_manager"]
+        assert manager
+        return manager
+
+    def _resolve_persona(self, persona_mention_name: str):
+        """
+        Resolve the addressed persona from the `chat_path` query arg and an
+        optional mention name. Returns the persona, or `None` when the chat
+        holds no matching ACP persona. Raises `HTTPError` for bad input.
+        """
+        chat_path = self.get_argument('chat_path', None)
+        if not chat_path:
+            raise tornado.web.HTTPError(400, "chat_path is required as a URL query parameter")
+
+        file_id = self.file_id_manager.get_id(chat_path)
+        if not file_id:
+            raise tornado.web.HTTPError(404, f"Chat not found: {chat_path}")
+        room_id = f"text:chat:{file_id}"
+
+        persona_manager: PersonaManager | None = self.serverapp.web_app.settings.get("jupyter-ai", {}).get("persona-managers", {}).get(room_id, None)
+        if not persona_manager:
+            raise tornado.web.HTTPError(404, f"Chat not initialized: {chat_path}")
+
+        if persona_mention_name:
+            for p in persona_manager.personas.values():
+                if p.as_user().mention_name == persona_mention_name:
+                    return p if isinstance(p, BaseAcpPersona) else None
+            raise tornado.web.HTTPError(404, f"Persona not found: @{persona_mention_name}")
+
+        persona = persona_manager.active_persona
+        return persona if isinstance(persona, BaseAcpPersona) else None
+
+    @tornado.web.authenticated
+    def get(self, persona_mention_name: str = ""):
+        persona = self._resolve_persona(persona_mention_name)
+        if persona is None:
+            self.finish(AcpModelsResponse().model_dump())
+            return
+
+        models = [
+            AcpModel(model_id=m.model_id, name=m.name, description=m.description)
+            for m in persona.acp_models
+        ]
+        response = AcpModelsResponse(
+            persona=persona.name,
+            models=models,
+            current_model_id=persona.acp_current_model_id,
+        )
+        self.finish(response.model_dump())
+
+    @tornado.web.authenticated
+    async def post(self, persona_mention_name: str = ""):
+        body = self.get_json_body() or {}
+        model_id = body.get("model_id")
+        if not model_id:
+            raise tornado.web.HTTPError(400, "Missing required field: model_id")
+
+        persona = self._resolve_persona(persona_mention_name)
+        if persona is None:
+            raise tornado.web.HTTPError(404, "No ACP persona to set a model on")
+
+        await persona.set_acp_model(model_id)
+        self.finish({"status": "ok", "current_model_id": model_id})
+
+
+class ActivePersonaInfo(BaseModel):
+    id: str
+    name: str
+    mention_name: str
+    is_acp: bool
+
+class ActivePersonaResponse(BaseModel):
+    # Every persona in the chat, for the selector.
+    personas: list[ActivePersonaInfo] = []
+    # The active persona (who replies), or None for "no one".
+    active_id: str | None = None
+    active_name: str | None = None
+    # The active persona's models, when it is an ACP persona.
+    models: list[AcpModel] = []
+    current_model_id: str | None = None
+
+class ActivePersonaHandler(APIHandler):
+    """
+    REST endpoint for the active-persona selector. GET returns the chat's
+    personas, which one is active, and the active persona's models in one call.
+    POST sets the active persona (persona_id null means "no one replies").
+    """
+
+    @property
+    def file_id_manager(self) -> BaseFileIdManager:
+        manager = self.serverapp.web_app.settings["file_id_manager"]
+        assert manager
+        return manager
+
+    def _get_persona_manager(self) -> "PersonaManager":
+        chat_path = self.get_argument('chat_path', None)
+        if not chat_path:
+            raise tornado.web.HTTPError(400, "chat_path is required as a URL query parameter")
+        file_id = self.file_id_manager.get_id(chat_path)
+        if not file_id:
+            raise tornado.web.HTTPError(404, f"Chat not found: {chat_path}")
+        room_id = f"text:chat:{file_id}"
+        persona_manager = self.serverapp.web_app.settings.get("jupyter-ai", {}).get("persona-managers", {}).get(room_id, None)
+        if not persona_manager:
+            raise tornado.web.HTTPError(404, f"Chat not initialized: {chat_path}")
+        return persona_manager
+
+    @tornado.web.authenticated
+    def get(self, _unused: str = ""):
+        persona_manager = self._get_persona_manager()
+        personas = [
+            ActivePersonaInfo(
+                id=p.id,
+                name=p.name,
+                mention_name=p.as_user().mention_name,
+                is_acp=isinstance(p, BaseAcpPersona),
+            )
+            for p in persona_manager.personas.values()
+        ]
+        active = persona_manager.active_persona
+        models: list[AcpModel] = []
+        current_model_id = None
+        if isinstance(active, BaseAcpPersona):
+            models = [
+                AcpModel(model_id=m.model_id, name=m.name, description=m.description)
+                for m in active.acp_models
+            ]
+            current_model_id = active.acp_current_model_id
+        response = ActivePersonaResponse(
+            personas=personas,
+            active_id=active.id if active else None,
+            active_name=active.name if active else None,
+            models=models,
+            current_model_id=current_model_id,
+        )
+        self.finish(response.model_dump())
+
+    @tornado.web.authenticated
+    def post(self, _unused: str = ""):
+        persona_manager = self._get_persona_manager()
+        body = self.get_json_body() or {}
+        persona_id = body.get("persona_id")
+        if persona_id:
+            persona = persona_manager.personas.get(persona_id)
+            if not persona:
+                raise tornado.web.HTTPError(404, f"Persona not found: {persona_id}")
+            persona_manager.set_active_persona(persona)
+        else:
+            persona_manager.set_active_persona(None)
+        self.finish({"status": "ok", "active_id": persona_id or None})
 
 
 class StopStreamingHandler(APIHandler):
