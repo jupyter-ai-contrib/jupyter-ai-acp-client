@@ -160,11 +160,14 @@ export async function setActivePersona(
   personaId: string | null
 ): Promise<void> {
   try {
-    await requestAPI(`/active_persona?chat_path=${encodeURIComponent(chatPath)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona_id: personaId })
-    });
+    await requestAPI(
+      `/active_persona?chat_path=${encodeURIComponent(chatPath)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona_id: personaId })
+      }
+    );
   } catch (e) {
     console.warn('Error setting active persona: ', e);
   }

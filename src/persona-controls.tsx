@@ -94,7 +94,8 @@ export function AcpPersonaControls(
     return null;
   }
 
-  const activeAvatar = personas.find(p => p.id === activeId)?.avatar_url ?? null;
+  const activeAvatar =
+    personas.find(p => p.id === activeId)?.avatar_url ?? null;
   const personaLabel = activeName ?? NO_ONE_LABEL;
   const currentModelName =
     models.find(m => m.model_id === currentModelId)?.name ??
@@ -183,14 +184,18 @@ export function AcpPersonaControls(
             size="small"
             variant="text"
             disableRipple
-            endIcon={<ArrowDropDownIcon className={`${SELECTOR_CLASS}-arrow`} />}
+            endIcon={
+              <ArrowDropDownIcon className={`${SELECTOR_CLASS}-arrow`} />
+            }
             onClick={event => {
               setModelAnchor(event.currentTarget);
               refresh();
             }}
             title="Select the model for this persona"
           >
-            <span className={`${SELECTOR_CLASS}-model`}>{currentModelName}</span>
+            <span className={`${SELECTOR_CLASS}-model`}>
+              {currentModelName}
+            </span>
           </Button>
           <Menu
             anchorEl={modelAnchor}
