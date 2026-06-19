@@ -244,6 +244,10 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   align-items: center;
   gap: 2px;
   min-width: 0;
+
+  /* Push the controls to the left of the right-aligned input toolbar, so the
+     action buttons (stop, attach, send) stay on the right. */
+  margin-right: auto;
 }
 
 .jp-ThemedContainer .jp-jupyter-ai-acp-client-modelSelector {
