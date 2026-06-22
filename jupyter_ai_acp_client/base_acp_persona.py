@@ -592,6 +592,10 @@ class BaseAcpPersona(BasePersona):
         self._acp_modes = modes.available_modes
         self._acp_current_mode_id = modes.current_mode_id
 
+    def _set_acp_current_mode(self, mode_id: str) -> None:
+        """Record a mode the agent switched to itself (a `current_mode_update`)."""
+        self._acp_current_mode_id = mode_id
+
     async def set_acp_mode(self, mode_id: str) -> None:
         """
         Select a mode for this persona's ACP session and persist the choice

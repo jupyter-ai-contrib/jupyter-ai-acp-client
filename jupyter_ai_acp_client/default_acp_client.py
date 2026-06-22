@@ -423,7 +423,7 @@ class JaiAcpClient(Client):
         # controls reflect the current values.
         if isinstance(update, CurrentModeUpdate):
             if persona is not None:
-                persona._acp_current_mode_id = update.current_mode_id
+                persona._set_acp_current_mode(update.current_mode_id)
             return
 
         if isinstance(update, ConfigOptionUpdate):
