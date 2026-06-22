@@ -237,7 +237,18 @@ def build_controls(persona: BaseAcpPersona) -> list[AcpControl]:
             ],
         ))
 
+    # Some agents (e.g. Copilot) advertise model and mode both as dedicated
+    # fields and as config options. Skip the config-option duplicates when the
+    # dedicated control already covers them, but keep them for agents (e.g.
+    # OpenCode) that only expose model/mode through config options.
+    has_model = bool(persona.acp_models)
+    has_mode = bool(persona.acp_modes)
+
     for opt in persona.acp_config_options:
+        if opt.id == "model" and has_model:
+            continue
+        if opt.id == "mode" and has_mode:
+            continue
         if isinstance(opt, SessionConfigOptionSelect):
             controls.append(AcpControl(
                 id=opt.id,
