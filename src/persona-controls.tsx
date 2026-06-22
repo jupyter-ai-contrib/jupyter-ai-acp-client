@@ -275,6 +275,9 @@ function ControlsRow(props: {
     if (!row || !measure) {
       return;
     }
+    // The measurement copy exists only to size controls; keep its buttons out of
+    // the tab order and the accessibility tree.
+    measure.inert = true;
     const GAP = 2;
     let frame = 0;
     const compute = () => {
