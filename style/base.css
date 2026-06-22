@@ -274,8 +274,8 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   white-space: nowrap;
 }
 
-/* model name: secondary, muted, truncated when long */
-.jp-jupyter-ai-acp-client-modelSelector-model {
+/* control value (model, mode, effort, ...): secondary, muted, truncated */
+.jp-jupyter-ai-acp-client-modelSelector-control-value {
   color: var(--jp-ui-font-color2);
   white-space: nowrap;
   overflow: hidden;
@@ -283,6 +283,37 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   max-width: 22ch;
   display: inline-block;
   vertical-align: bottom;
+}
+
+/* boolean config option: a compact on/off pill */
+.jp-jupyter-ai-acp-client-modelSelector-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 11px;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  line-height: 1.5;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.jp-jupyter-ai-acp-client-modelSelector-toggle:hover {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-jupyter-ai-acp-client-modelSelector-toggle-on {
+  border-color: var(--jp-brand-color1);
+  color: var(--jp-brand-color1);
+}
+
+.jp-jupyter-ai-acp-client-modelSelector-toggle-state {
+  font-weight: 600;
 }
 
 /* stylelint-disable selector-class-pattern -- theming MUI's startIcon wrapper */

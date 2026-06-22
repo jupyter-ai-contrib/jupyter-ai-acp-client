@@ -74,43 +74,20 @@ export async function getAcpSlashCommands(
 
   return response.commands;
 }
-export type AcpModel = {
-  model_id: string;
-  name: string;
+export type AcpControlChoice = {
+  value: string;
+  label: string;
   description: string | null;
 };
 
-export type AcpModelsResponse = {
-  persona: string | null;
-  models: AcpModel[];
-  current_model_id: string | null;
+export type AcpControl = {
+  id: string;
+  source: 'model' | 'mode' | 'config_option';
+  kind: 'select' | 'boolean';
+  label: string;
+  current_value: string | boolean | null;
+  choices: AcpControlChoice[];
 };
-
-/**
- * Fetch the addressed ACP persona's available models and current model. The
- * backend resolves the persona from the optional mention name, else the
- * last-mentioned or default persona.
- */
-export async function getAcpModels(
-  chatPath: string,
-  personaMentionName: string | null = null
-): Promise<AcpModelsResponse> {
-  const empty: AcpModelsResponse = {
-    persona: null,
-    models: [],
-    current_model_id: null
-  };
-  try {
-    const path =
-      personaMentionName === null
-        ? `/models?chat_path=${encodeURIComponent(chatPath)}`
-        : `/models/${encodeURIComponent(personaMentionName)}?chat_path=${encodeURIComponent(chatPath)}`;
-    return await requestAPI<AcpModelsResponse>(path);
-  } catch (e) {
-    console.warn('Error retrieving ACP models: ', e);
-    return empty;
-  }
-}
 
 export type ActivePersonaInfo = {
   id: string;
@@ -124,13 +101,12 @@ export type ActivePersonaResponse = {
   personas: ActivePersonaInfo[];
   active_id: string | null;
   active_name: string | null;
-  models: AcpModel[];
-  current_model_id: string | null;
+  controls: AcpControl[];
 };
 
 /**
  * Fetch the chat's personas, which one is active, and the active persona's
- * models, in one call.
+ * session controls, in one call.
  */
 export async function getActivePersona(
   chatPath: string
@@ -139,8 +115,7 @@ export async function getActivePersona(
     personas: [],
     active_id: null,
     active_name: null,
-    models: [],
-    current_model_id: null
+    controls: []
   };
   try {
     return await requestAPI<ActivePersonaResponse>(
@@ -174,25 +149,23 @@ export async function setActivePersona(
 }
 
 /**
- * Set the model for the addressed ACP persona.
+ * Set a session control (model, mode, or config option) on the chat's active
+ * ACP persona.
  */
-export async function setAcpModel(
+export async function setAcpControl(
   chatPath: string,
-  personaMentionName: string | null,
-  modelId: string
+  controlId: string,
+  source: string,
+  value: string | boolean
 ): Promise<void> {
   try {
-    const path =
-      personaMentionName === null
-        ? `/models?chat_path=${encodeURIComponent(chatPath)}`
-        : `/models/${encodeURIComponent(personaMentionName)}?chat_path=${encodeURIComponent(chatPath)}`;
-    await requestAPI(path, {
+    await requestAPI(`/control?chat_path=${encodeURIComponent(chatPath)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model_id: modelId })
+      body: JSON.stringify({ control_id: controlId, source, value })
     });
   } catch (e) {
-    console.warn('Error setting ACP model: ', e);
+    console.warn('Error setting ACP control: ', e);
   }
 }
 
