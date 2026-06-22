@@ -16,10 +16,12 @@ const MENU_CLASS = 'jp-jupyter-ai-acp-client-modelMenu';
 const NO_ONE_LABEL = 'No one';
 
 // Personas register a moment after a chat opens, and an ACP persona's controls
-// load asynchronously while its agent session initializes. Poll a bounded
-// number of times so the controls appear without needing a first message.
+// load asynchronously while its agent session initializes, which can take 20s+
+// for a slow agent (e.g. Kiro recovering a session). Poll a bounded number of
+// times so the controls appear without needing a first message. The budget
+// resets when the active persona changes, so each persona gets a full window.
 const POLL_MS = 1500;
-const MAX_POLLS = 10;
+const MAX_POLLS = 24;
 
 /**
  * A small round avatar image, or a same-sized spacer to keep labels aligned.
