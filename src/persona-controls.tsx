@@ -1,7 +1,21 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Button, ListItemText, Menu, MenuItem } from '@mui/material';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState
+} from 'react';
+import {
+  Button,
+  ListItemText,
+  ListSubheader,
+  Menu,
+  MenuItem,
+  Switch
+} from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CheckIcon from '@mui/icons-material/Check';
+import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import { InputToolbarRegistry } from '@jupyter/chat';
 import {
   AcpControl,
@@ -23,6 +37,16 @@ const NO_ONE_LABEL = 'No one';
 const POLL_MS = 1500;
 const MAX_POLLS = 24;
 
+// Width (px) reserved for the overflow ("...") button when not every control
+// fits inline.
+const OVERFLOW_BTN_WIDTH = 36;
+
+const menuAnchorProps = {
+  anchorOrigin: { vertical: 'top', horizontal: 'left' } as const,
+  transformOrigin: { vertical: 'bottom', horizontal: 'left' } as const,
+  PaperProps: { className: `${MENU_CLASS}-paper` }
+};
+
 /**
  * A small round avatar image, or a same-sized spacer to keep labels aligned.
  */
@@ -34,6 +58,19 @@ function Avatar(props: { url: string | null | undefined }): JSX.Element {
 }
 
 /**
+ * Resolve the label to show on a select control's button.
+ */
+function currentSelectLabel(control: AcpControl): string {
+  return (
+    control.choices.find(c => c.value === control.current_value)?.label ??
+    (typeof control.current_value === 'string'
+      ? control.current_value
+      : null) ??
+    control.label
+  );
+}
+
+/**
  * A dropdown for a select control (model, mode, or a select config option).
  */
 function SelectControl(props: {
@@ -42,12 +79,6 @@ function SelectControl(props: {
 }): JSX.Element {
   const { control, onSelect } = props;
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const currentLabel =
-    control.choices.find(c => c.value === control.current_value)?.label ??
-    (typeof control.current_value === 'string'
-      ? control.current_value
-      : null) ??
-    control.label;
   return (
     <>
       <Button
@@ -60,16 +91,14 @@ function SelectControl(props: {
         title={control.label}
       >
         <span className={`${SELECTOR_CLASS}-control-value`}>
-          {currentLabel}
+          {currentSelectLabel(control)}
         </span>
       </Button>
       <Menu
         anchorEl={anchor}
         open={!!anchor}
         onClose={() => setAnchor(null)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'left' }}
-        transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-        PaperProps={{ className: `${MENU_CLASS}-paper` }}
+        {...menuAnchorProps}
       >
         {control.choices.map(choice => (
           <MenuItem
@@ -120,6 +149,215 @@ function BooleanControl(props: {
         {on ? 'On' : 'Off'}
       </span>
     </button>
+  );
+}
+
+/**
+ * Render one control inline as a dropdown (select) or toggle (boolean).
+ */
+function ControlItem(props: {
+  control: AcpControl;
+  onChange: (control: AcpControl, value: string | boolean) => void;
+}): JSX.Element {
+  const { control, onChange } = props;
+  return control.kind === 'boolean' ? (
+    <BooleanControl control={control} onToggle={v => onChange(control, v)} />
+  ) : (
+    <SelectControl control={control} onSelect={v => onChange(control, v)} />
+  );
+}
+
+/**
+ * The overflow popover: controls that did not fit inline, shown as a single flat
+ * menu (no nested dropdowns). Each select renders as a `ListSubheader` group
+ * label followed by its choices; each boolean is one toggle `MenuItem`. Using
+ * MUI primitives keeps the menu keyboard-navigable: `ListSubheader` has no
+ * tabindex so arrow-key focus skips it, and the toggle row is a focusable
+ * `MenuItem`.
+ */
+function OverflowMenu(props: {
+  controls: AcpControl[];
+  anchor: HTMLElement | null;
+  onClose: () => void;
+  onChange: (control: AcpControl, value: string | boolean) => void;
+}): JSX.Element {
+  const { controls, anchor, onClose, onChange } = props;
+  return (
+    <Menu
+      anchorEl={anchor}
+      open={!!anchor}
+      onClose={onClose}
+      {...menuAnchorProps}
+    >
+      {controls.flatMap(control => {
+        if (control.kind === 'boolean') {
+          const on = control.current_value === true;
+          return [
+            <MenuItem
+              key={control.id}
+              className={`${SELECTOR_CLASS}-overflow-toggle`}
+              onClick={() => onChange(control, !on)}
+            >
+              <ListItemText
+                primary={control.label}
+                classes={{ primary: `${MENU_CLASS}-name` }}
+              />
+              <Switch
+                edge="end"
+                size="small"
+                checked={on}
+                tabIndex={-1}
+                disableRipple
+              />
+            </MenuItem>
+          ];
+        }
+        return [
+          <ListSubheader
+            key={`${control.id}-label`}
+            disableSticky
+            className={`${SELECTOR_CLASS}-overflow-subheader`}
+          >
+            {control.label}
+          </ListSubheader>,
+          ...control.choices.map(choice => (
+            <MenuItem
+              key={`${control.id}-${choice.value}`}
+              selected={choice.value === control.current_value}
+              onClick={() => {
+                onClose();
+                onChange(control, choice.value);
+              }}
+            >
+              <ListItemText
+                primary={choice.label}
+                secondary={choice.description ?? null}
+                classes={{
+                  primary: `${MENU_CLASS}-name`,
+                  secondary: `${MENU_CLASS}-desc`
+                }}
+              />
+              {choice.value === control.current_value ? (
+                <CheckIcon className={`${MENU_CLASS}-check`} fontSize="small" />
+              ) : null}
+            </MenuItem>
+          ))
+        ];
+      })}
+    </Menu>
+  );
+}
+
+/**
+ * A single-row, width-aware list of controls. Shows as many as fit inline and
+ * collapses the rest into an overflow ("...") popover, recomputing on resize.
+ */
+function ControlsRow(props: {
+  controls: AcpControl[];
+  onChange: (control: AcpControl, value: string | boolean) => void;
+}): JSX.Element {
+  const { controls, onChange } = props;
+  const rowRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const overflowBtnRef = useRef<HTMLButtonElement>(null);
+  const [visibleCount, setVisibleCount] = useState(controls.length);
+  const [overflowAnchor, setOverflowAnchor] = useState<HTMLElement | null>(
+    null
+  );
+
+  // Re-measure only when a control's displayed width could change (its set of
+  // ids or current values), not on every refresh that returns a new array.
+  const controlsKey = controls.map(c => `${c.id}:${c.current_value}`).join('|');
+
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const measure = measureRef.current;
+    if (!row || !measure) {
+      return;
+    }
+    const GAP = 2;
+    let frame = 0;
+    const compute = () => {
+      const avail = row.clientWidth;
+      const widths = (Array.from(measure.children) as HTMLElement[]).map(
+        el => el.offsetWidth
+      );
+      const total = widths.reduce((a, w, i) => a + w + (i ? GAP : 0), 0);
+      if (total <= avail) {
+        setVisibleCount(widths.length);
+        return;
+      }
+      const reserve =
+        (overflowBtnRef.current?.offsetWidth ?? OVERFLOW_BTN_WIDTH) + GAP;
+      let used = 0;
+      let count = 0;
+      for (let i = 0; i < widths.length; i++) {
+        const w = widths[i] + (i ? GAP : 0);
+        if (used + w + reserve <= avail) {
+          used += w;
+          count++;
+        } else {
+          break;
+        }
+      }
+      setVisibleCount(count);
+    };
+    // A ResizeObserver can fire many times during a drag; coalesce the work to
+    // one measurement per animation frame.
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(compute);
+    };
+    compute();
+    const observer = new ResizeObserver(schedule);
+    observer.observe(row);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [controlsKey]);
+
+  const visible = controls.slice(0, visibleCount);
+  const overflow = controls.slice(visibleCount);
+
+  return (
+    <div className={`${SELECTOR_CLASS}-controls`} ref={rowRef}>
+      {/* Hidden full-width copy used only to measure each control's width. */}
+      <div
+        className={`${SELECTOR_CLASS}-controls-measure`}
+        ref={measureRef}
+        aria-hidden="true"
+      >
+        {controls.map(control => (
+          <ControlItem key={control.id} control={control} onChange={onChange} />
+        ))}
+      </div>
+
+      {visible.map(control => (
+        <ControlItem key={control.id} control={control} onChange={onChange} />
+      ))}
+
+      {overflow.length ? (
+        <>
+          <button
+            type="button"
+            ref={overflowBtnRef}
+            className={`${SELECTOR_CLASS} ${SELECTOR_CLASS}-overflow-btn`}
+            onClick={event => setOverflowAnchor(event.currentTarget)}
+            title="More controls"
+            aria-label="More controls"
+          >
+            <MoreHorizIcon fontSize="small" />
+          </button>
+          <OverflowMenu
+            controls={overflow}
+            anchor={overflowAnchor}
+            onClose={() => setOverflowAnchor(null)}
+            onChange={onChange}
+          />
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -240,9 +478,7 @@ export function AcpPersonaControls(
         anchorEl={personaAnchor}
         open={!!personaAnchor}
         onClose={() => setPersonaAnchor(null)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'left' }}
-        transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-        PaperProps={{ className: `${MENU_CLASS}-paper` }}
+        {...menuAnchorProps}
       >
         {personas.map(p => (
           <MenuItem
@@ -278,21 +514,7 @@ export function AcpPersonaControls(
       {controls.length ? (
         <>
           <span className={`${SELECTOR_CLASS}-divider`} />
-          {controls.map(control =>
-            control.kind === 'boolean' ? (
-              <BooleanControl
-                key={control.id}
-                control={control}
-                onToggle={value => handleControl(control, value)}
-              />
-            ) : (
-              <SelectControl
-                key={control.id}
-                control={control}
-                onSelect={value => handleControl(control, value)}
-              />
-            )
-          )}
+          <ControlsRow controls={controls} onChange={handleControl} />
         </>
       ) : null}
     </div>

@@ -245,9 +245,66 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   gap: 2px;
   min-width: 0;
 
-  /* Push the controls to the left of the right-aligned input toolbar, so the
-     action buttons (stop, attach, send) stay on the right. */
-  margin-right: auto;
+  /* Claim the available width of the right-aligned input toolbar: the controls
+     sit on the left, the action buttons (stop, attach, send) stay on the right,
+     and the controls row gets a real width to measure for overflow. */
+  flex: 1 1 auto;
+}
+
+/* The persona button is pinned: it never shrinks, and a long name ellipsizes
+   rather than blowing out the row. */
+.jp-jupyter-ai-acp-client-modelSelector-persona-btn {
+  flex-shrink: 0;
+}
+
+/* Width-aware controls row: fills the space after the persona and clips, so the
+   overflow logic (not label-shrinking) decides what shows. */
+.jp-jupyter-ai-acp-client-modelSelector-controls {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Hidden full-width copy, measured to decide how many controls fit inline. */
+.jp-jupyter-ai-acp-client-modelSelector-controls-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  gap: 2px;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Inline controls keep their natural width; tight widths overflow into the
+   menu rather than truncating labels to unreadable stubs. */
+.jp-jupyter-ai-acp-client-modelSelector-control-btn,
+.jp-jupyter-ai-acp-client-modelSelector-toggle,
+.jp-jupyter-ai-acp-client-modelSelector-overflow-btn {
+  flex-shrink: 0;
+}
+
+/* Overflow ("...") trigger: a borderless icon button matching the controls. */
+.jp-jupyter-ai-acp-client-modelSelector-overflow-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 2px;
+  border: none;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  border-radius: var(--jp-border-radius);
+  cursor: pointer;
+}
+
+.jp-jupyter-ai-acp-client-modelSelector-overflow-btn:hover {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
 }
 
 .jp-ThemedContainer .jp-jupyter-ai-acp-client-modelSelector {
@@ -267,11 +324,16 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   color: var(--jp-ui-font-color1);
 }
 
-/* persona name: the addressee, slightly emphasized */
+/* persona name: the addressee, slightly emphasized, truncated when very long */
 .jp-jupyter-ai-acp-client-modelSelector-persona {
   font-weight: 600;
   color: var(--jp-ui-font-color1);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16ch;
+  display: inline-block;
+  vertical-align: bottom;
 }
 
 /* control value (model, mode, effort, ...): secondary, muted, truncated */
@@ -393,4 +455,17 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   color: var(--jp-brand-color1);
   margin-left: 12px;
   flex-shrink: 0;
+}
+
+/* overflow popover: group label above an overflowed select's choices. Scoped
+   under the menu paper to win over MUI's ListSubheader defaults. */
+.jp-jupyter-ai-acp-client-modelMenu-paper
+  .jp-jupyter-ai-acp-client-modelSelector-overflow-subheader {
+  padding: 4px 16px 0;
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  line-height: 1.8;
+  color: var(--jp-ui-font-color2);
+  background-color: var(--jp-layout-color1);
 }
