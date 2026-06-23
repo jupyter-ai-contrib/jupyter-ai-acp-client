@@ -336,17 +336,17 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   vertical-align: bottom;
 }
 
-/* control value (model, mode, effort, ...): secondary, muted. A shared min/max
-   keeps the controls a tidy band: short values (e.g. "Plan") get an even
-   footprint, long values (e.g. "Default (recommended)") cap with an ellipsis
-   and reveal in full on hover and in the dropdown. Real model names such as
-   "Claude Sonnet 4.6" still fit. */
+/* control value (model, mode, effort, ...): secondary, muted, sized to its
+   content so the dropdown arrow sits snug right after the text on every control.
+   A max-width caps long values (e.g. "Default (recommended)") with an ellipsis,
+   revealed in full on hover and in the dropdown; real names like "Claude Sonnet
+   4.6" still fit. No min-width: padding short values would push the arrow away
+   and make the gap uneven across controls. */
 .jp-jupyter-ai-acp-client-modelSelector-control-value {
   color: var(--jp-ui-font-color2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 6ch;
   max-width: 15ch;
   display: inline-block;
   vertical-align: bottom;
@@ -422,8 +422,12 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   opacity: 0.7;
 }
 
-/* Dropdown menus (rendered in a portal) */
-.jp-jupyter-ai-acp-client-modelMenu-paper {
+/* Dropdown menus (rendered in a portal to document.body, outside
+   .jp-ThemedContainer). The class is self-doubled to raise specificity to 0,2,0
+   so the width bounds win over MUI's own emotion class on the same Paper (0,1,0,
+   injected later); otherwise the menu sprawls to MUI's `calc(100% - 32px)` and
+   long descriptions never truncate. */
+.jp-jupyter-ai-acp-client-modelMenu-paper.jp-jupyter-ai-acp-client-modelMenu-paper {
   max-height: 60vh;
   min-width: 200px;
   max-width: 340px;
