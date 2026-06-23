@@ -498,10 +498,10 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   padding: 6px 12px 2px;
   border-top: 1px solid var(--jp-border-color2);
   font-family: var(--jp-ui-font-family);
-  font-size: var(--jp-ui-font-size0);
+  font-size: var(--jp-ui-font-size2);
   font-weight: 600;
   line-height: 1.5;
-  color: var(--jp-ui-font-color2);
+  color: var(--jp-ui-font-color1);
   background-color: var(--jp-layout-color1);
 }
 
