@@ -440,6 +440,11 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 .jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root {
   padding: 6px 12px;
   gap: 8px;
+
+  /* Base the menu item on the JAI UI font size (overrides MUI's 1rem) so the
+     name matches the rest of JAI and the em-based secondary size nests from it
+     and renders properly smaller. */
+  font-size: var(--jp-ui-font-size1);
 }
 
 .jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root:hover,
@@ -449,7 +454,13 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 }
 /* stylelint-enable selector-class-pattern */
 
-.jp-jupyter-ai-acp-client-modelMenu-name {
+/* Menu item name/description. Scoped under the menu paper so the font sizes win
+   over MUI's own Typography classes on the same element (otherwise MUI renders
+   the name at its 1rem/16px default, larger than the rest of JAI). This keeps
+   the menu on the JAI base UI font size: name at --jp-ui-font-size1, like the
+   inline controls and native menus; description one step smaller. */
+.jp-jupyter-ai-acp-client-modelMenu-paper
+  .jp-jupyter-ai-acp-client-modelMenu-name {
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size1);
   color: var(--jp-ui-font-color1);
@@ -460,7 +471,8 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 
 /* description: secondary, one line. Long descriptions truncate (full text on
    hover) so the menu stays clean and never sprawls. */
-.jp-jupyter-ai-acp-client-modelMenu-desc {
+.jp-jupyter-ai-acp-client-modelMenu-paper
+  .jp-jupyter-ai-acp-client-modelMenu-desc {
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size0);
   color: var(--jp-ui-font-color2);
