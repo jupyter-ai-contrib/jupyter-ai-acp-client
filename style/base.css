@@ -239,7 +239,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 }
 
 /* Active-persona controls (chat input toolbar) */
-.jp-jupyter-ai-acp-client-modelSelector-group {
+.jp-jupyter-ai-acp-client-personaControls-group {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -252,13 +252,13 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 }
 
 /* The persona button is pinned: it never shrinks, and a long name ellipsizes. */
-.jp-jupyter-ai-acp-client-modelSelector-persona-btn {
+.jp-jupyter-ai-acp-client-personaControls-persona-btn {
   flex-shrink: 0;
 }
 
 /* Width-aware controls row: fills the space after the persona and clips, so the
    overflow logic decides what shows. */
-.jp-jupyter-ai-acp-client-modelSelector-controls {
+.jp-jupyter-ai-acp-client-personaControls-controls {
   position: relative;
   display: flex;
   align-items: center;
@@ -269,7 +269,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 }
 
 /* Hidden full-width copy, measured to decide how many controls fit inline. */
-.jp-jupyter-ai-acp-client-modelSelector-controls-measure {
+.jp-jupyter-ai-acp-client-personaControls-controls-measure {
   position: absolute;
   top: 0;
   left: 0;
@@ -282,14 +282,14 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 
 /* Inline controls keep their natural width; tight widths overflow into the
    menu. */
-.jp-jupyter-ai-acp-client-modelSelector-control-btn,
-.jp-jupyter-ai-acp-client-modelSelector-toggle,
-.jp-jupyter-ai-acp-client-modelSelector-overflow-btn {
+.jp-jupyter-ai-acp-client-personaControls-control-btn,
+.jp-jupyter-ai-acp-client-personaControls-toggle,
+.jp-jupyter-ai-acp-client-personaControls-overflow-btn {
   flex-shrink: 0;
 }
 
 /* Overflow ("...") trigger: a borderless icon button matching the controls. */
-.jp-jupyter-ai-acp-client-modelSelector-overflow-btn {
+.jp-jupyter-ai-acp-client-personaControls-overflow-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -301,12 +301,12 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   cursor: pointer;
 }
 
-.jp-jupyter-ai-acp-client-modelSelector-overflow-btn:hover {
+.jp-jupyter-ai-acp-client-personaControls-overflow-btn:hover {
   background-color: var(--jp-layout-color2);
   color: var(--jp-ui-font-color1);
 }
 
-.jp-ThemedContainer .jp-jupyter-ai-acp-client-modelSelector {
+.jp-ThemedContainer .jp-jupyter-ai-acp-client-personaControls {
   text-transform: none;
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size1);
@@ -318,13 +318,13 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   line-height: 1.5;
 }
 
-.jp-ThemedContainer .jp-jupyter-ai-acp-client-modelSelector:hover {
+.jp-ThemedContainer .jp-jupyter-ai-acp-client-personaControls:hover {
   background-color: var(--jp-layout-color2);
   color: var(--jp-ui-font-color1);
 }
 
 /* persona name: the addressee, slightly emphasized, truncated when very long */
-.jp-jupyter-ai-acp-client-modelSelector-persona {
+.jp-jupyter-ai-acp-client-personaControls-persona {
   font-weight: 600;
   color: var(--jp-ui-font-color1);
   white-space: nowrap;
@@ -338,7 +338,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 /* control value (model, mode, effort): secondary, muted, sized to its content so
    the dropdown arrow sits snug after the text. A max-width caps long values with
    an ellipsis, shown in full on hover and in the dropdown. */
-.jp-jupyter-ai-acp-client-modelSelector-control-value {
+.jp-jupyter-ai-acp-client-personaControls-control-value {
   color: var(--jp-ui-font-color2);
   white-space: nowrap;
   overflow: hidden;
@@ -349,7 +349,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 }
 
 /* boolean config option: a compact on/off control. */
-.jp-jupyter-ai-acp-client-modelSelector-toggle {
+.jp-jupyter-ai-acp-client-personaControls-toggle {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -365,30 +365,30 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   white-space: nowrap;
 }
 
-.jp-jupyter-ai-acp-client-modelSelector-toggle:hover {
+.jp-jupyter-ai-acp-client-personaControls-toggle:hover {
   background-color: var(--jp-layout-color2);
   color: var(--jp-ui-font-color1);
 }
 
-.jp-jupyter-ai-acp-client-modelSelector-toggle-on {
+.jp-jupyter-ai-acp-client-personaControls-toggle-on {
   border-color: var(--jp-brand-color1);
   color: var(--jp-brand-color1);
 }
 
-.jp-jupyter-ai-acp-client-modelSelector-toggle-state {
+.jp-jupyter-ai-acp-client-personaControls-toggle-state {
   font-weight: 600;
 }
 
 /* stylelint-disable selector-class-pattern -- theming MUI's startIcon wrapper */
 .jp-ThemedContainer
-  .jp-jupyter-ai-acp-client-modelSelector-persona-btn
+  .jp-jupyter-ai-acp-client-personaControls-persona-btn
   .MuiButton-startIcon {
   margin-right: 6px;
   margin-left: 0;
 }
 /* stylelint-enable selector-class-pattern */
 
-.jp-jupyter-ai-acp-client-modelSelector-avatar {
+.jp-jupyter-ai-acp-client-personaControls-avatar {
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -396,14 +396,14 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   display: block;
 }
 
-.jp-jupyter-ai-acp-client-modelSelector-avatar-spacer {
+.jp-jupyter-ai-acp-client-personaControls-avatar-spacer {
   width: 18px;
   height: 18px;
   display: inline-block;
   flex-shrink: 0;
 }
 
-.jp-jupyter-ai-acp-client-modelSelector-divider {
+.jp-jupyter-ai-acp-client-personaControls-divider {
   width: 1px;
   height: 16px;
   background-color: var(--jp-border-color2);
@@ -411,7 +411,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   flex-shrink: 0;
 }
 
-.jp-jupyter-ai-acp-client-modelSelector-arrow {
+.jp-jupyter-ai-acp-client-personaControls-arrow {
   font-size: 18px !important;
   margin-left: -4px;
   opacity: 0.7;
@@ -419,7 +419,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 
 /* Dropdown menus, rendered in a portal. The class is doubled to raise its
    specificity so these width bounds win over MUI's own styles on the Paper. */
-.jp-jupyter-ai-acp-client-modelMenu-paper.jp-jupyter-ai-acp-client-modelMenu-paper {
+.jp-jupyter-ai-acp-client-controlMenu-paper.jp-jupyter-ai-acp-client-controlMenu-paper {
   max-height: 60vh;
   min-width: 200px;
   max-width: 340px;
@@ -429,7 +429,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 }
 
 /* stylelint-disable selector-class-pattern -- theming MUI's menu item classes */
-.jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root {
+.jp-jupyter-ai-acp-client-controlMenu-paper .MuiMenuItem-root {
   padding: 6px 12px;
   gap: 8px;
 
@@ -438,17 +438,18 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   font-size: var(--jp-ui-font-size1);
 }
 
-.jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root:hover,
-.jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root.Mui-selected,
-.jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root.Mui-selected:hover {
+.jp-jupyter-ai-acp-client-controlMenu-paper .MuiMenuItem-root:hover,
+.jp-jupyter-ai-acp-client-controlMenu-paper .MuiMenuItem-root.Mui-selected,
+.jp-jupyter-ai-acp-client-controlMenu-paper
+  .MuiMenuItem-root.Mui-selected:hover {
   background-color: var(--jp-layout-color2);
 }
 /* stylelint-enable selector-class-pattern */
 
 /* Menu name and description, scoped under the paper so the font sizes win over
    MUI's Typography. Name at the JAI base size, description one step smaller. */
-.jp-jupyter-ai-acp-client-modelMenu-paper
-  .jp-jupyter-ai-acp-client-modelMenu-name {
+.jp-jupyter-ai-acp-client-controlMenu-paper
+  .jp-jupyter-ai-acp-client-controlMenu-name {
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size1);
   color: var(--jp-ui-font-color1);
@@ -459,8 +460,8 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 
 /* description: secondary, one line. Long descriptions truncate (full text on
    hover) so the menu stays clean and never sprawls. */
-.jp-jupyter-ai-acp-client-modelMenu-paper
-  .jp-jupyter-ai-acp-client-modelMenu-desc {
+.jp-jupyter-ai-acp-client-controlMenu-paper
+  .jp-jupyter-ai-acp-client-controlMenu-desc {
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size0);
   color: var(--jp-ui-font-color2);
@@ -469,7 +470,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   text-overflow: ellipsis;
 }
 
-.jp-jupyter-ai-acp-client-modelMenu-check {
+.jp-jupyter-ai-acp-client-controlMenu-check {
   color: var(--jp-brand-color1);
   margin-left: 12px;
   flex-shrink: 0;
@@ -478,8 +479,8 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 /* overflow popover: an uppercase group label above each overflowed control's
    choices, with a hairline divider and top spacing separating the sections.
    Scoped under the paper to win over MUI's ListSubheader defaults. */
-.jp-jupyter-ai-acp-client-modelMenu-paper
-  .jp-jupyter-ai-acp-client-modelSelector-overflow-subheader {
+.jp-jupyter-ai-acp-client-controlMenu-paper
+  .jp-jupyter-ai-acp-client-personaControls-overflow-subheader {
   margin-top: 8px;
   padding: 8px 12px 2px;
   border-top: 1px solid var(--jp-border-color2);
@@ -494,8 +495,8 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 }
 
 /* first section sits flush at the top, no divider or extra gap above it. */
-.jp-jupyter-ai-acp-client-modelMenu-paper
-  .jp-jupyter-ai-acp-client-modelSelector-overflow-subheader:first-child {
+.jp-jupyter-ai-acp-client-controlMenu-paper
+  .jp-jupyter-ai-acp-client-personaControls-overflow-subheader:first-child {
   margin-top: 0;
   border-top: none;
 }

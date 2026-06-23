@@ -26,8 +26,8 @@ import {
   setActivePersona
 } from './request';
 
-const SELECTOR_CLASS = 'jp-jupyter-ai-acp-client-modelSelector';
-const MENU_CLASS = 'jp-jupyter-ai-acp-client-modelMenu';
+const SELECTOR_CLASS = 'jp-jupyter-ai-acp-client-personaControls';
+const MENU_CLASS = 'jp-jupyter-ai-acp-client-controlMenu';
 const NO_ONE_LABEL = 'No one';
 
 // Personas register a moment after a chat opens, and an ACP persona's controls
