@@ -336,25 +336,31 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   vertical-align: bottom;
 }
 
-/* control value (model, mode, effort, ...): secondary, muted, truncated */
+/* control value (model, mode, effort, ...): secondary, muted. A shared min/max
+   keeps the controls a tidy band: short values (e.g. "Plan") get an even
+   footprint, long values (e.g. "Default (recommended)") cap with an ellipsis
+   and reveal in full on hover and in the dropdown. Real model names such as
+   "Claude Sonnet 4.6" still fit. */
 .jp-jupyter-ai-acp-client-modelSelector-control-value {
   color: var(--jp-ui-font-color2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 22ch;
+  min-width: 6ch;
+  max-width: 15ch;
   display: inline-block;
   vertical-align: bottom;
 }
 
-/* boolean config option: a compact on/off pill */
+/* boolean config option: an on/off control in the same thin-bordered style as
+   the permission buttons, so it harmonizes with the rest of JAI (not a pill). */
 .jp-jupyter-ai-acp-client-modelSelector-toggle {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 1px 8px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
   background: transparent;
   color: var(--jp-ui-font-color2);
   font-family: var(--jp-ui-font-family);
@@ -419,7 +425,8 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 /* Dropdown menus (rendered in a portal) */
 .jp-jupyter-ai-acp-client-modelMenu-paper {
   max-height: 60vh;
-  min-width: 220px;
+  min-width: 200px;
+  max-width: 340px;
   background-color: var(--jp-layout-color1);
   border: 1px solid var(--jp-border-color2);
   box-shadow: var(--jp-elevation-z6);
@@ -427,8 +434,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 
 /* stylelint-disable selector-class-pattern -- theming MUI's menu item classes */
 .jp-jupyter-ai-acp-client-modelMenu-paper .MuiMenuItem-root {
-  padding-top: 5px;
-  padding-bottom: 5px;
+  padding: 6px 12px;
   gap: 8px;
 }
 
@@ -443,12 +449,20 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size1);
   color: var(--jp-ui-font-color1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/* description: secondary, one line. Long descriptions truncate (full text on
+   hover) so the menu stays clean and never sprawls. */
 .jp-jupyter-ai-acp-client-modelMenu-desc {
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size0);
   color: var(--jp-ui-font-color2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .jp-jupyter-ai-acp-client-modelMenu-check {
@@ -457,15 +471,27 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   flex-shrink: 0;
 }
 
-/* overflow popover: group label above an overflowed select's choices. Scoped
-   under the menu paper to win over MUI's ListSubheader defaults. */
+/* overflow popover: group label above an overflowed select's choices. JAI's
+   quiet secondary-label voice (muted, sentence case, no uppercase). Groups are
+   separated by a hairline divider + top spacing, the same way the diff view
+   separates blocks, so the sections read clearly without shouting. Scoped under
+   the menu paper to win over MUI's ListSubheader defaults. */
 .jp-jupyter-ai-acp-client-modelMenu-paper
   .jp-jupyter-ai-acp-client-modelSelector-overflow-subheader {
-  padding: 4px 16px 0;
+  margin-top: 8px;
+  padding: 6px 12px 2px;
+  border-top: 1px solid var(--jp-border-color2);
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size0);
   font-weight: 600;
-  line-height: 1.8;
+  line-height: 1.5;
   color: var(--jp-ui-font-color2);
   background-color: var(--jp-layout-color1);
+}
+
+/* first section sits flush at the top, no divider or extra gap above it. */
+.jp-jupyter-ai-acp-client-modelMenu-paper
+  .jp-jupyter-ai-acp-client-modelSelector-overflow-subheader:first-child {
+  margin-top: 0;
+  border-top: none;
 }
