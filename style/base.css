@@ -495,12 +495,14 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 .jp-jupyter-ai-acp-client-modelMenu-paper
   .jp-jupyter-ai-acp-client-modelSelector-overflow-subheader {
   margin-top: 8px;
-  padding: 6px 12px 2px;
+  padding: 8px 12px 2px;
   border-top: 1px solid var(--jp-border-color2);
   font-family: var(--jp-ui-font-family);
-  font-size: var(--jp-ui-font-size2);
-  font-weight: 600;
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 700;
   line-height: 1.5;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--jp-ui-font-color1);
   background-color: var(--jp-layout-color1);
 }
