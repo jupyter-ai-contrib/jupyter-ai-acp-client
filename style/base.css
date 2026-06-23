@@ -251,14 +251,13 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   flex: 1 1 auto;
 }
 
-/* The persona button is pinned: it never shrinks, and a long name ellipsizes
-   rather than blowing out the row. */
+/* The persona button is pinned: it never shrinks, and a long name ellipsizes. */
 .jp-jupyter-ai-acp-client-modelSelector-persona-btn {
   flex-shrink: 0;
 }
 
 /* Width-aware controls row: fills the space after the persona and clips, so the
-   overflow logic (not label-shrinking) decides what shows. */
+   overflow logic decides what shows. */
 .jp-jupyter-ai-acp-client-modelSelector-controls {
   position: relative;
   display: flex;
@@ -282,7 +281,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 }
 
 /* Inline controls keep their natural width; tight widths overflow into the
-   menu rather than truncating labels to unreadable stubs. */
+   menu. */
 .jp-jupyter-ai-acp-client-modelSelector-control-btn,
 .jp-jupyter-ai-acp-client-modelSelector-toggle,
 .jp-jupyter-ai-acp-client-modelSelector-overflow-btn {
@@ -336,12 +335,9 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   vertical-align: bottom;
 }
 
-/* control value (model, mode, effort, ...): secondary, muted, sized to its
-   content so the dropdown arrow sits snug right after the text on every control.
-   A max-width caps long values (e.g. "Default (recommended)") with an ellipsis,
-   revealed in full on hover and in the dropdown; real names like "Claude Sonnet
-   4.6" still fit. No min-width: padding short values would push the arrow away
-   and make the gap uneven across controls. */
+/* control value (model, mode, effort): secondary, muted, sized to its content so
+   the dropdown arrow sits snug after the text. A max-width caps long values with
+   an ellipsis, shown in full on hover and in the dropdown. */
 .jp-jupyter-ai-acp-client-modelSelector-control-value {
   color: var(--jp-ui-font-color2);
   white-space: nowrap;
@@ -352,8 +348,7 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   vertical-align: bottom;
 }
 
-/* boolean config option: an on/off control in the same thin-bordered style as
-   the permission buttons, so it harmonizes with the rest of JAI (not a pill). */
+/* boolean config option: a compact on/off control. */
 .jp-jupyter-ai-acp-client-modelSelector-toggle {
   display: inline-flex;
   align-items: center;
@@ -422,11 +417,8 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   opacity: 0.7;
 }
 
-/* Dropdown menus (rendered in a portal to document.body, outside
-   .jp-ThemedContainer). The class is self-doubled to raise specificity to 0,2,0
-   so the width bounds win over MUI's own emotion class on the same Paper (0,1,0,
-   injected later); otherwise the menu sprawls to MUI's `calc(100% - 32px)` and
-   long descriptions never truncate. */
+/* Dropdown menus, rendered in a portal. The class is doubled to raise its
+   specificity so these width bounds win over MUI's own styles on the Paper. */
 .jp-jupyter-ai-acp-client-modelMenu-paper.jp-jupyter-ai-acp-client-modelMenu-paper {
   max-height: 60vh;
   min-width: 200px;
@@ -441,9 +433,8 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   padding: 6px 12px;
   gap: 8px;
 
-  /* Base the menu item on the JAI UI font size (overrides MUI's 1rem) so the
-     name matches the rest of JAI and the em-based secondary size nests from it
-     and renders properly smaller. */
+  /* Base the menu item on the JAI font size (overrides MUI's default) so the
+     em-based secondary size nests from it. */
   font-size: var(--jp-ui-font-size1);
 }
 
@@ -454,11 +445,8 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 }
 /* stylelint-enable selector-class-pattern */
 
-/* Menu item name/description. Scoped under the menu paper so the font sizes win
-   over MUI's own Typography classes on the same element (otherwise MUI renders
-   the name at its 1rem/16px default, larger than the rest of JAI). This keeps
-   the menu on the JAI base UI font size: name at --jp-ui-font-size1, like the
-   inline controls and native menus; description one step smaller. */
+/* Menu name and description, scoped under the paper so the font sizes win over
+   MUI's Typography. Name at the JAI base size, description one step smaller. */
 .jp-jupyter-ai-acp-client-modelMenu-paper
   .jp-jupyter-ai-acp-client-modelMenu-name {
   font-family: var(--jp-ui-font-family);
@@ -487,11 +475,9 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   flex-shrink: 0;
 }
 
-/* overflow popover: group label above an overflowed select's choices. JAI's
-   quiet secondary-label voice (muted, sentence case, no uppercase). Groups are
-   separated by a hairline divider + top spacing, the same way the diff view
-   separates blocks, so the sections read clearly without shouting. Scoped under
-   the menu paper to win over MUI's ListSubheader defaults. */
+/* overflow popover: an uppercase group label above each overflowed control's
+   choices, with a hairline divider and top spacing separating the sections.
+   Scoped under the paper to win over MUI's ListSubheader defaults. */
 .jp-jupyter-ai-acp-client-modelMenu-paper
   .jp-jupyter-ai-acp-client-modelSelector-overflow-subheader {
   margin-top: 8px;
