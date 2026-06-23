@@ -19,6 +19,7 @@ import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import { InputToolbarRegistry } from '@jupyter/chat';
 import {
   AcpControl,
+  AcpControlChoice,
   ActivePersonaInfo,
   getActivePersona,
   setAcpControl,
@@ -71,6 +72,44 @@ function currentSelectLabel(control: AcpControl): string {
 }
 
 /**
+ * One choice row in a select dropdown. Shows the choice name, and a secondary
+ * description only when it adds information (some agents repeat the name as the
+ * description, which is just noise). The full description is available on hover.
+ */
+function ChoiceMenuItem(props: {
+  choice: AcpControlChoice;
+  selected: boolean;
+  onSelect: () => void;
+}): JSX.Element {
+  const { choice, selected, onSelect } = props;
+  const description =
+    choice.description &&
+    choice.description.trim().toLowerCase() !==
+      choice.label.trim().toLowerCase()
+      ? choice.description
+      : null;
+  return (
+    <MenuItem
+      selected={selected}
+      onClick={onSelect}
+      title={description ?? undefined}
+    >
+      <ListItemText
+        primary={choice.label}
+        secondary={description}
+        classes={{
+          primary: `${MENU_CLASS}-name`,
+          secondary: `${MENU_CLASS}-desc`
+        }}
+      />
+      {selected ? (
+        <CheckIcon className={`${MENU_CLASS}-check`} fontSize="small" />
+      ) : null}
+    </MenuItem>
+  );
+}
+
+/**
  * A dropdown for a select control (model, mode, or a select config option).
  */
 function SelectControl(props: {
@@ -101,26 +140,15 @@ function SelectControl(props: {
         {...menuAnchorProps}
       >
         {control.choices.map(choice => (
-          <MenuItem
+          <ChoiceMenuItem
             key={choice.value}
+            choice={choice}
             selected={choice.value === control.current_value}
-            onClick={() => {
+            onSelect={() => {
               setAnchor(null);
               onSelect(choice.value);
             }}
-          >
-            <ListItemText
-              primary={choice.label}
-              secondary={choice.description ?? null}
-              classes={{
-                primary: `${MENU_CLASS}-name`,
-                secondary: `${MENU_CLASS}-desc`
-              }}
-            />
-            {choice.value === control.current_value ? (
-              <CheckIcon className={`${MENU_CLASS}-check`} fontSize="small" />
-            ) : null}
-          </MenuItem>
+          />
         ))}
       </Menu>
     </>
@@ -221,26 +249,15 @@ function OverflowMenu(props: {
             {control.label}
           </ListSubheader>,
           ...control.choices.map(choice => (
-            <MenuItem
+            <ChoiceMenuItem
               key={`${control.id}-${choice.value}`}
+              choice={choice}
               selected={choice.value === control.current_value}
-              onClick={() => {
+              onSelect={() => {
                 onClose();
                 onChange(control, choice.value);
               }}
-            >
-              <ListItemText
-                primary={choice.label}
-                secondary={choice.description ?? null}
-                classes={{
-                  primary: `${MENU_CLASS}-name`,
-                  secondary: `${MENU_CLASS}-desc`
-                }}
-              />
-              {choice.value === control.current_value ? (
-                <CheckIcon className={`${MENU_CLASS}-check`} fontSize="small" />
-              ) : null}
-            </MenuItem>
+            />
           ))
         ];
       })}
