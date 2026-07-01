@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from jupyter_server.base.handlers import APIHandler
 import tornado
 from pydantic import BaseModel
+from acp.schema import SessionConfigOptionBoolean, SessionConfigOptionSelect
 from .base_acp_persona import BaseAcpPersona
 
 if TYPE_CHECKING:
@@ -54,7 +55,7 @@ class AcpSlashCommandsHandler(APIHandler):
                 # raise HTTP error: persona not found
                 raise tornado.web.HTTPError(404, f"Persona not found: @{persona_mention_name}")
         else:
-            persona = persona_manager.last_mentioned_persona or persona_manager.default_persona
+            persona = persona_manager.active_persona
 
         # Return early with empty response if either:
         # 1. no default persona, or
@@ -78,6 +79,235 @@ class AcpSlashCommandsHandler(APIHandler):
 
         response = AcpSlashCommandsResponse(commands=commands)
         self.finish(response.model_dump())
+
+
+MODEL_CONTROL_ID = "__model__"
+MODE_CONTROL_ID = "__mode__"
+
+class AcpControlChoice(BaseModel):
+    value: str
+    label: str
+    description: str | None = None
+
+class AcpControl(BaseModel):
+    # Stable control id: "__model__", "__mode__", or the config option id.
+    id: str
+    # Which ACP mechanism backs this control: "model" | "mode" | "config_option".
+    source: str
+    # "select" (a dropdown of choices) or "boolean" (a toggle).
+    kind: str
+    # Human-readable label shown on the control.
+    label: str
+    # Currently selected value: a choice value (select) or a bool (boolean).
+    current_value: str | bool | None = None
+    # Available choices, for selects.
+    choices: list[AcpControlChoice] = []
+
+def _flatten_select_options(options) -> list:
+    """
+    Yield the flat choice items of an ACP select option, whether the agent sent
+    a flat list or grouped options. Unknown shapes are skipped.
+    """
+    flat = []
+    for item in options or []:
+        if hasattr(item, "value"):
+            flat.append(item)
+        elif hasattr(item, "options"):
+            flat.extend(item.options or [])
+    return flat
+
+def build_controls(persona: BaseAcpPersona) -> list[AcpControl]:
+    """
+    Normalize an ACP persona's model, mode, and config options into one uniform
+    list of toolbar controls. Model and mode are surfaced as selects; config
+    options keep their declared select/boolean kind.
+    """
+    controls: list[AcpControl] = []
+
+    if persona.acp_models:
+        controls.append(AcpControl(
+            id=MODEL_CONTROL_ID,
+            source="model",
+            kind="select",
+            label="Model",
+            current_value=persona.acp_current_model_id,
+            choices=[
+                AcpControlChoice(value=m.model_id, label=m.name, description=m.description)
+                for m in persona.acp_models
+            ],
+        ))
+
+    if persona.acp_modes:
+        controls.append(AcpControl(
+            id=MODE_CONTROL_ID,
+            source="mode",
+            kind="select",
+            label="Mode",
+            current_value=persona.acp_current_mode_id,
+            choices=[
+                AcpControlChoice(value=m.id, label=m.name, description=m.description)
+                for m in persona.acp_modes
+            ],
+        ))
+
+    # Some agents (e.g. Copilot) advertise model and mode both as dedicated
+    # fields and as config options. Skip the config-option duplicates when the
+    # dedicated control already covers them, but keep them for agents (e.g.
+    # OpenCode) that only expose model/mode through config options.
+    has_model = bool(persona.acp_models)
+    has_mode = bool(persona.acp_modes)
+
+    for opt in persona.acp_config_options:
+        if opt.id == "model" and has_model:
+            continue
+        if opt.id == "mode" and has_mode:
+            continue
+        if isinstance(opt, SessionConfigOptionSelect):
+            controls.append(AcpControl(
+                id=opt.id,
+                source="config_option",
+                kind="select",
+                label=opt.name,
+                current_value=opt.current_value,
+                choices=[
+                    AcpControlChoice(value=c.value, label=c.name, description=c.description)
+                    for c in _flatten_select_options(opt.options)
+                ],
+            ))
+        elif isinstance(opt, SessionConfigOptionBoolean):
+            controls.append(AcpControl(
+                id=opt.id,
+                source="config_option",
+                kind="boolean",
+                label=opt.name,
+                current_value=opt.current_value,
+            ))
+
+    return controls
+
+class _ChatScopedHandler(APIHandler):
+    """
+    Base for handlers scoped to a single chat. Resolves the chat's
+    `PersonaManager` from the required `chat_path` query argument.
+    """
+
+    @property
+    def file_id_manager(self) -> BaseFileIdManager:
+        manager = self.serverapp.web_app.settings["file_id_manager"]
+        assert manager
+        return manager
+
+    def _get_persona_manager(self) -> "PersonaManager":
+        chat_path = self.get_argument('chat_path', None)
+        if not chat_path:
+            raise tornado.web.HTTPError(400, "chat_path is required as a URL query parameter")
+        file_id = self.file_id_manager.get_id(chat_path)
+        if not file_id:
+            raise tornado.web.HTTPError(404, f"Chat not found: {chat_path}")
+        room_id = f"text:chat:{file_id}"
+        persona_manager = self.serverapp.web_app.settings.get("jupyter-ai", {}).get("persona-managers", {}).get(room_id, None)
+        if not persona_manager:
+            raise tornado.web.HTTPError(404, f"Chat not initialized: {chat_path}")
+        return persona_manager
+
+class ActivePersonaInfo(BaseModel):
+    id: str
+    name: str
+    mention_name: str
+    is_acp: bool
+    avatar_url: str | None = None
+
+class ActivePersonaResponse(BaseModel):
+    # Every persona in the chat, for the selector.
+    personas: list[ActivePersonaInfo] = []
+    # The active persona (who replies), or None for "no one".
+    active_id: str | None = None
+    active_name: str | None = None
+    # The active persona's session controls (model, mode, config options),
+    # normalized for the input toolbar, when it is an ACP persona.
+    controls: list[AcpControl] = []
+
+class ActivePersonaHandler(_ChatScopedHandler):
+    """
+    REST endpoint for the active-persona selector. GET returns the chat's
+    personas, which one is active, and the active persona's session controls in
+    one call. POST sets the active persona (persona_id null means "no one").
+    """
+
+    @tornado.web.authenticated
+    def get(self, _unused: str = ""):
+        persona_manager = self._get_persona_manager()
+        personas = [
+            ActivePersonaInfo(
+                id=p.id,
+                name=p.name,
+                mention_name=p.as_user().mention_name,
+                is_acp=isinstance(p, BaseAcpPersona),
+                avatar_url=p.as_user().avatar_url,
+            )
+            for p in persona_manager.personas.values()
+        ]
+        active = persona_manager.active_persona
+        controls: list[AcpControl] = []
+        if isinstance(active, BaseAcpPersona):
+            controls = build_controls(active)
+        response = ActivePersonaResponse(
+            personas=personas,
+            active_id=active.id if active else None,
+            active_name=active.name if active else None,
+            controls=controls,
+        )
+        self.finish(response.model_dump())
+
+    @tornado.web.authenticated
+    def post(self, _unused: str = ""):
+        persona_manager = self._get_persona_manager()
+        body = self.get_json_body() or {}
+        persona_id = body.get("persona_id")
+        if persona_id:
+            persona = persona_manager.personas.get(persona_id)
+            if not persona:
+                raise tornado.web.HTTPError(404, f"Persona not found: {persona_id}")
+            persona_manager.set_active_persona(persona)
+        else:
+            persona_manager.set_active_persona(None)
+        self.finish({"status": "ok", "active_id": persona_id or None})
+
+
+class AcpControlHandler(_ChatScopedHandler):
+    """
+    REST endpoint that sets a single session control on the chat's active
+    persona. POST body: {control_id, source, value}. `source` selects the ACP
+    mechanism: "model" and "mode" take the chosen id as `value`; "config_option"
+    takes the option `control_id` and its new select value or boolean.
+    """
+
+    @tornado.web.authenticated
+    async def post(self, _unused: str = ""):
+        persona_manager = self._get_persona_manager()
+        body = self.get_json_body() or {}
+        control_id = body.get("control_id")
+        source = body.get("source")
+        value = body.get("value")
+        if not control_id or not source or value is None:
+            raise tornado.web.HTTPError(
+                400, "Missing required fields: control_id, source, value"
+            )
+
+        persona = persona_manager.active_persona
+        if not isinstance(persona, BaseAcpPersona):
+            raise tornado.web.HTTPError(404, "No ACP persona to configure")
+
+        if source == "model":
+            await persona.set_acp_model(value)
+        elif source == "mode":
+            await persona.set_acp_mode(value)
+        elif source == "config_option":
+            await persona.set_acp_config_option(control_id, value)
+        else:
+            raise tornado.web.HTTPError(400, f"Unknown control source: {source}")
+
+        self.finish({"status": "ok", "control_id": control_id, "value": value})
 
 
 class StopStreamingHandler(APIHandler):

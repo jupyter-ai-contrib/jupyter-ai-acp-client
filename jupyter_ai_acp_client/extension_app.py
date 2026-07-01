@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 from jupyter_server.extension.application import ExtensionApp
-from .routes import AcpSlashCommandsHandler, PermissionHandler, StopStreamingHandler
+from .routes import ActivePersonaHandler, AcpControlHandler, AcpSlashCommandsHandler, PermissionHandler, StopStreamingHandler
 
 
 class JaiAcpClientExtension(ExtensionApp):
@@ -12,6 +12,8 @@ class JaiAcpClientExtension(ExtensionApp):
     name = "jupyter_ai_acp_client"
     handlers = [
         (r"ai/acp/slash_commands/?([^/]*)?", AcpSlashCommandsHandler),
+        (r"ai/acp/active_persona/?([^/]*)?", ActivePersonaHandler),
+        (r"ai/acp/control/?([^/]*)?", AcpControlHandler),
         (r"ai/acp/permissions", PermissionHandler),
         (r"ai/acp/stop/?([^/]*)?", StopStreamingHandler),
     ]

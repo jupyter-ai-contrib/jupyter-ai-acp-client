@@ -9,12 +9,24 @@ from typing import Any, ClassVar, Optional
 
 from acp import NewSessionResponse, LoadSessionResponse
 from acp.exceptions import RequestError
-from acp.schema import AvailableCommand
+from acp.schema import (
+    AvailableCommand,
+    ModelInfo,
+    SessionConfigOptionBoolean,
+    SessionConfigOptionSelect,
+    SessionMode,
+    SessionModelState,
+    SessionModeState,
+)
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
 
 from .default_acp_client import JaiAcpClient
 from .telemetry import emit_event, auto_emit_event
+
+# A single session config option the agent advertises: either a select (one of
+# several values) or a boolean toggle. Set via `session/set_config_option`.
+AcpConfigOption = SessionConfigOptionSelect | SessionConfigOptionBoolean
 
 
 class BaseAcpPersona(BasePersona):
@@ -56,6 +68,35 @@ class BaseAcpPersona(BasePersona):
     """
     List of slash commands broadcast by the ACP agent in the current session.
     This attribute is set automatically by the default ACP client.
+    """
+
+    _acp_models: list[ModelInfo]
+    """
+    Models the ACP agent advertises for the current session. Set by the persona
+    when a session is created or loaded.
+    """
+
+    _acp_current_model_id: Optional[str]
+    """
+    The model ID currently selected for the ACP session, if any.
+    """
+
+    _acp_modes: list[SessionMode]
+    """
+    Modes the ACP agent advertises for the current session. Set by the persona
+    when a session is created or loaded.
+    """
+
+    _acp_current_mode_id: Optional[str]
+    """
+    The mode ID currently selected for the ACP session, if any.
+    """
+
+    _acp_config_options: list[AcpConfigOption]
+    """
+    Session config options (selects and toggles) the ACP agent advertises for
+    the current session, each carrying its current value. Set by the persona
+    when a session is created or loaded.
     """
 
     _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
@@ -100,6 +141,11 @@ class BaseAcpPersona(BasePersona):
             self._init_client_session()
         )
         self._acp_slash_commands = []
+        self._acp_models = []
+        self._acp_current_model_id = None
+        self._acp_modes = []
+        self._acp_current_mode_id = None
+        self._acp_config_options = []
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -170,6 +216,9 @@ class BaseAcpPersona(BasePersona):
             self.__class__.__name__,
             existing_session_id,
         )
+        self._set_acp_model_state(response.models)
+        self._set_acp_mode_state(response.modes)
+        self._set_acp_config_options(response.config_options)
         return response
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
@@ -181,6 +230,66 @@ class BaseAcpPersona(BasePersona):
             response.session_id,
         )
         self._record_new_session(response.session_id)
+        self._set_acp_model_state(response.models)
+        self._set_acp_mode_state(response.modes)
+        self._set_acp_config_options(response.config_options)
+
+        # Reapply a previously selected model so the choice survives session
+        # recreation (e.g. a server restart that creates a fresh ACP session).
+        stored_model_id = self._get_stored_model_choice()
+        advertised_model_ids = {m.model_id for m in self._acp_models}
+        if (
+            stored_model_id
+            and stored_model_id != self._acp_current_model_id
+            and stored_model_id in advertised_model_ids
+        ):
+            try:
+                await client.set_session_model(stored_model_id, response.session_id)
+                self._acp_current_model_id = stored_model_id
+            except Exception:
+                self.log.warning(
+                    "Failed to reapply stored model '%s' for '%s'.",
+                    stored_model_id,
+                    self.__class__.__name__,
+                    exc_info=True,
+                )
+
+        # Reapply a previously selected mode the same way.
+        stored_mode_id = self._get_stored_mode_choice()
+        advertised_mode_ids = {m.id for m in self._acp_modes}
+        if (
+            stored_mode_id
+            and stored_mode_id != self._acp_current_mode_id
+            and stored_mode_id in advertised_mode_ids
+        ):
+            try:
+                await client.set_session_mode(stored_mode_id, response.session_id)
+                self._acp_current_mode_id = stored_mode_id
+            except Exception:
+                self.log.warning(
+                    "Failed to reapply stored mode '%s' for '%s'.",
+                    stored_mode_id,
+                    self.__class__.__name__,
+                    exc_info=True,
+                )
+
+        # Reapply previously selected config option values the same way.
+        stored_config = self._get_stored_config_choices()
+        advertised_options = {opt.id: opt for opt in self._acp_config_options}
+        for config_id, value in stored_config.items():
+            option = advertised_options.get(config_id)
+            if option is None or option.current_value == value:
+                continue
+            try:
+                await client.set_config_option(config_id, value, response.session_id)
+                option.current_value = value
+            except Exception:
+                self.log.warning(
+                    "Failed to reapply stored config option '%s' for '%s'.",
+                    config_id,
+                    self.__class__.__name__,
+                    exc_info=True,
+                )
         return response
 
     async def _init_client_session(self) -> NewSessionResponse | LoadSessionResponse:
@@ -412,6 +521,145 @@ class BaseAcpPersona(BasePersona):
             self.parent.room_id,
         )
         self._acp_slash_commands = commands
+
+    @property
+    def acp_models(self) -> list[ModelInfo]:
+        """
+        Models the ACP agent advertises for the current session. Empty when the
+        agent does not advertise any. Set by the persona on session create/load.
+        """
+        return self._acp_models
+
+    @property
+    def acp_current_model_id(self) -> Optional[str]:
+        """The model ID currently selected for the ACP session, if any."""
+        return self._acp_current_model_id
+
+    def _set_acp_model_state(self, models: Optional[SessionModelState]) -> None:
+        """
+        Store the model state from a `session/new` or `session/load` response.
+        `models` is `None` when the agent does not advertise models.
+        """
+        if models is None:
+            self._acp_models = []
+            self._acp_current_model_id = None
+            return
+        self._acp_models = models.available_models
+        self._acp_current_model_id = models.current_model_id
+
+    async def set_acp_model(self, model_id: str) -> None:
+        """
+        Select a model for this persona's ACP session and persist the choice
+        with the chat so it survives session recreation.
+        """
+        client = await self.get_client()
+        session_id = await self.get_session_id()
+        await client.set_session_model(model_id, session_id)
+        self._acp_current_model_id = model_id
+        self._record_model_choice(model_id)
+
+    def _record_model_choice(self, model_id: str) -> None:
+        """Persist the selected model in chat metadata, keyed by persona ID."""
+        existing = self.ychat.get_metadata().get("acp_models", {})
+        self.ychat.set_metadata("acp_models", {**existing, self.id: model_id})
+
+    def _get_stored_model_choice(self) -> Optional[str]:
+        """Return the model previously selected for this persona in this chat."""
+        return self.ychat.get_metadata().get("acp_models", {}).get(self.id)
+
+    @property
+    def acp_modes(self) -> list[SessionMode]:
+        """
+        Modes the ACP agent advertises for the current session. Empty when the
+        agent does not advertise any. Set by the persona on session create/load.
+        """
+        return self._acp_modes
+
+    @property
+    def acp_current_mode_id(self) -> Optional[str]:
+        """The mode ID currently selected for the ACP session, if any."""
+        return self._acp_current_mode_id
+
+    def _set_acp_mode_state(self, modes: Optional[SessionModeState]) -> None:
+        """
+        Store the mode state from a `session/new` or `session/load` response.
+        `modes` is `None` when the agent does not advertise modes.
+        """
+        if modes is None:
+            self._acp_modes = []
+            self._acp_current_mode_id = None
+            return
+        self._acp_modes = modes.available_modes
+        self._acp_current_mode_id = modes.current_mode_id
+
+    def _set_acp_current_mode(self, mode_id: str) -> None:
+        """Record a mode the agent switched to itself (a `current_mode_update`)."""
+        self._acp_current_mode_id = mode_id
+
+    async def set_acp_mode(self, mode_id: str) -> None:
+        """
+        Select a mode for this persona's ACP session and persist the choice
+        with the chat so it survives session recreation.
+        """
+        client = await self.get_client()
+        session_id = await self.get_session_id()
+        await client.set_session_mode(mode_id, session_id)
+        self._acp_current_mode_id = mode_id
+        self._record_mode_choice(mode_id)
+
+    def _record_mode_choice(self, mode_id: str) -> None:
+        """Persist the selected mode in chat metadata, keyed by persona ID."""
+        existing = self.ychat.get_metadata().get("acp_modes", {})
+        self.ychat.set_metadata("acp_modes", {**existing, self.id: mode_id})
+
+    def _get_stored_mode_choice(self) -> Optional[str]:
+        """Return the mode previously selected for this persona in this chat."""
+        return self.ychat.get_metadata().get("acp_modes", {}).get(self.id)
+
+    @property
+    def acp_config_options(self) -> list[AcpConfigOption]:
+        """
+        Session config options the ACP agent advertises for the current session,
+        each carrying its current value. Empty when the agent advertises none.
+        Set by the persona on session create/load.
+        """
+        return self._acp_config_options
+
+    def _set_acp_config_options(
+        self, config_options: Optional[list[AcpConfigOption]]
+    ) -> None:
+        """
+        Store the config options from a `session/new`, `session/load`, or
+        `config_option_update` payload. `config_options` is `None` when the agent
+        does not advertise any.
+        """
+        self._acp_config_options = config_options or []
+
+    async def set_acp_config_option(self, config_id: str, value: str | bool) -> None:
+        """
+        Set a session config option for this persona's ACP session and persist
+        the choice with the chat so it survives session recreation.
+        """
+        client = await self.get_client()
+        session_id = await self.get_session_id()
+        await client.set_config_option(config_id, value, session_id)
+        for option in self._acp_config_options:
+            if option.id == config_id:
+                option.current_value = value
+                break
+        self._record_config_choice(config_id, value)
+
+    def _record_config_choice(self, config_id: str, value: str | bool) -> None:
+        """Persist a config option value in chat metadata, keyed by persona ID."""
+        all_choices = self.ychat.get_metadata().get("acp_config_options", {})
+        persona_choices = {**all_choices.get(self.id, {}), config_id: value}
+        self.ychat.set_metadata(
+            "acp_config_options", {**all_choices, self.id: persona_choices}
+        )
+
+    def _get_stored_config_choices(self) -> dict[str, str | bool]:
+        """Return config option values previously selected for this persona here."""
+        return self.ychat.get_metadata().get("acp_config_options", {}).get(self.id, {})
 
     async def handle_uncaught_exception(self, exc: Exception) -> None:
         """Show structured error info for ACP RequestError inside the standard dropdown."""

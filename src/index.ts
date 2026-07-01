@@ -17,6 +17,7 @@ import { ToolCallsComponent } from './tool-calls';
 
 import { getAcpSlashCommands } from './request';
 import { AcpStopButton } from './stop-button';
+import { AcpPersonaControls } from './persona-controls';
 
 const SLASH_COMMAND_PROVIDER_ID =
   '@jupyter-ai/acp-client:slash-command-provider';
@@ -165,6 +166,11 @@ export const toolbarPlugin: JupyterFrontEndPlugin<IInputToolbarRegistryFactory> 
         create: () => {
           // Start with the default toolbar (Send, Attach, Cancel, SaveEdit)
           const registry = InputToolbarRegistry.defaultToolbarRegistry();
+          // Add the active-persona controls (persona + model), leftmost.
+          registry.addItem('persona', {
+            element: AcpPersonaControls,
+            position: 5
+          });
           // Add our stop button (position 90 = just before Send at 100)
           registry.addItem('stop', {
             element: AcpStopButton,

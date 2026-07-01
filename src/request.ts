@@ -74,6 +74,101 @@ export async function getAcpSlashCommands(
 
   return response.commands;
 }
+export type AcpControlChoice = {
+  value: string;
+  label: string;
+  description: string | null;
+};
+
+export type AcpControl = {
+  id: string;
+  source: 'model' | 'mode' | 'config_option';
+  kind: 'select' | 'boolean';
+  label: string;
+  current_value: string | boolean | null;
+  choices: AcpControlChoice[];
+};
+
+export type ActivePersonaInfo = {
+  id: string;
+  name: string;
+  mention_name: string;
+  is_acp: boolean;
+  avatar_url: string | null;
+};
+
+export type ActivePersonaResponse = {
+  personas: ActivePersonaInfo[];
+  active_id: string | null;
+  active_name: string | null;
+  controls: AcpControl[];
+};
+
+/**
+ * Fetch the chat's personas, which one is active, and the active persona's
+ * session controls, in one call.
+ */
+export async function getActivePersona(
+  chatPath: string
+): Promise<ActivePersonaResponse> {
+  const empty: ActivePersonaResponse = {
+    personas: [],
+    active_id: null,
+    active_name: null,
+    controls: []
+  };
+  try {
+    return await requestAPI<ActivePersonaResponse>(
+      `/active_persona?chat_path=${encodeURIComponent(chatPath)}`
+    );
+  } catch (e) {
+    console.warn('Error retrieving active persona: ', e);
+    return empty;
+  }
+}
+
+/**
+ * Set the active persona (who replies). A null personaId means "no one".
+ */
+export async function setActivePersona(
+  chatPath: string,
+  personaId: string | null
+): Promise<void> {
+  try {
+    await requestAPI(
+      `/active_persona?chat_path=${encodeURIComponent(chatPath)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona_id: personaId })
+      }
+    );
+  } catch (e) {
+    console.warn('Error setting active persona: ', e);
+  }
+}
+
+/**
+ * Set a session control (model, mode, or config option) on the chat's active
+ * ACP persona.
+ */
+export async function setAcpControl(
+  chatPath: string,
+  controlId: string,
+  source: string,
+  value: string | boolean
+): Promise<void> {
+  try {
+    await requestAPI(`/control?chat_path=${encodeURIComponent(chatPath)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ control_id: controlId, source, value })
+    });
+  } catch (e) {
+    console.warn('Error setting ACP control: ', e);
+  }
+}
+
 /**
  * Send the user's permission decision to the backend.
  */

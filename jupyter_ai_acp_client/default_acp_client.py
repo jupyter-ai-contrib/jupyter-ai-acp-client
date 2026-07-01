@@ -21,6 +21,7 @@ from acp.schema import (
     AudioContentBlock,
     AvailableCommandsUpdate,
     ClientCapabilities,
+    ConfigOptionUpdate,
     CreateTerminalResponse,
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
@@ -174,6 +175,34 @@ class JaiAcpClient(Client):
         session = await conn.new_session(cwd=persona.get_chat_dir(), mcp_servers=mcp_servers)
         self._personas_by_session[session.session_id] = persona
         return session
+
+    async def set_session_model(self, model_id: str, session_id: str) -> None:
+        """
+        Set the model for an ACP session. Sends a `session/set_model` request to
+        the ACP agent.
+        """
+        conn = await self.get_connection()
+        await conn.set_session_model(model_id=model_id, session_id=session_id)
+
+    async def set_session_mode(self, mode_id: str, session_id: str) -> None:
+        """
+        Set the mode for an ACP session. Sends a `session/set_mode` request to
+        the ACP agent.
+        """
+        conn = await self.get_connection()
+        await conn.set_session_mode(mode_id=mode_id, session_id=session_id)
+
+    async def set_config_option(
+        self, config_id: str, value: str | bool, session_id: str
+    ) -> None:
+        """
+        Set a session config option for an ACP session. Sends a
+        `session/set_config_option` request to the ACP agent.
+        """
+        conn = await self.get_connection()
+        await conn.set_config_option(
+            config_id=config_id, value=value, session_id=session_id
+        )
 
     def _is_session_loading(self, session_id: str) -> bool:
         task = self._loading_sessions.get(session_id)
@@ -365,7 +394,8 @@ class JaiAcpClient(Client):
         | ToolCallProgress
         | AgentPlanUpdate
         | AvailableCommandsUpdate
-        | CurrentModeUpdate,
+        | CurrentModeUpdate
+        | ConfigOptionUpdate,
         **kwargs: Any,
     ) -> None:
         """
@@ -386,6 +416,19 @@ class JaiAcpClient(Client):
                 return
             if persona and hasattr(persona, 'acp_slash_commands'):
                 persona.acp_slash_commands = update.available_commands
+            return
+
+        # Keep the persona's mode/config state in sync when the agent changes it
+        # itself (e.g. a slash command that switches mode), so the toolbar
+        # controls reflect the current values.
+        if isinstance(update, CurrentModeUpdate):
+            if persona is not None:
+                persona._set_acp_current_mode(update.current_mode_id)
+            return
+
+        if isinstance(update, ConfigOptionUpdate):
+            if persona is not None:
+                persona._set_acp_config_options(update.config_options)
             return
 
         # Skip message/tool events when cancellation has been requested
