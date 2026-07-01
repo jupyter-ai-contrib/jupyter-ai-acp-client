@@ -51,13 +51,11 @@ class ClaudeAcpPersona(BaseAcpPersona):
         )
 ```
 
-Currently, this package provides 8 personas:
+Currently, this package provides 7 personas:
 
 - `@Claude`
   - requires `claude-agent-acp`, installed via `npm install -g @zed-industries/claude-agent-acp`
   - optional env variable `CLAUDE_CODE_EXECUTABLE` points to your custom-installed Claude executable location. By default, claude-agent-acp uses Claude packaged in `@zed-industries/claude-agent-acp`.
-- `@Gemini`
-  - requires `gemini` CLI (>= 0.34.0), installed via https://geminicli.com/
 - `@Kiro`
   - requires `kiro-cli` (>= 1.25.0, < 2), installed via https://kiro.dev
 - `@Mistral-Vibe`
@@ -84,7 +82,6 @@ Currently, this package provides 8 personas:
 **Optional**
 
 - `claude-agent-acp` (enables `@Claude`)
-- `gemini` CLI (enables `@Gemini`)
 - `kiro-cli` (enables `@Kiro`)
 - `mistral-vibe` (enables `@Mistral-Vibe` via the `vibe-acp` command)
 - `opencode` v1.0.0+ (enables `@OpenCode`)

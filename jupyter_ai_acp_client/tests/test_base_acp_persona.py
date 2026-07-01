@@ -347,7 +347,7 @@ class TestResumeAfterAuth:
 
     There are two categories of ACP agents with respect to authentication:
 
-    **Agents with auth-gated sessions** (e.g. Kiro, Gemini): These agents cannot
+    **Agents with auth-gated sessions** (e.g. Kiro): These agents cannot
     start their ACP subprocess until the user is authenticated. The subprocess
     startup is blocked in `before_agent_subprocess()`, which means
     `_init_client_session()` does not complete until auth passes. Once the user
