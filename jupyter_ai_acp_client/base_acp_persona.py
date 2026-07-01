@@ -208,7 +208,7 @@ class BaseAcpPersona(BasePersona):
             response = await self._create_session(client)
 
             # If the user was initially unauthenticated and the session was
-            # blocked on auth (e.g. Kiro, Gemini), proactively resume their
+            # blocked on auth (e.g. Kiro), proactively resume their
             # original request now that the session is ready.
             if self._was_initially_unauthenticated:
                 self._was_initially_unauthenticated = False
@@ -462,7 +462,7 @@ class BaseAcpPersona(BasePersona):
         self.log.info("[shutdown] Starting for '%s'.", self.__class__.__name__)
 
         # Cancel any pending startup futures to avoid hanging on auth-gated
-        # personas (e.g. Kiro, Gemini) that never finished startup.
+        # personas (e.g. Kiro) that never finished startup.
         for future in [
             self.__class__._before_subprocess_future,
             self.__class__._subprocess_future,
