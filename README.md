@@ -52,6 +52,7 @@ class ClaudeAcpPersona(BaseAcpPersona):
 ```
 
 Currently, this package provides 8 personas:
+
 - `@Claude`
   - requires `claude-agent-acp`, installed via `npm install -g @zed-industries/claude-agent-acp`
   - optional env variable `CLAUDE_CODE_EXECUTABLE` points to your custom-installed Claude executable location. By default, claude-agent-acp uses Claude packaged in `@zed-industries/claude-agent-acp`.
