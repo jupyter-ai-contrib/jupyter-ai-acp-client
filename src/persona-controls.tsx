@@ -47,6 +47,10 @@ const USAGE_ERROR_AT = 0.9;
 const POLL_MS = 1500;
 const MAX_POLLS = 24;
 
+// Delay for the one trailing refresh after a burst of message updates, long
+// enough for the turn's usage report to be stored server-side.
+const TRAILING_REFRESH_MS = 1500;
+
 // Width (px) reserved for the overflow ("...") button when not every control
 // fits inline.
 const OVERFLOW_BTN_WIDTH = 36;
@@ -617,10 +621,21 @@ export function AcpPersonaControls(
   }, [chatPath]);
 
   useEffect(() => {
+    let trailing: number | undefined;
+    const onMessages = () => {
+      refresh();
+      // The agent's usage report is stored when the prompt response resolves,
+      // a beat after the turn's final message update, so a refresh driven only
+      // by message events always misses it. One trailing refresh after the
+      // burst settles picks it up.
+      window.clearTimeout(trailing);
+      trailing = window.setTimeout(refresh, TRAILING_REFRESH_MS);
+    };
     refresh();
-    chatModel?.messagesUpdated?.connect(refresh);
+    chatModel?.messagesUpdated?.connect(onMessages);
     return () => {
-      chatModel?.messagesUpdated?.disconnect(refresh);
+      window.clearTimeout(trailing);
+      chatModel?.messagesUpdated?.disconnect(onMessages);
     };
   }, [chatModel, refresh]);
 
