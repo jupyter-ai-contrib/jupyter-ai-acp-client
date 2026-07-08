@@ -571,10 +571,6 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
 }
 
 .jp-jupyter-ai-acp-client-usage-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 16px;
   margin-top: 8px;
   padding: 8px 0 2px;
   border-top: 1px solid var(--jp-border-color2);
@@ -584,16 +580,6 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--jp-ui-font-color1);
-}
-
-/* Reference value carried by a section header (e.g. the context window size):
-   a muted annotation, exempt from the header's uppercase emphasis. */
-.jp-jupyter-ai-acp-client-usage-section-value {
-  font-weight: 400;
-  letter-spacing: normal;
-  text-transform: none;
-  color: var(--jp-ui-font-color2);
-  white-space: nowrap;
 }
 
 .jp-jupyter-ai-acp-client-usage-section:first-child {

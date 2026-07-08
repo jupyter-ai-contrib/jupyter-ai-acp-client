@@ -500,7 +500,7 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
 
   const summary = [
     context &&
-      `Context: ${context.used.toLocaleString()} / ${context.size.toLocaleString()} tokens (${percent}%)`,
+      `Context: ${context.used.toLocaleString()} of ${formatTokens(context.size)} tokens (${percent}%)`,
     tokens && `Session tokens: ${tokens.total_tokens.toLocaleString()}`,
     cost && `Cost: ${formatCost(cost.amount, cost.currency)}`
   ]
@@ -537,15 +537,10 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
         <div className={`${USAGE_CLASS}-card`}>
           {context ? (
             <>
-              <div className={`${USAGE_CLASS}-section`}>
-                <span>Context window</span>
-                <span className={`${USAGE_CLASS}-section-value`}>
-                  {formatTokens(context.size)} tokens
-                </span>
-              </div>
+              <div className={`${USAGE_CLASS}-section`}>Context</div>
               <UsageRow
                 label="In context now"
-                value={`${context.used.toLocaleString()} (${percent}%)`}
+                value={`${context.used.toLocaleString()} of ${formatTokens(context.size)} (${percent}%)`}
               />
             </>
           ) : null}
