@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from acp.exceptions import RequestError
-from acp.schema import ResourceContentBlock, TextContentBlock
+from acp.schema import (
+    ResourceContentBlock,
+    TextContentBlock,
+    Usage,
+    UsageUpdate,
+)
 
 from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
 
@@ -216,6 +221,48 @@ class TestPromptAndReplyContentBlocks:
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
         assert blocks[1].uri == "../../../etc/passwd"
+
+
+class TestUsageStorage:
+    """A usage report received by the client ends up readable on the persona."""
+
+    async def test_usage_update_is_stored_as_context_usage(self):
+        client, _, persona = _make_client_and_persona()
+        client._loading_sessions = {}
+        persona.acp_context_usage = None
+        persona._set_acp_context_usage = lambda u: setattr(
+            persona, "acp_context_usage", u
+        )
+        update = UsageUpdate(sessionUpdate="usage_update", used=41_000, size=200_000)
+
+        await client.session_update(SESSION_ID, update)
+
+        assert persona.acp_context_usage is update
+
+    async def test_prompt_response_usage_is_stored_as_session_usage(self):
+        client, conn, persona = _make_client_and_persona()
+        usage = Usage(inputTokens=900, outputTokens=340, totalTokens=1_240)
+        conn.prompt = AsyncMock(return_value=MagicMock(usage=usage))
+        persona.acp_session_usage = None
+        persona._set_acp_session_usage = lambda u: setattr(
+            persona, "acp_session_usage", u
+        )
+
+        await client.prompt_and_reply(session_id=SESSION_ID, prompt="hello")
+
+        assert persona.acp_session_usage is usage
+
+    async def test_prompt_response_without_usage_stores_nothing(self):
+        client, conn, persona = _make_client_and_persona()
+        conn.prompt = AsyncMock(return_value=MagicMock(usage=None))
+        persona.acp_session_usage = None
+        persona._set_acp_session_usage = lambda u: setattr(
+            persona, "acp_session_usage", u
+        )
+
+        await client.prompt_and_reply(session_id=SESSION_ID, prompt="hello")
+
+        assert persona.acp_session_usage is None
 
 
 class TestLoadSessionCleanup:

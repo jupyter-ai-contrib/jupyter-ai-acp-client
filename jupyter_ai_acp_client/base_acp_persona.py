@@ -17,6 +17,8 @@ from acp.schema import (
     SessionMode,
     SessionModelState,
     SessionModeState,
+    Usage,
+    UsageUpdate,
 )
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
@@ -99,6 +101,20 @@ class BaseAcpPersona(BasePersona):
     when a session is created or loaded.
     """
 
+    _acp_context_usage: Optional[UsageUpdate]
+    """
+    The latest `usage_update` from the ACP agent: tokens currently in context,
+    context window size, and optional cumulative session cost. `None` until the
+    agent sends one; some agents never do. Set by the default ACP client.
+    """
+
+    _acp_session_usage: Optional[Usage]
+    """
+    Cumulative session token usage from the latest prompt response. All values
+    are totals across the session, not per turn. `None` until a prompt response
+    carries usage. Set by the default ACP client.
+    """
+
     _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
     """
     Maximum number of recent messages to include in the history context injected
@@ -146,6 +162,8 @@ class BaseAcpPersona(BasePersona):
         self._acp_modes = []
         self._acp_current_mode_id = None
         self._acp_config_options = []
+        self._acp_context_usage = None
+        self._acp_session_usage = None
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -660,6 +678,31 @@ class BaseAcpPersona(BasePersona):
     def _get_stored_config_choices(self) -> dict[str, str | bool]:
         """Return config option values previously selected for this persona here."""
         return self.ychat.get_metadata().get("acp_config_options", {}).get(self.id, {})
+
+    @property
+    def acp_context_usage(self) -> Optional[UsageUpdate]:
+        """
+        The latest context usage reported by the ACP agent: tokens currently in
+        context, window size, and optional cumulative session cost. `None` when
+        the agent has not reported any.
+        """
+        return self._acp_context_usage
+
+    def _set_acp_context_usage(self, usage: UsageUpdate) -> None:
+        """Store a `usage_update` received from the ACP agent."""
+        self._acp_context_usage = usage
+
+    @property
+    def acp_session_usage(self) -> Optional[Usage]:
+        """
+        Cumulative session token usage from the latest prompt response. `None`
+        when no prompt response has carried usage.
+        """
+        return self._acp_session_usage
+
+    def _set_acp_session_usage(self, usage: Usage) -> None:
+        """Store the token usage carried on a completed prompt response."""
+        self._acp_session_usage = usage
 
     async def handle_uncaught_exception(self, exc: Exception) -> None:
         """Show structured error info for ACP RequestError inside the standard dropdown."""
