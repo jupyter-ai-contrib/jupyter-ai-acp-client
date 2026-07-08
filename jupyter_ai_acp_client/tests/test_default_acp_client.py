@@ -1,6 +1,7 @@
 """Tests for content block building and session management in JaiAcpClient."""
 
 import asyncio
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -13,6 +14,7 @@ from acp.schema import (
     UsageUpdate,
 )
 
+from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
 from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
 
 
@@ -229,9 +231,6 @@ def _real_usage_persona():
     carrying the real usage setters and properties so tests cover the actual
     store-then-read round trip. Collaborators the client touches are mocked.
     """
-    import logging
-
-    from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
 
     class _ConcreteAcpPersona(BaseAcpPersona):
         @property

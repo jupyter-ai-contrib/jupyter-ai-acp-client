@@ -607,6 +607,7 @@ export function AcpPersonaControls(
   const [usage, setUsage] = useState<AcpUsage>(EMPTY_USAGE);
   const [personaAnchor, setPersonaAnchor] = useState<HTMLElement | null>(null);
   const [polls, setPolls] = useState(0);
+  const refreshSeq = useRef(0);
 
   const chatPath = chatModel?.name ?? null;
 
@@ -614,7 +615,13 @@ export function AcpPersonaControls(
     if (!chatPath) {
       return;
     }
+    // Refreshes overlap (message events, polling, the trailing refresh), and a
+    // slow earlier response must not overwrite a newer one's state.
+    const seq = ++refreshSeq.current;
     const response = await getActivePersona(chatPath);
+    if (seq !== refreshSeq.current) {
+      return;
+    }
     setPersonas(response.personas);
     setActiveId(response.active_id);
     setActiveName(response.active_name);
