@@ -35,7 +35,7 @@ const USAGE_CLASS = 'jp-jupyter-ai-acp-client-usage';
 const NO_ONE_LABEL = 'No one';
 
 // Context-fill fractions at which the chip starts demanding attention: the
-// percent label appears and the ring turns warn, then error, colored.
+// ring and percent turn warn, then error, colored.
 const USAGE_WARN_AT = 0.7;
 const USAGE_ERROR_AT = 0.9;
 
@@ -469,12 +469,12 @@ function UsageRow(props: { label: string; value: string }): JSX.Element {
 }
 
 /**
- * The usage chip for the input toolbar: a small ring gauge of the active
- * persona's context-window fill, with the percent label appearing once fill
- * crosses the warn threshold. Hover shows a one-line summary; click opens a
- * popover with the full breakdown (context, session token totals, cost).
- * Renders nothing when the agent has reported no usage at all, so absence
- * reads as unknown rather than empty.
+ * The usage chip for the input toolbar: a ring gauge and percent of the active
+ * persona's context-window fill, shown next to the persona it describes, and
+ * colored once fill crosses the warn threshold. Hover shows a one-line
+ * summary; click opens a popover with the full breakdown (context, session
+ * token totals, cost). Renders nothing when the agent has reported no usage
+ * at all, so absence reads as unknown rather than empty.
  */
 function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
   const { context, tokens, cost } = props.usage;
@@ -512,9 +512,11 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
         title={summary}
         aria-label="Usage"
       >
-        {context ? <UsageRing fraction={fraction} /> : null}
-        {context && level !== 'ok' ? (
-          <span className={`${USAGE_CLASS}-pct`}>{percent}%</span>
+        {context ? (
+          <>
+            <UsageRing fraction={fraction} />
+            <span className={`${USAGE_CLASS}-pct`}>{percent}%</span>
+          </>
         ) : null}
         {!context && tokens ? (
           <span className={`${USAGE_CLASS}-pct`}>
@@ -751,14 +753,14 @@ export function AcpPersonaControls(
         </MenuItem>
       </Menu>
 
+      <UsageChip usage={usage} />
+
       {controls.length ? (
         <>
           <span className={`${SELECTOR_CLASS}-divider`} />
           <ControlsRow controls={controls} onChange={handleControl} />
         </>
       ) : null}
-
-      <UsageChip usage={usage} />
     </div>
   );
 }

@@ -501,10 +501,10 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   border-top: none;
 }
 
-/* Usage chip: a small ring gauge of the active persona's context fill, pinned
-   at the right end of the persona-controls group. Borderless, matching the
-   overflow button. The ring fill and percent take the chip's color, so the
-   warn/error levels recolor them through `currentColor`. */
+/* Usage chip: a small ring gauge and percent of the active persona's context
+   fill, next to the persona it describes. Borderless, matching the overflow
+   button. The ring fill and percent take the chip's color, so the warn/error
+   levels recolor them through `currentColor`. */
 .jp-jupyter-ai-acp-client-usage-chip {
   display: inline-flex;
   align-items: center;
