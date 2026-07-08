@@ -217,6 +217,58 @@ class ActivePersonaInfo(BaseModel):
     is_acp: bool
     avatar_url: str | None = None
 
+class AcpContextUsage(BaseModel):
+    # Tokens currently in the agent's context window.
+    used: int
+    # Total context window size in tokens.
+    size: int
+
+class AcpTokenUsage(BaseModel):
+    # All values are cumulative across the session, not per turn.
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cached_read_tokens: int | None = None
+    cached_write_tokens: int | None = None
+    thought_tokens: int | None = None
+
+class AcpCostUsage(BaseModel):
+    # Cumulative session cost, as reported by the agent.
+    amount: float
+    currency: str
+
+class AcpUsage(BaseModel):
+    # Each field is None when the agent has not reported that quantity.
+    context: AcpContextUsage | None = None
+    tokens: AcpTokenUsage | None = None
+    cost: AcpCostUsage | None = None
+
+def build_usage(persona: BaseAcpPersona) -> AcpUsage:
+    """
+    Collect the persona's reported usage: context fill and cost from the latest
+    `usage_update`, cumulative session tokens from the latest prompt response.
+    Fields the agent has not reported stay None.
+    """
+    usage = AcpUsage()
+    context = persona.acp_context_usage
+    if context is not None:
+        usage.context = AcpContextUsage(used=context.used, size=context.size)
+        if context.cost is not None:
+            usage.cost = AcpCostUsage(
+                amount=context.cost.amount, currency=context.cost.currency
+            )
+    tokens = persona.acp_session_usage
+    if tokens is not None:
+        usage.tokens = AcpTokenUsage(
+            input_tokens=tokens.input_tokens,
+            output_tokens=tokens.output_tokens,
+            total_tokens=tokens.total_tokens,
+            cached_read_tokens=tokens.cached_read_tokens,
+            cached_write_tokens=tokens.cached_write_tokens,
+            thought_tokens=tokens.thought_tokens,
+        )
+    return usage
+
 class ActivePersonaResponse(BaseModel):
     # Every persona in the chat, for the selector.
     personas: list[ActivePersonaInfo] = []
@@ -226,6 +278,9 @@ class ActivePersonaResponse(BaseModel):
     # The active persona's session controls (model, mode, config options),
     # normalized for the input toolbar, when it is an ACP persona.
     controls: list[AcpControl] = []
+    # The active persona's reported usage (context fill, session tokens, cost),
+    # when it is an ACP persona. Quantities the agent has not reported are None.
+    usage: AcpUsage = AcpUsage()
 
 class ActivePersonaHandler(_ChatScopedHandler):
     """
@@ -249,13 +304,16 @@ class ActivePersonaHandler(_ChatScopedHandler):
         ]
         active = persona_manager.active_persona
         controls: list[AcpControl] = []
+        usage = AcpUsage()
         if isinstance(active, BaseAcpPersona):
             controls = build_controls(active)
+            usage = build_usage(active)
         response = ActivePersonaResponse(
             personas=personas,
             active_id=active.id if active else None,
             active_name=active.name if active else None,
             controls=controls,
+            usage=usage,
         )
         self.finish(response.model_dump())
 

@@ -6,11 +6,14 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 import tornado.web
 from acp.schema import (
+    Cost,
     ModelInfo,
     SessionConfigOptionBoolean,
     SessionConfigOptionSelect,
     SessionConfigSelectOption,
     SessionMode,
+    Usage,
+    UsageUpdate,
 )
 from tornado.httpclient import HTTPClientError
 
@@ -19,6 +22,7 @@ from jupyter_ai_acp_client.routes import (
     MODEL_CONTROL_ID,
     AcpSlashCommandsHandler,
     build_controls,
+    build_usage,
 )
 
 
@@ -198,3 +202,60 @@ class TestBuildControls:
 
     def test_persona_with_nothing_advertised_yields_no_controls(self):
         assert build_controls(_persona()) == []
+
+
+def _usage_persona(*, context=None, tokens=None):
+    """A stand-in exposing only the attributes build_usage reads."""
+    return SimpleNamespace(acp_context_usage=context, acp_session_usage=tokens)
+
+
+class TestBuildUsage:
+    """Collection of a persona's reported usage into the endpoint shape."""
+
+    def test_nothing_reported_yields_all_none(self):
+        usage = build_usage(_usage_persona())
+        assert usage.context is None
+        assert usage.tokens is None
+        assert usage.cost is None
+
+    def test_context_without_cost(self):
+        update = UsageUpdate(sessionUpdate="usage_update", used=41_000, size=200_000)
+
+        usage = build_usage(_usage_persona(context=update))
+
+        assert usage.context.used == 41_000
+        assert usage.context.size == 200_000
+        assert usage.cost is None
+        assert usage.tokens is None
+
+    def test_context_with_cost(self):
+        update = UsageUpdate(
+            sessionUpdate="usage_update",
+            used=41_000,
+            size=200_000,
+            cost=Cost(amount=0.41, currency="USD"),
+        )
+
+        usage = build_usage(_usage_persona(context=update))
+
+        assert usage.cost.amount == 0.41
+        assert usage.cost.currency == "USD"
+
+    def test_session_tokens_with_optional_fields_passed_through(self):
+        tokens = Usage(
+            inputTokens=900,
+            outputTokens=340,
+            totalTokens=1_240,
+            cachedReadTokens=100,
+            thoughtTokens=50,
+        )
+
+        usage = build_usage(_usage_persona(tokens=tokens))
+
+        assert usage.tokens.input_tokens == 900
+        assert usage.tokens.output_tokens == 340
+        assert usage.tokens.total_tokens == 1_240
+        assert usage.tokens.cached_read_tokens == 100
+        assert usage.tokens.cached_write_tokens is None
+        assert usage.tokens.thought_tokens == 50
+        assert usage.context is None
