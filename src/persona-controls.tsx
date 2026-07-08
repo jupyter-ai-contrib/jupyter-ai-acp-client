@@ -457,15 +457,28 @@ function UsageRing(props: { fraction: number }): JSX.Element {
 }
 
 /**
- * One "label: value" row in the usage popover.
+ * A group header in the usage popover: an uppercase label with the group's
+ * headline value. Detail rows, when the group has any, follow beneath.
  */
-function UsageRow(props: {
+function UsageSection(props: {
   label: string;
   value: string;
   title?: string;
 }): JSX.Element {
   return (
-    <div className={`${USAGE_CLASS}-row`} title={props.title}>
+    <div className={`${USAGE_CLASS}-section`} title={props.title}>
+      <span>{props.label}</span>
+      <span className={`${USAGE_CLASS}-section-value`}>{props.value}</span>
+    </div>
+  );
+}
+
+/**
+ * One "label: value" detail row in the usage popover.
+ */
+function UsageRow(props: { label: string; value: string }): JSX.Element {
+  return (
+    <div className={`${USAGE_CLASS}-row`}>
       <span className={`${USAGE_CLASS}-row-label`}>{props.label}</span>
       <span className={`${USAGE_CLASS}-row-value`}>{props.value}</span>
     </div>
@@ -536,19 +549,15 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
       >
         <div className={`${USAGE_CLASS}-card`}>
           {context ? (
-            <>
-              <div className={`${USAGE_CLASS}-section`}>Context</div>
-              <UsageRow
-                label="In context now"
-                value={`${context.used.toLocaleString()} of ${formatTokens(context.size)} (${percent}%)`}
-              />
-            </>
+            <UsageSection
+              label="Context"
+              value={`${context.used.toLocaleString()} of ${formatTokens(context.size)} (${percent}%)`}
+            />
           ) : null}
           {tokens ? (
             <>
-              <div className={`${USAGE_CLASS}-section`}>Session tokens</div>
-              <UsageRow
-                label="Total"
+              <UsageSection
+                label="Session tokens"
                 value={tokens.total_tokens.toLocaleString()}
               />
               <UsageRow
@@ -580,14 +589,11 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
             </>
           ) : null}
           {cost ? (
-            <>
-              <div className={`${USAGE_CLASS}-section`}>Cost</div>
-              <UsageRow
-                label="Session estimate"
-                value={formatCost(cost.amount, cost.currency)}
-                title="Estimated at API list prices"
-              />
-            </>
+            <UsageSection
+              label="Session cost (est.)"
+              value={formatCost(cost.amount, cost.currency)}
+              title="Estimated at API list prices"
+            />
           ) : null}
         </div>
       </Popover>

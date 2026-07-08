@@ -570,7 +570,13 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   color: var(--jp-ui-font-color1);
 }
 
+/* Group header: an uppercase label with the group's headline value on the
+   right. Detail rows, when the group has any, follow beneath. */
 .jp-jupyter-ai-acp-client-usage-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
   margin-top: 8px;
   padding: 8px 0 2px;
   border-top: 1px solid var(--jp-border-color2);
@@ -582,10 +588,14 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   color: var(--jp-ui-font-color1);
 }
 
-.jp-jupyter-ai-acp-client-usage-section:first-child {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
+/* The headline value: primary data, exempt from the label's uppercase
+   emphasis, at the same size as the detail rows. */
+.jp-jupyter-ai-acp-client-usage-section-value {
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .jp-jupyter-ai-acp-client-usage-row {
@@ -593,6 +603,13 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   justify-content: space-between;
   gap: 16px;
   line-height: 1.7;
+}
+
+/* Whatever the card starts with sits flush at the top, no divider above. */
+.jp-jupyter-ai-acp-client-usage-card > :first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .jp-jupyter-ai-acp-client-usage-row-label {
