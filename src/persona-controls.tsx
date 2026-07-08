@@ -11,6 +11,7 @@ import {
   ListSubheader,
   Menu,
   MenuItem,
+  Popover,
   Switch
 } from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
@@ -20,7 +21,9 @@ import { InputToolbarRegistry } from '@jupyter/chat';
 import {
   AcpControl,
   AcpControlChoice,
+  AcpUsage,
   ActivePersonaInfo,
+  EMPTY_USAGE,
   getActivePersona,
   setAcpControl,
   setActivePersona
@@ -28,7 +31,13 @@ import {
 
 const SELECTOR_CLASS = 'jp-jupyter-ai-acp-client-personaControls';
 const MENU_CLASS = 'jp-jupyter-ai-acp-client-controlMenu';
+const USAGE_CLASS = 'jp-jupyter-ai-acp-client-usage';
 const NO_ONE_LABEL = 'No one';
+
+// Context-fill fractions at which the chip starts demanding attention: the
+// percent label appears and the ring turns warn, then error, colored.
+const USAGE_WARN_AT = 0.7;
+const USAGE_ERROR_AT = 0.9;
 
 // Personas register a moment after a chat opens, and an ACP persona's controls
 // load asynchronously while its agent session initializes, which can take 20s+
@@ -382,6 +391,200 @@ function ControlsRow(props: {
 }
 
 /**
+ * Format a token count compactly: 950 stays as-is, 41500 becomes "41.5k",
+ * 1240000 becomes "1.24M".
+ */
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toPrecision(3)}M`;
+  }
+  if (n >= 1_000) {
+    return `${(n / 1_000).toPrecision(3)}k`;
+  }
+  return String(n);
+}
+
+/**
+ * Format a cost amount with its ISO 4217 currency code.
+ */
+function formatCost(amount: number, currency: string): string {
+  const value = amount.toFixed(2);
+  return currency === 'USD' ? `$${value}` : `${value} ${currency}`;
+}
+
+/**
+ * A ring gauge showing how full the context window is. The track is a muted
+ * full circle; the fill arc grows clockwise from 12 o'clock and takes the
+ * chip's current color, so the warn/error classes color it via `currentColor`.
+ */
+function UsageRing(props: { fraction: number }): JSX.Element {
+  const radius = 6;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.min(Math.max(props.fraction, 0), 1);
+  return (
+    <svg
+      className={`${USAGE_CLASS}-ring`}
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      aria-hidden="true"
+    >
+      <circle
+        className={`${USAGE_CLASS}-ring-track`}
+        cx="8"
+        cy="8"
+        r={radius}
+        fill="none"
+        strokeWidth="2"
+      />
+      <circle
+        className={`${USAGE_CLASS}-ring-fill`}
+        cx="8"
+        cy="8"
+        r={radius}
+        fill="none"
+        strokeWidth="2"
+        strokeDasharray={circumference}
+        strokeDashoffset={circumference * (1 - clamped)}
+        transform="rotate(-90 8 8)"
+      />
+    </svg>
+  );
+}
+
+/**
+ * One "label: value" row in the usage popover.
+ */
+function UsageRow(props: { label: string; value: string }): JSX.Element {
+  return (
+    <div className={`${USAGE_CLASS}-row`}>
+      <span className={`${USAGE_CLASS}-row-label`}>{props.label}</span>
+      <span className={`${USAGE_CLASS}-row-value`}>{props.value}</span>
+    </div>
+  );
+}
+
+/**
+ * The usage chip for the input toolbar: a small ring gauge of the active
+ * persona's context-window fill, with the percent label appearing once fill
+ * crosses the warn threshold. Hover shows a one-line summary; click opens a
+ * popover with the full breakdown (context, session token totals, cost).
+ * Renders nothing when the agent has reported no usage at all, so absence
+ * reads as unknown rather than empty.
+ */
+function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
+  const { context, tokens, cost } = props.usage;
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+
+  if (!context && !tokens && !cost) {
+    return null;
+  }
+
+  const fraction =
+    context && context.size > 0 ? context.used / context.size : 0;
+  const percent = Math.round(fraction * 100);
+  const level =
+    fraction >= USAGE_ERROR_AT
+      ? 'error'
+      : fraction >= USAGE_WARN_AT
+        ? 'warn'
+        : 'ok';
+
+  const summary = [
+    context &&
+      `Context: ${context.used.toLocaleString()} / ${context.size.toLocaleString()} tokens (${percent}%)`,
+    tokens && `Session tokens: ${tokens.total_tokens.toLocaleString()}`,
+    cost && `Cost: ${formatCost(cost.amount, cost.currency)}`
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`${USAGE_CLASS}-chip ${USAGE_CLASS}-${level}`}
+        onClick={event => setAnchor(event.currentTarget)}
+        title={summary}
+        aria-label="Usage"
+      >
+        {context ? <UsageRing fraction={fraction} /> : null}
+        {context && level !== 'ok' ? (
+          <span className={`${USAGE_CLASS}-pct`}>{percent}%</span>
+        ) : null}
+        {!context && tokens ? (
+          <span className={`${USAGE_CLASS}-pct`}>
+            {formatTokens(tokens.total_tokens)}
+          </span>
+        ) : null}
+      </button>
+      <Popover
+        anchorEl={anchor}
+        open={!!anchor}
+        onClose={() => setAnchor(null)}
+        {...menuAnchorProps}
+      >
+        <div className={`${USAGE_CLASS}-card`}>
+          {context ? (
+            <>
+              <div className={`${USAGE_CLASS}-section`}>Context</div>
+              <UsageRow
+                label="In context now"
+                value={`${context.used.toLocaleString()} / ${context.size.toLocaleString()} (${percent}%)`}
+              />
+            </>
+          ) : null}
+          {tokens ? (
+            <>
+              <div className={`${USAGE_CLASS}-section`}>Session tokens</div>
+              <UsageRow
+                label="Total"
+                value={tokens.total_tokens.toLocaleString()}
+              />
+              <UsageRow
+                label="Input"
+                value={tokens.input_tokens.toLocaleString()}
+              />
+              <UsageRow
+                label="Output"
+                value={tokens.output_tokens.toLocaleString()}
+              />
+              {tokens.cached_read_tokens !== null ? (
+                <UsageRow
+                  label="Cache read"
+                  value={tokens.cached_read_tokens.toLocaleString()}
+                />
+              ) : null}
+              {tokens.cached_write_tokens !== null ? (
+                <UsageRow
+                  label="Cache write"
+                  value={tokens.cached_write_tokens.toLocaleString()}
+                />
+              ) : null}
+              {tokens.thought_tokens !== null ? (
+                <UsageRow
+                  label="Thinking"
+                  value={tokens.thought_tokens.toLocaleString()}
+                />
+              ) : null}
+            </>
+          ) : null}
+          {cost ? (
+            <>
+              <div className={`${USAGE_CLASS}-section`}>Cost</div>
+              <UsageRow
+                label="Session"
+                value={`${formatCost(cost.amount, cost.currency)} est. at API rates`}
+              />
+            </>
+          ) : null}
+        </div>
+      </Popover>
+    </>
+  );
+}
+
+/**
  * The active-persona control for the chat input toolbar. Shows which persona
  * replies (with its avatar), lets the user switch it, and, when the active
  * persona is an ACP persona, renders its session controls (model, mode, and any
@@ -395,6 +598,7 @@ export function AcpPersonaControls(
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeName, setActiveName] = useState<string | null>(null);
   const [controls, setControls] = useState<AcpControl[]>([]);
+  const [usage, setUsage] = useState<AcpUsage>(EMPTY_USAGE);
   const [personaAnchor, setPersonaAnchor] = useState<HTMLElement | null>(null);
   const [polls, setPolls] = useState(0);
 
@@ -409,6 +613,7 @@ export function AcpPersonaControls(
     setActiveId(response.active_id);
     setActiveName(response.active_name);
     setControls(response.controls);
+    setUsage(response.usage ?? EMPTY_USAGE);
   }, [chatPath]);
 
   useEffect(() => {
@@ -537,6 +742,8 @@ export function AcpPersonaControls(
           <ControlsRow controls={controls} onChange={handleControl} />
         </>
       ) : null}
+
+      <UsageChip usage={usage} />
     </div>
   );
 }

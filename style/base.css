@@ -500,3 +500,105 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   margin-top: 0;
   border-top: none;
 }
+
+/* Usage chip: a small ring gauge of the active persona's context fill, pinned
+   at the right end of the persona-controls group. Borderless, matching the
+   overflow button. The ring fill and percent take the chip's color, so the
+   warn/error levels recolor them through `currentColor`. */
+.jp-jupyter-ai-acp-client-usage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px;
+  border: none;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  border-radius: var(--jp-border-radius);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size0);
+  line-height: 1.5;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.jp-jupyter-ai-acp-client-usage-chip:hover {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-jupyter-ai-acp-client-usage-warn {
+  color: var(--jp-warn-color1);
+}
+
+.jp-jupyter-ai-acp-client-usage-error {
+  color: var(--jp-error-color1);
+}
+
+/* Keep the threshold color on hover, only the background changes. */
+.jp-jupyter-ai-acp-client-usage-warn:hover {
+  color: var(--jp-warn-color1);
+}
+
+.jp-jupyter-ai-acp-client-usage-error:hover {
+  color: var(--jp-error-color1);
+}
+
+.jp-jupyter-ai-acp-client-usage-ring {
+  display: block;
+  flex-shrink: 0;
+}
+
+.jp-jupyter-ai-acp-client-usage-ring-track {
+  stroke: var(--jp-border-color2);
+}
+
+.jp-jupyter-ai-acp-client-usage-ring-fill {
+  stroke: currentcolor;
+}
+
+.jp-jupyter-ai-acp-client-usage-pct {
+  white-space: nowrap;
+}
+
+/* Usage popover card: labeled sections in the overflow-subheader style, then
+   one row per quantity, label muted and value right-aligned. */
+.jp-jupyter-ai-acp-client-usage-card {
+  padding: 8px 12px;
+  min-width: 220px;
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-jupyter-ai-acp-client-usage-section {
+  margin-top: 8px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--jp-border-color2);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-jupyter-ai-acp-client-usage-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.jp-jupyter-ai-acp-client-usage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  line-height: 1.7;
+}
+
+.jp-jupyter-ai-acp-client-usage-row-label {
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-jupyter-ai-acp-client-usage-row-value {
+  white-space: nowrap;
+}
