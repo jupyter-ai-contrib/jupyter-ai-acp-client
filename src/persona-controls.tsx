@@ -390,24 +390,24 @@ function ControlsRow(props: {
   );
 }
 
+const compactNumber = new Intl.NumberFormat('en', {
+  notation: 'compact',
+  maximumSignificantDigits: 3
+});
+
 /**
  * Format a token count compactly: 950 stays as-is, 41500 becomes "41.5k",
- * 1240000 becomes "1.24M".
+ * 1240000 becomes "1.24M". `Intl.NumberFormat` picks the tier after rounding,
+ * so boundary values like 999500 become "1M" rather than an exponential form.
  */
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) {
-    return `${(n / 1_000_000).toPrecision(3)}M`;
-  }
-  if (n >= 1_000) {
-    return `${(n / 1_000).toPrecision(3)}k`;
-  }
-  return String(n);
+export function formatTokens(n: number): string {
+  return compactNumber.format(n).replace('K', 'k');
 }
 
 /**
  * Format a cost amount with its ISO 4217 currency code.
  */
-function formatCost(amount: number, currency: string): string {
+export function formatCost(amount: number, currency: string): string {
   const value = amount.toFixed(2);
   return currency === 'USD' ? `$${value}` : `${value} ${currency}`;
 }
