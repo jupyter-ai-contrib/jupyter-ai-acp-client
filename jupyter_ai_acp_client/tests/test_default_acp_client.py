@@ -223,16 +223,38 @@ class TestPromptAndReplyContentBlocks:
         assert blocks[1].uri == "../../../etc/passwd"
 
 
+def _real_usage_persona():
+    """
+    A `BaseAcpPersona` created without `__init__` (no subprocess or session),
+    carrying the real usage setters and properties so tests cover the actual
+    store-then-read round trip. Collaborators the client touches are mocked.
+    """
+    import logging
+
+    from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
+
+    class _ConcreteAcpPersona(BaseAcpPersona):
+        @property
+        def defaults(self):  # pragma: no cover - never called in these tests
+            return None
+
+    persona = _ConcreteAcpPersona.__new__(_ConcreteAcpPersona)
+    persona._acp_context_usage = None
+    persona._acp_session_usage = None
+    persona.log = logging.getLogger("test")
+    persona.awareness = MagicMock()
+    persona.ychat = MagicMock()
+    return persona
+
+
 class TestUsageStorage:
     """A usage report received by the client ends up readable on the persona."""
 
     async def test_usage_update_is_stored_as_context_usage(self):
-        client, _, persona = _make_client_and_persona()
+        client, _, _ = _make_client_and_persona()
         client._loading_sessions = {}
-        persona.acp_context_usage = None
-        persona._set_acp_context_usage = lambda u: setattr(
-            persona, "acp_context_usage", u
-        )
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
         update = UsageUpdate(sessionUpdate="usage_update", used=41_000, size=200_000)
 
         await client.session_update(SESSION_ID, update)
@@ -240,25 +262,21 @@ class TestUsageStorage:
         assert persona.acp_context_usage is update
 
     async def test_prompt_response_usage_is_stored_as_session_usage(self):
-        client, conn, persona = _make_client_and_persona()
+        client, conn, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
         usage = Usage(inputTokens=900, outputTokens=340, totalTokens=1_240)
         conn.prompt = AsyncMock(return_value=MagicMock(usage=usage))
-        persona.acp_session_usage = None
-        persona._set_acp_session_usage = lambda u: setattr(
-            persona, "acp_session_usage", u
-        )
 
         await client.prompt_and_reply(session_id=SESSION_ID, prompt="hello")
 
         assert persona.acp_session_usage is usage
 
     async def test_prompt_response_without_usage_stores_nothing(self):
-        client, conn, persona = _make_client_and_persona()
+        client, conn, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
         conn.prompt = AsyncMock(return_value=MagicMock(usage=None))
-        persona.acp_session_usage = None
-        persona._set_acp_session_usage = lambda u: setattr(
-            persona, "acp_session_usage", u
-        )
 
         await client.prompt_and_reply(session_id=SESSION_ID, prompt="hello")
 
