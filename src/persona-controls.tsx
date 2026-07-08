@@ -459,9 +459,13 @@ function UsageRing(props: { fraction: number }): JSX.Element {
 /**
  * One "label: value" row in the usage popover.
  */
-function UsageRow(props: { label: string; value: string }): JSX.Element {
+function UsageRow(props: {
+  label: string;
+  value: string;
+  title?: string;
+}): JSX.Element {
   return (
-    <div className={`${USAGE_CLASS}-row`}>
+    <div className={`${USAGE_CLASS}-row`} title={props.title}>
       <span className={`${USAGE_CLASS}-row-label`}>{props.label}</span>
       <span className={`${USAGE_CLASS}-row-value`}>{props.value}</span>
     </div>
@@ -533,10 +537,15 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
         <div className={`${USAGE_CLASS}-card`}>
           {context ? (
             <>
-              <div className={`${USAGE_CLASS}-section`}>Context</div>
+              <div className={`${USAGE_CLASS}-section`}>
+                <span>Context window</span>
+                <span className={`${USAGE_CLASS}-section-value`}>
+                  {formatTokens(context.size)} tokens
+                </span>
+              </div>
               <UsageRow
                 label="In context now"
-                value={`${context.used.toLocaleString()} / ${context.size.toLocaleString()} (${percent}%)`}
+                value={`${context.used.toLocaleString()} (${percent}%)`}
               />
             </>
           ) : null}
@@ -579,8 +588,9 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
             <>
               <div className={`${USAGE_CLASS}-section`}>Cost</div>
               <UsageRow
-                label="Session"
-                value={`${formatCost(cost.amount, cost.currency)} est. at API rates`}
+                label="Session estimate"
+                value={formatCost(cost.amount, cost.currency)}
+                title="Estimated at API list prices"
               />
             </>
           ) : null}
