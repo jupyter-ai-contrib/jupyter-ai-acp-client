@@ -458,16 +458,20 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   text-overflow: ellipsis;
 }
 
-/* description: secondary, one line. Long descriptions truncate (full text on
-   hover) so the menu stays clean and never sprawls. */
+/* description: secondary, wrapping to at most two lines. Agent-authored text
+   has arbitrary length, so the clamp keeps the common case fully readable and
+   bounds the pathological one (full text stays on hover). The class is doubled
+   to out-rank MUI's nowrap on the same element. */
 .jp-jupyter-ai-acp-client-controlMenu-paper
-  .jp-jupyter-ai-acp-client-controlMenu-desc {
+  .jp-jupyter-ai-acp-client-controlMenu-desc.jp-jupyter-ai-acp-client-controlMenu-desc {
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size0);
   color: var(--jp-ui-font-color2);
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .jp-jupyter-ai-acp-client-controlMenu-check {
