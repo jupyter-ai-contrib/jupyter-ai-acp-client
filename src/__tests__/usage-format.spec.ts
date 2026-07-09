@@ -2,7 +2,11 @@
  * Tests for the usage chip's number formatters.
  */
 
-import { formatCost, formatTokens } from '../persona-controls';
+import {
+  formatCost,
+  formatTokens,
+  formatTokensExact
+} from '../persona-controls';
 
 describe('formatTokens', () => {
   it('keeps small counts as-is', () => {
@@ -26,9 +30,19 @@ describe('formatTokens', () => {
   });
 });
 
+describe('formatTokensExact', () => {
+  it('renders the full count with separators for hover titles', () => {
+    expect(formatTokensExact(12456789)).toEqual('12,456,789 tokens');
+  });
+});
+
 describe('formatCost', () => {
   it('renders USD with a dollar sign', () => {
     expect(formatCost(0.41, 'USD')).toEqual('$0.41');
+  });
+
+  it('groups thousands', () => {
+    expect(formatCost(1234.5, 'USD')).toEqual('$1,234.50');
   });
 
   it('renders other currencies with their code', () => {

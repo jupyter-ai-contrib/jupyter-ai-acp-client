@@ -394,28 +394,41 @@ function ControlsRow(props: {
   );
 }
 
-// Both formatters pin the `en` locale so exact and compact numbers agree with
-// each other and with the surrounding English labels.
+// All formatters pin the `en` locale so numbers agree with each other and
+// with the surrounding English labels.
 const exactNumber = new Intl.NumberFormat('en');
 const compactNumber = new Intl.NumberFormat('en', {
   notation: 'compact',
   maximumSignificantDigits: 3
+});
+const costNumber = new Intl.NumberFormat('en', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
 });
 
 /**
  * Format a token count compactly: 950 stays as-is, 41500 becomes "41.5k",
  * 1240000 becomes "1.24M". `Intl.NumberFormat` picks the tier after rounding,
  * so boundary values like 999500 become "1M" rather than an exponential form.
+ * Token values render compactly everywhere (magnitude is what a status surface
+ * communicates); the exact count rides on the element's hover title.
  */
 export function formatTokens(n: number): string {
   return compactNumber.format(n).replace('K', 'k');
 }
 
 /**
+ * Format a token count exactly, with thousands separators, for hover titles.
+ */
+export function formatTokensExact(n: number): string {
+  return `${exactNumber.format(n)} tokens`;
+}
+
+/**
  * Format a cost amount with its ISO 4217 currency code.
  */
 export function formatCost(amount: number, currency: string): string {
-  const value = amount.toFixed(2);
+  const value = costNumber.format(amount);
   return currency === 'USD' ? `$${value}` : `${value} ${currency}`;
 }
 
@@ -477,11 +490,16 @@ function UsageSection(props: {
 }
 
 /**
- * One "label: value" detail row in the usage popover.
+ * One "label: value" detail row in the usage popover. `title` carries the
+ * exact value behind a compact one.
  */
-function UsageRow(props: { label: string; value: string }): JSX.Element {
+function UsageRow(props: {
+  label: string;
+  value: string;
+  title?: string;
+}): JSX.Element {
   return (
-    <div className={`${USAGE_CLASS}-row`}>
+    <div className={`${USAGE_CLASS}-row`} title={props.title}>
       <span className={`${USAGE_CLASS}-row-label`}>{props.label}</span>
       <span className={`${USAGE_CLASS}-row-value`}>{props.value}</span>
     </div>
@@ -516,8 +534,8 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
 
   const summary = [
     context &&
-      `Context: ${exactNumber.format(context.used)} of ${formatTokens(context.size)} tokens (${percent}%)`,
-    tokens && `Session tokens: ${exactNumber.format(tokens.total_tokens)}`,
+      `Context: ${formatTokens(context.used)} of ${formatTokens(context.size)} tokens (${percent}%)`,
+    tokens && `Session tokens: ${formatTokens(tokens.total_tokens)}`,
     cost && `Cost: ${formatCost(cost.amount, cost.currency)}`
   ]
     .filter(Boolean)
@@ -554,39 +572,46 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
           {context ? (
             <UsageSection
               label="Context"
-              value={`${exactNumber.format(context.used)} of ${formatTokens(context.size)} (${percent}%)`}
+              value={`${formatTokens(context.used)} of ${formatTokens(context.size)} (${percent}%)`}
+              title={`${exactNumber.format(context.used)} of ${exactNumber.format(context.size)} tokens`}
             />
           ) : null}
           {tokens ? (
             <>
               <UsageSection
                 label="Session tokens"
-                value={exactNumber.format(tokens.total_tokens)}
+                value={formatTokens(tokens.total_tokens)}
+                title={formatTokensExact(tokens.total_tokens)}
               />
               <UsageRow
                 label="Input"
-                value={exactNumber.format(tokens.input_tokens)}
+                value={formatTokens(tokens.input_tokens)}
+                title={formatTokensExact(tokens.input_tokens)}
               />
               <UsageRow
                 label="Output"
-                value={exactNumber.format(tokens.output_tokens)}
+                value={formatTokens(tokens.output_tokens)}
+                title={formatTokensExact(tokens.output_tokens)}
               />
               {tokens.cached_read_tokens !== null ? (
                 <UsageRow
                   label="Cache read"
-                  value={exactNumber.format(tokens.cached_read_tokens)}
+                  value={formatTokens(tokens.cached_read_tokens)}
+                  title={formatTokensExact(tokens.cached_read_tokens)}
                 />
               ) : null}
               {tokens.cached_write_tokens !== null ? (
                 <UsageRow
                   label="Cache write"
-                  value={exactNumber.format(tokens.cached_write_tokens)}
+                  value={formatTokens(tokens.cached_write_tokens)}
+                  title={formatTokensExact(tokens.cached_write_tokens)}
                 />
               ) : null}
               {tokens.thought_tokens !== null ? (
                 <UsageRow
                   label="Thinking"
-                  value={exactNumber.format(tokens.thought_tokens)}
+                  value={formatTokens(tokens.thought_tokens)}
+                  title={formatTokensExact(tokens.thought_tokens)}
                 />
               ) : null}
             </>
