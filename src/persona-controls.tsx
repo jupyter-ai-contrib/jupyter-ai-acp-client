@@ -394,6 +394,9 @@ function ControlsRow(props: {
   );
 }
 
+// Both formatters pin the `en` locale so exact and compact numbers agree with
+// each other and with the surrounding English labels.
+const exactNumber = new Intl.NumberFormat('en');
 const compactNumber = new Intl.NumberFormat('en', {
   notation: 'compact',
   maximumSignificantDigits: 3
@@ -513,8 +516,8 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
 
   const summary = [
     context &&
-      `Context: ${context.used.toLocaleString()} of ${formatTokens(context.size)} tokens (${percent}%)`,
-    tokens && `Session tokens: ${tokens.total_tokens.toLocaleString()}`,
+      `Context: ${exactNumber.format(context.used)} of ${formatTokens(context.size)} tokens (${percent}%)`,
+    tokens && `Session tokens: ${exactNumber.format(tokens.total_tokens)}`,
     cost && `Cost: ${formatCost(cost.amount, cost.currency)}`
   ]
     .filter(Boolean)
@@ -527,7 +530,7 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
         className={`${USAGE_CLASS}-chip ${USAGE_CLASS}-${level}`}
         onClick={event => setAnchor(event.currentTarget)}
         title={summary}
-        aria-label="Usage"
+        aria-label={context ? `Context ${percent}% used` : 'Usage'}
       >
         {context ? (
           <>
@@ -551,39 +554,39 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
           {context ? (
             <UsageSection
               label="Context"
-              value={`${context.used.toLocaleString()} of ${formatTokens(context.size)} (${percent}%)`}
+              value={`${exactNumber.format(context.used)} of ${formatTokens(context.size)} (${percent}%)`}
             />
           ) : null}
           {tokens ? (
             <>
               <UsageSection
                 label="Session tokens"
-                value={tokens.total_tokens.toLocaleString()}
+                value={exactNumber.format(tokens.total_tokens)}
               />
               <UsageRow
                 label="Input"
-                value={tokens.input_tokens.toLocaleString()}
+                value={exactNumber.format(tokens.input_tokens)}
               />
               <UsageRow
                 label="Output"
-                value={tokens.output_tokens.toLocaleString()}
+                value={exactNumber.format(tokens.output_tokens)}
               />
               {tokens.cached_read_tokens !== null ? (
                 <UsageRow
                   label="Cache read"
-                  value={tokens.cached_read_tokens.toLocaleString()}
+                  value={exactNumber.format(tokens.cached_read_tokens)}
                 />
               ) : null}
               {tokens.cached_write_tokens !== null ? (
                 <UsageRow
                   label="Cache write"
-                  value={tokens.cached_write_tokens.toLocaleString()}
+                  value={exactNumber.format(tokens.cached_write_tokens)}
                 />
               ) : null}
               {tokens.thought_tokens !== null ? (
                 <UsageRow
                   label="Thinking"
-                  value={tokens.thought_tokens.toLocaleString()}
+                  value={exactNumber.format(tokens.thought_tokens)}
                 />
               ) : null}
             </>
@@ -695,6 +698,10 @@ export function AcpPersonaControls(
   const handlePersona = async (personaId: string | null) => {
     setPersonaAnchor(null);
     setActiveId(personaId);
+    // Usage is per persona; clearing it now keeps the previous persona's
+    // numbers from showing next to the new persona's name while the refresh
+    // is in flight.
+    setUsage(EMPTY_USAGE);
     if (chatPath) {
       await setActivePersona(chatPath, personaId);
       // Refetch so the controls follow the new active persona.
