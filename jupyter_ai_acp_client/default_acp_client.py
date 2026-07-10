@@ -334,7 +334,7 @@ class JaiAcpClient(Client):
                 # Store the cumulative session token usage when the agent
                 # reports it on the response.
                 if response.usage is not None:
-                    persona._set_acp_session_usage(response.usage)
+                    persona.update_acp_session_usage(response.usage)
 
                 # If cancelled, message already finalized by stop_streaming()
                 if self._cancel_requested.get(session_id, False):
@@ -442,7 +442,7 @@ class JaiAcpClient(Client):
         # full the agent's context window is.
         if isinstance(update, UsageUpdate):
             if persona is not None:
-                persona._set_acp_context_usage(update)
+                persona.update_acp_context_usage(update)
             return
 
         # Skip message/tool events when cancellation has been requested

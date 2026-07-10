@@ -103,16 +103,21 @@ class BaseAcpPersona(BasePersona):
 
     _acp_context_usage: Optional[UsageUpdate]
     """
-    The latest `usage_update` from the ACP agent: tokens currently in context,
-    context window size, and optional cumulative session cost. `None` until the
-    agent sends one; some agents never do. Set by the default ACP client.
+    How full the agent's context window is right now: tokens currently in
+    context, window size, and optional cumulative session cost, from the
+    latest `usage_update`. A live snapshot that can decrease (e.g. after
+    compaction). Distinct from `acp_session_usage`, which counts total
+    session throughput. `None` until the agent sends one; some agents
+    never do. Set by the default ACP client.
     """
 
     _acp_session_usage: Optional[Usage]
     """
-    Cumulative session token usage from the latest prompt response. All values
-    are totals across the session, not per turn. `None` until a prompt response
-    carries usage. Set by the default ACP client.
+    Cumulative token totals for the whole session from the latest prompt
+    response: never decreases, and includes cache re-reads, so it grows
+    past the context window size. Distinct from `acp_context_usage`, which measures
+    current window occupancy. `None` until a prompt response carries
+    usage. Set by the default ACP client.
     """
 
     _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
@@ -682,26 +687,31 @@ class BaseAcpPersona(BasePersona):
     @property
     def acp_context_usage(self) -> Optional[UsageUpdate]:
         """
-        The latest context usage reported by the ACP agent: tokens currently in
-        context, window size, and optional cumulative session cost. `None` when
-        the agent has not reported any.
+        How full the agent's context window is right now: tokens currently in
+        context, window size, and optional cumulative session cost, from the
+        latest `usage_update`. A live snapshot that can decrease (e.g. after
+        compaction). Distinct from `acp_session_usage`, which counts total
+        session throughput. `None` when the agent has not reported any.
         """
         return self._acp_context_usage
 
-    def _set_acp_context_usage(self, usage: UsageUpdate) -> None:
-        """Store a `usage_update` received from the ACP agent."""
+    def update_acp_context_usage(self, usage: UsageUpdate) -> None:
+        """Record a `usage_update` received from the ACP agent."""
         self._acp_context_usage = usage
 
     @property
     def acp_session_usage(self) -> Optional[Usage]:
         """
-        Cumulative session token usage from the latest prompt response. `None`
-        when no prompt response has carried usage.
+        Cumulative token totals for the whole session from the latest prompt
+        response: never decreases, and includes cache re-reads, so it grows
+        past the context window size. Distinct from `acp_context_usage`, which measures
+        current window occupancy. `None` when no prompt response has carried
+        usage.
         """
         return self._acp_session_usage
 
-    def _set_acp_session_usage(self, usage: Usage) -> None:
-        """Store the token usage carried on a completed prompt response."""
+    def update_acp_session_usage(self, usage: Usage) -> None:
+        """Record the token usage carried on a completed prompt response."""
         self._acp_session_usage = usage
 
     async def handle_uncaught_exception(self, exc: Exception) -> None:
