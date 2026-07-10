@@ -241,7 +241,7 @@ class BaseAcpPersona(BasePersona):
         )
         self._set_acp_model_state(response.models)
         self._set_acp_mode_state(response.modes)
-        self._set_acp_config_options(response.config_options)
+        self.update_acp_config_options(response.config_options)
         return response
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
@@ -255,7 +255,7 @@ class BaseAcpPersona(BasePersona):
         self._record_new_session(response.session_id)
         self._set_acp_model_state(response.models)
         self._set_acp_mode_state(response.modes)
-        self._set_acp_config_options(response.config_options)
+        self.update_acp_config_options(response.config_options)
 
         # Reapply a previously selected model so the choice survives session
         # recreation (e.g. a server restart that creates a fresh ACP session).
@@ -615,7 +615,7 @@ class BaseAcpPersona(BasePersona):
         self._acp_modes = modes.available_modes
         self._acp_current_mode_id = modes.current_mode_id
 
-    def _set_acp_current_mode(self, mode_id: str) -> None:
+    def update_acp_current_mode(self, mode_id: str) -> None:
         """Record a mode the agent switched to itself (a `current_mode_update`)."""
         self._acp_current_mode_id = mode_id
 
@@ -648,7 +648,7 @@ class BaseAcpPersona(BasePersona):
         """
         return self._acp_config_options
 
-    def _set_acp_config_options(
+    def update_acp_config_options(
         self, config_options: Optional[list[AcpConfigOption]]
     ) -> None:
         """

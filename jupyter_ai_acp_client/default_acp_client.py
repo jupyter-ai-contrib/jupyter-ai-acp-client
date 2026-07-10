@@ -430,12 +430,12 @@ class JaiAcpClient(Client):
         # controls reflect the current values.
         if isinstance(update, CurrentModeUpdate):
             if persona is not None:
-                persona._set_acp_current_mode(update.current_mode_id)
+                persona.update_acp_current_mode(update.current_mode_id)
             return
 
         if isinstance(update, ConfigOptionUpdate):
             if persona is not None:
-                persona._set_acp_config_options(update.config_options)
+                persona.update_acp_config_options(update.config_options)
             return
 
         # Keep the persona's context usage current so the toolbar can show how
