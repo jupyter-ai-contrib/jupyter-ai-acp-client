@@ -55,7 +55,7 @@ class AcpSlashCommandsHandler(APIHandler):
                 # raise HTTP error: persona not found
                 raise tornado.web.HTTPError(404, f"Persona not found: @{persona_mention_name}")
         else:
-            persona = persona_manager.active_persona
+            persona = persona_manager.default_persona
 
         # Return early with empty response if either:
         # 1. no default persona, or
@@ -210,7 +210,7 @@ class _ChatScopedHandler(APIHandler):
             raise tornado.web.HTTPError(404, f"Chat not initialized: {chat_path}")
         return persona_manager
 
-class ActivePersonaInfo(BaseModel):
+class PersonaInfo(BaseModel):
     id: str
     name: str
     mention_name: str
@@ -269,31 +269,47 @@ def build_usage(persona: BaseAcpPersona) -> AcpUsage:
         )
     return usage
 
-class ActivePersonaResponse(BaseModel):
+class PersonasResponse(BaseModel):
     # Every persona in the chat, for the selector.
-    personas: list[ActivePersonaInfo] = []
-    # The active persona (who replies), or None for "no one".
-    active_id: str | None = None
-    active_name: str | None = None
-    # The active persona's session controls (model, mode, config options),
-    # normalized for the input toolbar, when it is an ACP persona.
+    personas: list[PersonaInfo] = []
+    # The session controls (model, mode, config options) of the persona named in
+    # the `persona_id` query arg, normalized for the input toolbar, when it is an
+    # ACP persona. Empty otherwise.
     controls: list[AcpControl] = []
-    # The active persona's reported usage (context fill, session tokens, cost),
+    # The selected persona's reported usage (context fill, session tokens, cost),
     # when it is an ACP persona. Quantities the agent has not reported are None.
     usage: AcpUsage = AcpUsage()
 
-class ActivePersonaHandler(_ChatScopedHandler):
+class PersonasHandler(_ChatScopedHandler):
     """
-    REST endpoint for the active-persona selector. GET returns the chat's
-    personas, which one is active, and the active persona's session controls in
-    one call. POST sets the active persona (persona_id null means "no one").
+    REST endpoint backing the persona selector and its session controls. GET
+    returns the chat's personas and — for the persona named by the optional
+    `persona_id` query arg (defaulting to the chat's default persona) — that
+    persona's session controls, when it is an ACP persona.
+
+    The endpoint no longer tracks an "active" persona: which persona a message
+    is routed to now lives in each message's metadata (stamped by the frontend),
+    so this endpoint only advertises what's available and configurable.
     """
+
+    def _resolve_persona(self, persona_manager: "PersonaManager"):
+        """The persona whose controls to serve: the one named by `persona_id`,
+        else the chat's default persona. Returns None if neither resolves.
+
+        A `persona_id` naming a persona that isn't installed here (e.g. a default
+        advertised by the server but not present in this environment) is not an
+        error: it just means "no controls to show". We must still return the
+        persona list so the selector can render, so this never raises."""
+        persona_id = self.get_argument("persona_id", None)
+        if persona_id:
+            return persona_manager.personas.get(persona_id)
+        return persona_manager.default_persona
 
     @tornado.web.authenticated
     def get(self, _unused: str = ""):
         persona_manager = self._get_persona_manager()
         personas = [
-            ActivePersonaInfo(
+            PersonaInfo(
                 id=p.id,
                 name=p.name,
                 mention_name=p.as_user().mention_name,
@@ -302,40 +318,22 @@ class ActivePersonaHandler(_ChatScopedHandler):
             )
             for p in persona_manager.personas.values()
         ]
-        active = persona_manager.active_persona
+        persona = self._resolve_persona(persona_manager)
         controls: list[AcpControl] = []
         usage = AcpUsage()
-        if isinstance(active, BaseAcpPersona):
-            controls = build_controls(active)
-            usage = build_usage(active)
-        response = ActivePersonaResponse(
-            personas=personas,
-            active_id=active.id if active else None,
-            active_name=active.name if active else None,
-            controls=controls,
-            usage=usage,
+        if isinstance(persona, BaseAcpPersona):
+            controls = build_controls(persona)
+            usage = build_usage(persona)
+        response = PersonasResponse(
+            personas=personas, controls=controls, usage=usage
         )
         self.finish(response.model_dump())
-
-    @tornado.web.authenticated
-    def post(self, _unused: str = ""):
-        persona_manager = self._get_persona_manager()
-        body = self.get_json_body() or {}
-        persona_id = body.get("persona_id")
-        if persona_id:
-            persona = persona_manager.personas.get(persona_id)
-            if not persona:
-                raise tornado.web.HTTPError(404, f"Persona not found: {persona_id}")
-            persona_manager.set_active_persona(persona)
-        else:
-            persona_manager.set_active_persona(None)
-        self.finish({"status": "ok", "active_id": persona_id or None})
 
 
 class AcpControlHandler(_ChatScopedHandler):
     """
-    REST endpoint that sets a single session control on the chat's active
-    persona. POST body: {control_id, source, value}. `source` selects the ACP
+    REST endpoint that sets a single session control on an ACP persona. POST
+    body: {persona_id, control_id, source, value}. `source` selects the ACP
     mechanism: "model" and "mode" take the chosen id as `value`; "config_option"
     takes the option `control_id` and its new select value or boolean.
     """
@@ -344,17 +342,21 @@ class AcpControlHandler(_ChatScopedHandler):
     async def post(self, _unused: str = ""):
         persona_manager = self._get_persona_manager()
         body = self.get_json_body() or {}
+        persona_id = body.get("persona_id")
         control_id = body.get("control_id")
         source = body.get("source")
         value = body.get("value")
-        if not control_id or not source or value is None:
+        if not persona_id or not control_id or not source or value is None:
             raise tornado.web.HTTPError(
-                400, "Missing required fields: control_id, source, value"
+                400,
+                "Missing required fields: persona_id, control_id, source, value",
             )
 
-        persona = persona_manager.active_persona
+        persona = persona_manager.personas.get(persona_id)
         if not isinstance(persona, BaseAcpPersona):
-            raise tornado.web.HTTPError(404, "No ACP persona to configure")
+            raise tornado.web.HTTPError(
+                404, f"No ACP persona to configure: {persona_id}"
+            )
 
         if source == "model":
             await persona.set_acp_model(value)

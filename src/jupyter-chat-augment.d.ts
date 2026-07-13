@@ -80,5 +80,19 @@ declare module '@jupyter/chat' {
 
   export interface IMessageMetadata {
     tool_calls?: IToolCall[];
+    /**
+     * ID of the persona this message is directed to. Read by the
+     * PersonaManager to route the message.
+     */
+    to_persona?: string | null;
+    /**
+     * ID of the selected model for the addressed persona.
+     */
+    model?: string;
+    /**
+     * The selected session settings (mode and config options), keyed by
+     * control ID.
+     */
+    settings?: { [id: string]: string | boolean };
   }
 }
