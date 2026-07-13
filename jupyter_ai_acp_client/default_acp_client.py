@@ -44,6 +44,7 @@ from acp.schema import (
     ToolCall,
     ToolCallProgress,
     ToolCallStart,
+    UsageUpdate,
     UserMessageChunk,
     WaitForTerminalExitResponse,
     WriteTextFileResponse,
@@ -330,6 +331,11 @@ class JaiAcpClient(Client):
                     session_id=session_id,
                 )
 
+                # Store the cumulative session token usage when the agent
+                # reports it on the response.
+                if response.usage is not None:
+                    persona.update_acp_session_usage(response.usage)
+
                 # If cancelled, message already finalized by stop_streaming()
                 if self._cancel_requested.get(session_id, False):
                     return response
@@ -395,7 +401,8 @@ class JaiAcpClient(Client):
         | AgentPlanUpdate
         | AvailableCommandsUpdate
         | CurrentModeUpdate
-        | ConfigOptionUpdate,
+        | ConfigOptionUpdate
+        | UsageUpdate,
         **kwargs: Any,
     ) -> None:
         """
@@ -423,12 +430,19 @@ class JaiAcpClient(Client):
         # controls reflect the current values.
         if isinstance(update, CurrentModeUpdate):
             if persona is not None:
-                persona._set_acp_current_mode(update.current_mode_id)
+                persona.update_acp_current_mode(update.current_mode_id)
             return
 
         if isinstance(update, ConfigOptionUpdate):
             if persona is not None:
-                persona._set_acp_config_options(update.config_options)
+                persona.update_acp_config_options(update.config_options)
+            return
+
+        # Keep the persona's context usage current so the toolbar can show how
+        # full the agent's context window is.
+        if isinstance(update, UsageUpdate):
+            if persona is not None:
+                persona.update_acp_context_usage(update)
             return
 
         # Skip message/tool events when cancellation has been requested

@@ -17,6 +17,8 @@ from acp.schema import (
     SessionMode,
     SessionModelState,
     SessionModeState,
+    Usage,
+    UsageUpdate,
 )
 from jupyter_ai_persona_manager import BasePersona
 from jupyterlab_chat.models import Message
@@ -99,6 +101,25 @@ class BaseAcpPersona(BasePersona):
     when a session is created or loaded.
     """
 
+    _acp_context_usage: Optional[UsageUpdate]
+    """
+    How full the agent's context window is right now: tokens currently in
+    context, window size, and optional cumulative session cost, from the
+    latest `usage_update`. A live snapshot that can decrease (e.g. after
+    compaction). Distinct from `acp_session_usage`, which counts total
+    session throughput. `None` until the agent sends one; some agents
+    never do. Set by the default ACP client.
+    """
+
+    _acp_session_usage: Optional[Usage]
+    """
+    Cumulative token totals for the whole session from the latest prompt
+    response: never decreases, and includes cache re-reads, so it grows
+    past the context window size. Distinct from `acp_context_usage`, which measures
+    current window occupancy. `None` until a prompt response carries
+    usage. Set by the default ACP client.
+    """
+
     _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
     """
     Maximum number of recent messages to include in the history context injected
@@ -146,6 +167,8 @@ class BaseAcpPersona(BasePersona):
         self._acp_modes = []
         self._acp_current_mode_id = None
         self._acp_config_options = []
+        self._acp_context_usage = None
+        self._acp_session_usage = None
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -218,7 +241,7 @@ class BaseAcpPersona(BasePersona):
         )
         self._set_acp_model_state(response.models)
         self._set_acp_mode_state(response.modes)
-        self._set_acp_config_options(response.config_options)
+        self.update_acp_config_options(response.config_options)
         return response
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
@@ -232,7 +255,7 @@ class BaseAcpPersona(BasePersona):
         self._record_new_session(response.session_id)
         self._set_acp_model_state(response.models)
         self._set_acp_mode_state(response.modes)
-        self._set_acp_config_options(response.config_options)
+        self.update_acp_config_options(response.config_options)
 
         # Reapply a previously selected model so the choice survives session
         # recreation (e.g. a server restart that creates a fresh ACP session).
@@ -592,7 +615,7 @@ class BaseAcpPersona(BasePersona):
         self._acp_modes = modes.available_modes
         self._acp_current_mode_id = modes.current_mode_id
 
-    def _set_acp_current_mode(self, mode_id: str) -> None:
+    def update_acp_current_mode(self, mode_id: str) -> None:
         """Record a mode the agent switched to itself (a `current_mode_update`)."""
         self._acp_current_mode_id = mode_id
 
@@ -625,7 +648,7 @@ class BaseAcpPersona(BasePersona):
         """
         return self._acp_config_options
 
-    def _set_acp_config_options(
+    def update_acp_config_options(
         self, config_options: Optional[list[AcpConfigOption]]
     ) -> None:
         """
@@ -660,6 +683,36 @@ class BaseAcpPersona(BasePersona):
     def _get_stored_config_choices(self) -> dict[str, str | bool]:
         """Return config option values previously selected for this persona here."""
         return self.ychat.get_metadata().get("acp_config_options", {}).get(self.id, {})
+
+    @property
+    def acp_context_usage(self) -> Optional[UsageUpdate]:
+        """
+        How full the agent's context window is right now: tokens currently in
+        context, window size, and optional cumulative session cost, from the
+        latest `usage_update`. A live snapshot that can decrease (e.g. after
+        compaction). Distinct from `acp_session_usage`, which counts total
+        session throughput. `None` when the agent has not reported any.
+        """
+        return self._acp_context_usage
+
+    def update_acp_context_usage(self, usage: UsageUpdate) -> None:
+        """Record a `usage_update` received from the ACP agent."""
+        self._acp_context_usage = usage
+
+    @property
+    def acp_session_usage(self) -> Optional[Usage]:
+        """
+        Cumulative token totals for the whole session from the latest prompt
+        response: never decreases, and includes cache re-reads, so it grows
+        past the context window size. Distinct from `acp_context_usage`, which measures
+        current window occupancy. `None` when no prompt response has carried
+        usage.
+        """
+        return self._acp_session_usage
+
+    def update_acp_session_usage(self, usage: Usage) -> None:
+        """Record the token usage carried on a completed prompt response."""
+        self._acp_session_usage = usage
 
     async def handle_uncaught_exception(self, exc: Exception) -> None:
         """Show structured error info for ACP RequestError inside the standard dropdown."""

@@ -11,6 +11,7 @@ import {
   ListSubheader,
   Menu,
   MenuItem,
+  Popover,
   Switch
 } from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
@@ -20,7 +21,9 @@ import { InputToolbarRegistry } from '@jupyter/chat';
 import {
   AcpControl,
   AcpControlChoice,
+  AcpUsage,
   ActivePersonaInfo,
+  EMPTY_USAGE,
   getActivePersona,
   setAcpControl,
   setActivePersona
@@ -28,7 +31,13 @@ import {
 
 const SELECTOR_CLASS = 'jp-jupyter-ai-acp-client-personaControls';
 const MENU_CLASS = 'jp-jupyter-ai-acp-client-controlMenu';
+const USAGE_CLASS = 'jp-jupyter-ai-acp-client-usage';
 const NO_ONE_LABEL = 'No one';
+
+// Context-fill fractions at which the chip starts demanding attention: the
+// ring and percent turn warn, then error, colored.
+const USAGE_WARN_AT = 0.7;
+const USAGE_ERROR_AT = 0.9;
 
 // Personas register a moment after a chat opens, and an ACP persona's controls
 // load asynchronously while its agent session initializes, which can take 20s+
@@ -37,6 +46,10 @@ const NO_ONE_LABEL = 'No one';
 // resets when the active persona changes, so each persona gets a full window.
 const POLL_MS = 1500;
 const MAX_POLLS = 24;
+
+// Delay for the one trailing refresh after a burst of message updates, long
+// enough for the turn's usage report to be stored server-side.
+const TRAILING_REFRESH_MS = 1500;
 
 // Width (px) reserved for the overflow ("...") button when not every control
 // fits inline.
@@ -381,6 +394,241 @@ function ControlsRow(props: {
   );
 }
 
+// All formatters pin the `en` locale so numbers agree with each other and
+// with the surrounding English labels.
+const exactNumber = new Intl.NumberFormat('en');
+const compactNumber = new Intl.NumberFormat('en', {
+  notation: 'compact',
+  maximumSignificantDigits: 3
+});
+const costNumber = new Intl.NumberFormat('en', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
+/**
+ * Format a token count compactly: 950 stays as-is, 41500 becomes "41.5k",
+ * 1240000 becomes "1.24M". `Intl.NumberFormat` picks the tier after rounding,
+ * so boundary values like 999500 become "1M" rather than an exponential form.
+ * Token values render compactly everywhere (magnitude is what a status surface
+ * communicates); the exact count rides on the element's hover title.
+ */
+export function formatTokens(n: number): string {
+  return compactNumber.format(n).replace('K', 'k');
+}
+
+/**
+ * Format a token count exactly, with thousands separators, for hover titles.
+ */
+export function formatTokensExact(n: number): string {
+  return `${exactNumber.format(n)} tokens`;
+}
+
+/**
+ * Format a cost amount with its ISO 4217 currency code.
+ */
+export function formatCost(amount: number, currency: string): string {
+  const value = costNumber.format(amount);
+  return currency === 'USD' ? `$${value}` : `${value} ${currency}`;
+}
+
+/**
+ * A ring gauge showing how full the context window is. The track is a muted
+ * full circle; the fill arc grows clockwise from 12 o'clock and takes the
+ * chip's current color, so the warn/error classes color it via `currentColor`.
+ */
+function UsageRing(props: { fraction: number }): JSX.Element {
+  const radius = 6;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.min(Math.max(props.fraction, 0), 1);
+  return (
+    <svg
+      className={`${USAGE_CLASS}-ring`}
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      aria-hidden="true"
+    >
+      <circle
+        className={`${USAGE_CLASS}-ring-track`}
+        cx="8"
+        cy="8"
+        r={radius}
+        fill="none"
+        strokeWidth="2"
+      />
+      <circle
+        className={`${USAGE_CLASS}-ring-fill`}
+        cx="8"
+        cy="8"
+        r={radius}
+        fill="none"
+        strokeWidth="2"
+        strokeDasharray={circumference}
+        strokeDashoffset={circumference * (1 - clamped)}
+        transform="rotate(-90 8 8)"
+      />
+    </svg>
+  );
+}
+
+/**
+ * A group header in the usage popover: an uppercase label with the group's
+ * headline value. Detail rows, when the group has any, follow beneath.
+ */
+function UsageSection(props: {
+  label: string;
+  value: string;
+  title?: string;
+}): JSX.Element {
+  return (
+    <div className={`${USAGE_CLASS}-section`} title={props.title}>
+      <span>{props.label}</span>
+      <span className={`${USAGE_CLASS}-section-value`}>{props.value}</span>
+    </div>
+  );
+}
+
+/**
+ * One "label: value" detail row in the usage popover. `title` carries the
+ * exact value behind a compact one.
+ */
+function UsageRow(props: {
+  label: string;
+  value: string;
+  title?: string;
+}): JSX.Element {
+  return (
+    <div className={`${USAGE_CLASS}-row`} title={props.title}>
+      <span className={`${USAGE_CLASS}-row-label`}>{props.label}</span>
+      <span className={`${USAGE_CLASS}-row-value`}>{props.value}</span>
+    </div>
+  );
+}
+
+/**
+ * The usage chip for the input toolbar: a ring gauge and percent of the active
+ * persona's context-window fill, shown next to the persona it describes, and
+ * colored once fill crosses the warn threshold. Hover shows a one-line
+ * summary; click opens a popover with the full breakdown (context, session
+ * token totals, cost). Renders nothing when the agent has reported no usage
+ * at all, so absence reads as unknown rather than empty.
+ */
+function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
+  const { context, tokens, cost } = props.usage;
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+
+  if (!context && !tokens && !cost) {
+    return null;
+  }
+
+  const fraction =
+    context && context.size > 0 ? context.used / context.size : 0;
+  const percent = Math.round(fraction * 100);
+  const level =
+    fraction >= USAGE_ERROR_AT
+      ? 'error'
+      : fraction >= USAGE_WARN_AT
+        ? 'warn'
+        : 'ok';
+
+  const summary = [
+    context &&
+      `Context: ${formatTokens(context.used)} of ${formatTokens(context.size)} tokens (${percent}%)`,
+    tokens && `Session tokens: ${formatTokens(tokens.total_tokens)}`,
+    cost && `Cost: ${formatCost(cost.amount, cost.currency)}`
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`${USAGE_CLASS}-chip ${USAGE_CLASS}-${level}`}
+        onClick={event => setAnchor(event.currentTarget)}
+        title={summary}
+        aria-label={context ? `Context ${percent}% used` : 'Usage'}
+      >
+        {context ? (
+          <>
+            <UsageRing fraction={fraction} />
+            <span className={`${USAGE_CLASS}-pct`}>{percent}%</span>
+          </>
+        ) : null}
+        {!context && tokens ? (
+          <span className={`${USAGE_CLASS}-pct`}>
+            {formatTokens(tokens.total_tokens)}
+          </span>
+        ) : null}
+      </button>
+      <Popover
+        anchorEl={anchor}
+        open={!!anchor}
+        onClose={() => setAnchor(null)}
+        {...menuAnchorProps}
+      >
+        <div className={`${USAGE_CLASS}-card`}>
+          {context ? (
+            <UsageSection
+              label="Context"
+              value={`${formatTokens(context.used)} of ${formatTokens(context.size)} (${percent}%)`}
+              title={`${exactNumber.format(context.used)} of ${exactNumber.format(context.size)} tokens`}
+            />
+          ) : null}
+          {tokens ? (
+            <>
+              <UsageSection
+                label="Session tokens"
+                value={formatTokens(tokens.total_tokens)}
+                title={formatTokensExact(tokens.total_tokens)}
+              />
+              <UsageRow
+                label="Input"
+                value={formatTokens(tokens.input_tokens)}
+                title={formatTokensExact(tokens.input_tokens)}
+              />
+              <UsageRow
+                label="Output"
+                value={formatTokens(tokens.output_tokens)}
+                title={formatTokensExact(tokens.output_tokens)}
+              />
+              {tokens.cached_read_tokens !== null ? (
+                <UsageRow
+                  label="Cache read"
+                  value={formatTokens(tokens.cached_read_tokens)}
+                  title={formatTokensExact(tokens.cached_read_tokens)}
+                />
+              ) : null}
+              {tokens.cached_write_tokens !== null ? (
+                <UsageRow
+                  label="Cache write"
+                  value={formatTokens(tokens.cached_write_tokens)}
+                  title={formatTokensExact(tokens.cached_write_tokens)}
+                />
+              ) : null}
+              {tokens.thought_tokens !== null ? (
+                <UsageRow
+                  label="Thinking"
+                  value={formatTokens(tokens.thought_tokens)}
+                  title={formatTokensExact(tokens.thought_tokens)}
+                />
+              ) : null}
+            </>
+          ) : null}
+          {cost ? (
+            <UsageSection
+              label="Session cost (est.)"
+              value={formatCost(cost.amount, cost.currency)}
+              title="Estimated at API list prices"
+            />
+          ) : null}
+        </div>
+      </Popover>
+    </>
+  );
+}
+
 /**
  * The active-persona control for the chat input toolbar. Shows which persona
  * replies (with its avatar), lets the user switch it, and, when the active
@@ -395,8 +643,10 @@ export function AcpPersonaControls(
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeName, setActiveName] = useState<string | null>(null);
   const [controls, setControls] = useState<AcpControl[]>([]);
+  const [usage, setUsage] = useState<AcpUsage>(EMPTY_USAGE);
   const [personaAnchor, setPersonaAnchor] = useState<HTMLElement | null>(null);
   const [polls, setPolls] = useState(0);
+  const refreshSeq = useRef(0);
 
   const chatPath = chatModel?.name ?? null;
 
@@ -404,18 +654,36 @@ export function AcpPersonaControls(
     if (!chatPath) {
       return;
     }
+    // Refreshes overlap (message events, polling, the trailing refresh), and a
+    // slow earlier response must not overwrite a newer one's state.
+    const seq = ++refreshSeq.current;
     const response = await getActivePersona(chatPath);
+    if (seq !== refreshSeq.current) {
+      return;
+    }
     setPersonas(response.personas);
     setActiveId(response.active_id);
     setActiveName(response.active_name);
     setControls(response.controls);
+    setUsage(response.usage ?? EMPTY_USAGE);
   }, [chatPath]);
 
   useEffect(() => {
+    let trailing: number | undefined;
+    const onMessages = () => {
+      refresh();
+      // The agent's usage report is stored when the prompt response resolves,
+      // a beat after the turn's final message update, so a refresh driven only
+      // by message events always misses it. One trailing refresh after the
+      // burst settles picks it up.
+      window.clearTimeout(trailing);
+      trailing = window.setTimeout(refresh, TRAILING_REFRESH_MS);
+    };
     refresh();
-    chatModel?.messagesUpdated?.connect(refresh);
+    chatModel?.messagesUpdated?.connect(onMessages);
     return () => {
-      chatModel?.messagesUpdated?.disconnect(refresh);
+      window.clearTimeout(trailing);
+      chatModel?.messagesUpdated?.disconnect(onMessages);
     };
   }, [chatModel, refresh]);
 
@@ -455,6 +723,10 @@ export function AcpPersonaControls(
   const handlePersona = async (personaId: string | null) => {
     setPersonaAnchor(null);
     setActiveId(personaId);
+    // Usage is per persona; clearing it now keeps the previous persona's
+    // numbers from showing next to the new persona's name while the refresh
+    // is in flight.
+    setUsage(EMPTY_USAGE);
     if (chatPath) {
       await setActivePersona(chatPath, personaId);
       // Refetch so the controls follow the new active persona.
@@ -530,6 +802,8 @@ export function AcpPersonaControls(
           ) : null}
         </MenuItem>
       </Menu>
+
+      <UsageChip usage={usage} />
 
       {controls.length ? (
         <>

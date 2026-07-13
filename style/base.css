@@ -458,16 +458,20 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   text-overflow: ellipsis;
 }
 
-/* description: secondary, one line. Long descriptions truncate (full text on
-   hover) so the menu stays clean and never sprawls. */
+/* description: secondary, wrapping to at most two lines. Agent-authored text
+   has arbitrary length, so the clamp keeps the common case fully readable and
+   bounds the pathological one (full text stays on hover). The class is doubled
+   to out-rank MUI's nowrap on the same element. */
 .jp-jupyter-ai-acp-client-controlMenu-paper
-  .jp-jupyter-ai-acp-client-controlMenu-desc {
+  .jp-jupyter-ai-acp-client-controlMenu-desc.jp-jupyter-ai-acp-client-controlMenu-desc {
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size0);
   color: var(--jp-ui-font-color2);
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .jp-jupyter-ai-acp-client-controlMenu-check {
@@ -499,4 +503,123 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   .jp-jupyter-ai-acp-client-personaControls-overflow-subheader:first-child {
   margin-top: 0;
   border-top: none;
+}
+
+/* Usage chip: a small ring gauge and percent of the active persona's context
+   fill, next to the persona it describes. Borderless, matching the overflow
+   button. The ring fill and percent take the chip's color, so the warn/error
+   levels recolor them through `currentColor`. */
+.jp-jupyter-ai-acp-client-usage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border: none;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  border-radius: var(--jp-border-radius);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  line-height: 1.5;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.jp-jupyter-ai-acp-client-usage-chip:hover {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-jupyter-ai-acp-client-usage-warn {
+  color: var(--jp-warn-color1);
+}
+
+.jp-jupyter-ai-acp-client-usage-error {
+  color: var(--jp-error-color1);
+}
+
+/* Keep the threshold color on hover, only the background changes. */
+.jp-jupyter-ai-acp-client-usage-warn:hover {
+  color: var(--jp-warn-color1);
+}
+
+.jp-jupyter-ai-acp-client-usage-error:hover {
+  color: var(--jp-error-color1);
+}
+
+.jp-jupyter-ai-acp-client-usage-ring {
+  display: block;
+  flex-shrink: 0;
+}
+
+.jp-jupyter-ai-acp-client-usage-ring-track {
+  stroke: var(--jp-border-color2);
+}
+
+.jp-jupyter-ai-acp-client-usage-ring-fill {
+  stroke: currentcolor;
+}
+
+.jp-jupyter-ai-acp-client-usage-pct {
+  white-space: nowrap;
+}
+
+/* Usage popover card: labeled sections in the overflow-subheader style, then
+   one row per quantity, label muted and value right-aligned. */
+.jp-jupyter-ai-acp-client-usage-card {
+  padding: 8px 12px;
+  min-width: 220px;
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color1);
+}
+
+/* Group header: an uppercase label with the group's headline value on the
+   right. Detail rows, when the group has any, follow beneath. */
+.jp-jupyter-ai-acp-client-usage-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--jp-border-color2);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--jp-ui-font-color1);
+}
+
+/* The headline value: primary data, exempt from the label's uppercase
+   emphasis, at the same size as the detail rows. */
+.jp-jupyter-ai-acp-client-usage-section-value {
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.jp-jupyter-ai-acp-client-usage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  line-height: 1.7;
+}
+
+/* Whatever the card starts with sits flush at the top, no divider above. */
+.jp-jupyter-ai-acp-client-usage-card > :first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.jp-jupyter-ai-acp-client-usage-row-label {
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-jupyter-ai-acp-client-usage-row-value {
+  white-space: nowrap;
 }

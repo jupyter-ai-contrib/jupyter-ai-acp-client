@@ -97,11 +97,47 @@ export type ActivePersonaInfo = {
   avatar_url: string | null;
 };
 
+export type AcpContextUsage = {
+  used: number;
+  size: number;
+};
+
+export type AcpTokenUsage = {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cached_read_tokens: number | null;
+  cached_write_tokens: number | null;
+  thought_tokens: number | null;
+};
+
+export type AcpCostUsage = {
+  amount: number;
+  currency: string;
+};
+
+/**
+ * The active persona's reported usage. Each field is null when the agent has
+ * not reported that quantity; some agents report none of them.
+ */
+export type AcpUsage = {
+  context: AcpContextUsage | null;
+  tokens: AcpTokenUsage | null;
+  cost: AcpCostUsage | null;
+};
+
+export const EMPTY_USAGE: AcpUsage = {
+  context: null,
+  tokens: null,
+  cost: null
+};
+
 export type ActivePersonaResponse = {
   personas: ActivePersonaInfo[];
   active_id: string | null;
   active_name: string | null;
   controls: AcpControl[];
+  usage: AcpUsage;
 };
 
 /**
@@ -115,7 +151,8 @@ export async function getActivePersona(
     personas: [],
     active_id: null,
     active_name: null,
-    controls: []
+    controls: [],
+    usage: EMPTY_USAGE
   };
   try {
     return await requestAPI<ActivePersonaResponse>(
