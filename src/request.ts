@@ -89,7 +89,7 @@ export type AcpControl = {
   choices: AcpControlChoice[];
 };
 
-export type ActivePersonaInfo = {
+export type PersonaInfo = {
   id: string;
   name: string;
   mention_name: string;
@@ -117,7 +117,7 @@ export type AcpCostUsage = {
 };
 
 /**
- * The active persona's reported usage. Each field is null when the agent has
+ * The selected persona's reported usage. Each field is null when the agent has
  * not reported that quantity; some agents report none of them.
  */
 export type AcpUsage = {
@@ -132,65 +132,43 @@ export const EMPTY_USAGE: AcpUsage = {
   cost: null
 };
 
-export type ActivePersonaResponse = {
-  personas: ActivePersonaInfo[];
-  active_id: string | null;
-  active_name: string | null;
+export type PersonasResponse = {
+  personas: PersonaInfo[];
   controls: AcpControl[];
   usage: AcpUsage;
 };
 
 /**
- * Fetch the chat's personas, which one is active, and the active persona's
- * session controls, in one call.
+ * Fetch the chat's personas and, for the given persona (defaulting to the
+ * chat's default persona when `personaId` is null), its session controls.
  */
-export async function getActivePersona(
-  chatPath: string
-): Promise<ActivePersonaResponse> {
-  const empty: ActivePersonaResponse = {
+export async function getPersonas(
+  chatPath: string,
+  personaId: string | null = null
+): Promise<PersonasResponse> {
+  const empty: PersonasResponse = {
     personas: [],
-    active_id: null,
-    active_name: null,
     controls: [],
     usage: EMPTY_USAGE
   };
   try {
-    return await requestAPI<ActivePersonaResponse>(
-      `/active_persona?chat_path=${encodeURIComponent(chatPath)}`
-    );
+    let endPoint = `/personas?chat_path=${encodeURIComponent(chatPath)}`;
+    if (personaId) {
+      endPoint += `&persona_id=${encodeURIComponent(personaId)}`;
+    }
+    return await requestAPI<PersonasResponse>(endPoint);
   } catch (e) {
-    console.warn('Error retrieving active persona: ', e);
+    console.warn('Error retrieving personas: ', e);
     return empty;
   }
 }
 
 /**
- * Set the active persona (who replies). A null personaId means "no one".
- */
-export async function setActivePersona(
-  chatPath: string,
-  personaId: string | null
-): Promise<void> {
-  try {
-    await requestAPI(
-      `/active_persona?chat_path=${encodeURIComponent(chatPath)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ persona_id: personaId })
-      }
-    );
-  } catch (e) {
-    console.warn('Error setting active persona: ', e);
-  }
-}
-
-/**
- * Set a session control (model, mode, or config option) on the chat's active
- * ACP persona.
+ * Set a session control (model, mode, or config option) on an ACP persona.
  */
 export async function setAcpControl(
   chatPath: string,
+  personaId: string,
   controlId: string,
   source: string,
   value: string | boolean
@@ -199,7 +177,12 @@ export async function setAcpControl(
     await requestAPI(`/control?chat_path=${encodeURIComponent(chatPath)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ control_id: controlId, source, value })
+      body: JSON.stringify({
+        persona_id: personaId,
+        control_id: controlId,
+        source,
+        value
+      })
     });
   } catch (e) {
     console.warn('Error setting ACP control: ', e);

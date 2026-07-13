@@ -21,6 +21,7 @@ from jupyter_ai_acp_client.routes import (
     MODE_CONTROL_ID,
     MODEL_CONTROL_ID,
     AcpSlashCommandsHandler,
+    PersonasHandler,
     build_controls,
     build_usage,
 )
@@ -55,7 +56,6 @@ def _make_handler_and_serverapp(personas: dict):
 
     persona_manager = MagicMock()
     persona_manager.personas = personas
-    persona_manager.active_persona = None
     persona_manager.default_persona = None
 
     serverapp.web_app.settings = {
@@ -105,6 +105,41 @@ class TestPersonaNotFound:
                 with pytest.raises(tornado.web.HTTPError) as exc_info:
                     handler.get(persona_mention_name="bot-c")
                 assert exc_info.value.status_code == 404
+
+
+class TestResolvePersona:
+    """Which persona's controls PersonasHandler serves, given the persona_id
+    query arg. Must never raise — the endpoint still returns the persona list."""
+
+    def _handler(self, persona_id_arg):
+        handler = object.__new__(PersonasHandler)
+        handler.get_argument = lambda name, default=None: persona_id_arg
+        return handler
+
+    def test_returns_the_persona_named_by_persona_id(self):
+        pm = MagicMock()
+        pm.personas = {"installed::A": "personaA"}
+        handler = self._handler("installed::A")
+
+        assert handler._resolve_persona(pm) == "personaA"
+
+    def test_unknown_persona_id_returns_none_not_error(self):
+        # A default advertised by the server but not installed here must not
+        # fail the endpoint (which also returns the persona list for the picker).
+        pm = MagicMock()
+        pm.personas = {"installed::A": "personaA"}
+        pm.default_persona = "defaultP"
+        handler = self._handler("not::installed")
+
+        assert handler._resolve_persona(pm) is None
+
+    def test_no_persona_id_falls_back_to_default_persona(self):
+        pm = MagicMock()
+        pm.personas = {"installed::A": "personaA"}
+        pm.default_persona = "defaultP"
+        handler = self._handler(None)
+
+        assert handler._resolve_persona(pm) == "defaultP"
 
 
 def _select_option(option_id: str, current: str, values: list[str]) -> SessionConfigOptionSelect:

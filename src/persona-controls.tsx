@@ -17,16 +17,16 @@ import {
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CheckIcon from '@mui/icons-material/Check';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
-import { InputToolbarRegistry } from '@jupyter/chat';
+import { PageConfig } from '@jupyterlab/coreutils';
+import { IMessageMetadata, InputToolbarRegistry } from '@jupyter/chat';
 import {
   AcpControl,
   AcpControlChoice,
   AcpUsage,
-  ActivePersonaInfo,
   EMPTY_USAGE,
-  getActivePersona,
-  setAcpControl,
-  setActivePersona
+  PersonaInfo,
+  getPersonas,
+  setAcpControl
 } from './request';
 
 const SELECTOR_CLASS = 'jp-jupyter-ai-acp-client-personaControls';
@@ -38,6 +38,53 @@ const NO_ONE_LABEL = 'No one';
 // ring and percent turn warn, then error, colored.
 const USAGE_WARN_AT = 0.7;
 const USAGE_ERROR_AT = 0.9;
+
+/**
+ * The chat's default persona ID, advertised by the persona-manager server
+ * extension via PageConfig. Used as the initial selection for a chat where the
+ * user hasn't picked a persona yet. Empty string if none is configured.
+ */
+const DEFAULT_PERSONA_ID =
+  PageConfig.getOption('jupyter_ai_default_persona') || null;
+
+/**
+ * Build the message metadata describing the current picker selection: the
+ * target persona, its model, and its settings (mode + config options). This is
+ * stamped onto the input model so every outgoing message is self-describing and
+ * the PersonaManager can route it. A `null` persona means "no one".
+ */
+export function buildSelectionMetadata(
+  selectedId: string | null,
+  controls: AcpControl[]
+): IMessageMetadata {
+  const metadata: IMessageMetadata = { to_persona: selectedId };
+
+  // With no persona selected ("No one"), there is nothing to configure — don't
+  // stamp a model/settings from whatever controls happen to be loaded.
+  if (!selectedId) {
+    return metadata;
+  }
+
+  const modelControl = controls.find(c => c.source === 'model');
+  if (modelControl && typeof modelControl.current_value === 'string') {
+    metadata.model = modelControl.current_value;
+  }
+
+  const settings: { [id: string]: string | boolean } = {};
+  for (const control of controls) {
+    if (control.source === 'model') {
+      continue;
+    }
+    if (control.current_value !== null) {
+      settings[control.id] = control.current_value;
+    }
+  }
+  if (Object.keys(settings).length) {
+    metadata.settings = settings;
+  }
+
+  return metadata;
+}
 
 // Personas register a moment after a chat opens, and an ACP persona's controls
 // load asynchronously while its agent session initializes, which can take 20s+
@@ -630,18 +677,24 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
 }
 
 /**
- * The active-persona control for the chat input toolbar. Shows which persona
- * replies (with its avatar), lets the user switch it, and, when the active
- * persona is an ACP persona, renders its session controls (model, mode, and any
- * config options) next to it. Hides itself when the chat has no personas.
+ * The persona control for the chat input toolbar. Shows which persona a message
+ * will be directed to (with its avatar), lets the user switch it, and, when the
+ * selected persona is an ACP persona, renders its session controls (model,
+ * mode, and any config options) next to it. Hides itself when the chat has no
+ * personas.
+ *
+ * The selection is owned by the frontend and stamped onto each message's
+ * metadata (there is no server-side "active persona"). It's seeded from the
+ * default persona advertised over PageConfig.
  */
 export function AcpPersonaControls(
   props: InputToolbarRegistry.IToolbarItemProps
 ): JSX.Element | null {
-  const { chatModel } = props;
-  const [personas, setPersonas] = useState<ActivePersonaInfo[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [activeName, setActiveName] = useState<string | null>(null);
+  const { chatModel, model } = props;
+  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    DEFAULT_PERSONA_ID
+  );
   const [controls, setControls] = useState<AcpControl[]>([]);
   const [usage, setUsage] = useState<AcpUsage>(EMPTY_USAGE);
   const [personaAnchor, setPersonaAnchor] = useState<HTMLElement | null>(null);
@@ -650,23 +703,24 @@ export function AcpPersonaControls(
 
   const chatPath = chatModel?.name ?? null;
 
+  // Fetch the persona list and the selected persona's controls. Keyed on the
+  // selection so switching personas pulls the right controls.
   const refresh = useCallback(async () => {
     if (!chatPath) {
       return;
     }
-    // Refreshes overlap (message events, polling, the trailing refresh), and a
-    // slow earlier response must not overwrite a newer one's state.
+    // Refreshes overlap (message events, polling, the trailing refresh, and
+    // persona switches), and a slow earlier response must not overwrite a newer
+    // one's state.
     const seq = ++refreshSeq.current;
-    const response = await getActivePersona(chatPath);
+    const response = await getPersonas(chatPath, selectedId);
     if (seq !== refreshSeq.current) {
       return;
     }
     setPersonas(response.personas);
-    setActiveId(response.active_id);
-    setActiveName(response.active_name);
     setControls(response.controls);
     setUsage(response.usage ?? EMPTY_USAGE);
-  }, [chatPath]);
+  }, [chatPath, selectedId]);
 
   useEffect(() => {
     let trailing: number | undefined;
@@ -687,18 +741,32 @@ export function AcpPersonaControls(
     };
   }, [chatModel, refresh]);
 
-  // Reset the poll counter when the chat or the active persona changes.
+  // Once personas load, reconcile the selection: if the seeded default isn't
+  // present in this chat, fall back to the sole persona (if there's exactly
+  // one) or to no one, so we never point at a persona the chat doesn't have.
+  useEffect(() => {
+    if (!personas.length) {
+      return;
+    }
+    if (selectedId && personas.some(p => p.id === selectedId)) {
+      return;
+    }
+    setSelectedId(personas.length === 1 ? personas[0].id : null);
+  }, [personas, selectedId]);
+
+  // Reset the poll counter when the chat or the selection changes.
   useEffect(() => {
     setPolls(0);
-  }, [chatPath, activeId]);
+  }, [chatPath, selectedId]);
 
-  // Poll until the personas register and the active ACP persona's controls
+  // Poll until the personas register and the selected ACP persona's controls
   // load, so nothing waits on a first message. Depend on primitive flags, not
   // the array references (which change on every refresh), to avoid restarting
   // the timer on unrelated updates.
-  const activeIsAcp = personas.find(p => p.id === activeId)?.is_acp ?? false;
+  const selectedIsAcp =
+    personas.find(p => p.id === selectedId)?.is_acp ?? false;
   const needPersonas = personas.length === 0;
-  const needControls = activeIsAcp && controls.length === 0;
+  const needControls = selectedIsAcp && controls.length === 0;
   const shouldPoll = needPersonas || needControls;
   useEffect(() => {
     if (!shouldPoll || polls >= MAX_POLLS) {
@@ -711,39 +779,59 @@ export function AcpPersonaControls(
     return () => window.clearTimeout(timer);
   }, [shouldPoll, polls, refresh]);
 
+  // Stamp the current selection onto the input model's metadata, so it rides
+  // out with the next message and the PersonaManager routes on it. Runs on
+  // initial load and whenever the persona or a control value changes. Keyed on
+  // a signature of the values (not the array reference, which changes on every
+  // refresh) to avoid redundant writes.
+  const controlsSignature = controls
+    .map(c => `${c.id}:${c.current_value}`)
+    .join('|');
+  useEffect(() => {
+    model.clearMetadata();
+    model.updateMetadata(buildSelectionMetadata(selectedId, controls));
+  }, [model, selectedId, controlsSignature]);
+
   // No personas in the chat: nothing to show.
   if (!personas.length) {
     return null;
   }
 
-  const activeAvatar =
-    personas.find(p => p.id === activeId)?.avatar_url ?? null;
+  const selectedPersona = personas.find(p => p.id === selectedId) ?? null;
+  const activeName = selectedPersona?.name ?? null;
+  const activeAvatar = selectedPersona?.avatar_url ?? null;
   const personaLabel = activeName ?? NO_ONE_LABEL;
 
-  const handlePersona = async (personaId: string | null) => {
+  const handlePersona = (personaId: string | null) => {
     setPersonaAnchor(null);
-    setActiveId(personaId);
+    // Update the local selection; the effect above refetches this persona's
+    // controls and the metadata sync effect stamps it onto the input model.
+    setSelectedId(personaId);
     // Usage is per persona; clearing it now keeps the previous persona's
     // numbers from showing next to the new persona's name while the refresh
     // is in flight.
     setUsage(EMPTY_USAGE);
-    if (chatPath) {
-      await setActivePersona(chatPath, personaId);
-      // Refetch so the controls follow the new active persona.
-      await refresh();
-    }
   };
 
   const handleControl = async (
     control: AcpControl,
     value: string | boolean
   ) => {
-    // Optimistic update for immediate feedback.
+    // Optimistic update for immediate feedback; the metadata sync effect picks
+    // up the new value and stamps it onto the input model.
     setControls(prev =>
       prev.map(c => (c.id === control.id ? { ...c, current_value: value } : c))
     );
-    if (chatPath) {
-      await setAcpControl(chatPath, control.id, control.source, value);
+    if (chatPath && selectedId) {
+      // POST so the change reaches the persona's live ACP session (which the
+      // metadata does not yet drive).
+      await setAcpControl(
+        chatPath,
+        selectedId,
+        control.id,
+        control.source,
+        value
+      );
       // Refetch in case the change cascades (e.g. a mode switch alters options).
       await refresh();
     }
@@ -762,7 +850,7 @@ export function AcpPersonaControls(
           setPersonaAnchor(event.currentTarget);
           refresh();
         }}
-        title="Choose which persona replies"
+        title="Choose which persona to message"
       >
         <span className={`${SELECTOR_CLASS}-persona`}>{personaLabel}</span>
       </Button>
@@ -775,7 +863,7 @@ export function AcpPersonaControls(
         {personas.map(p => (
           <MenuItem
             key={p.id}
-            selected={p.id === activeId}
+            selected={p.id === selectedId}
             onClick={() => handlePersona(p.id)}
           >
             <Avatar url={p.avatar_url} />
@@ -783,13 +871,13 @@ export function AcpPersonaControls(
               primary={p.name}
               classes={{ primary: `${MENU_CLASS}-name` }}
             />
-            {p.id === activeId ? (
+            {p.id === selectedId ? (
               <CheckIcon className={`${MENU_CLASS}-check`} fontSize="small" />
             ) : null}
           </MenuItem>
         ))}
         <MenuItem
-          selected={activeId === null}
+          selected={selectedId === null}
           onClick={() => handlePersona(null)}
         >
           <Avatar url={null} />
@@ -797,7 +885,7 @@ export function AcpPersonaControls(
             primary={NO_ONE_LABEL}
             classes={{ primary: `${MENU_CLASS}-name` }}
           />
-          {activeId === null ? (
+          {selectedId === null ? (
             <CheckIcon className={`${MENU_CLASS}-check`} fontSize="small" />
           ) : null}
         </MenuItem>
