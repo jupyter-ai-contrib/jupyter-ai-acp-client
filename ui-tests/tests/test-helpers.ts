@@ -27,6 +27,8 @@ const PERSONAS_SRC = path.resolve(__dirname, '..', 'fixtures', 'personas');
  */
 export enum FixturePersona {
   Hello = 'hello',
+  Hello2 = 'hello-2',
+  Hello3 = 'hello-3',
   EchoConfig = 'echo-config',
   SessionUsage = 'session-usage',
   ResponseUsage = 'response-usage',
@@ -41,6 +43,8 @@ interface FixturePersonaInfo {
 /** Single source of truth for each fixture persona's metadata. */
 export const FIXTURE_PERSONAS: Record<FixturePersona, FixturePersonaInfo> = {
   [FixturePersona.Hello]: { name: 'Hello Test Agent' },
+  [FixturePersona.Hello2]: { name: 'Hello Agent Two' },
+  [FixturePersona.Hello3]: { name: 'Hello Agent Three' },
   [FixturePersona.EchoConfig]: { name: 'Echo Config Agent' },
   [FixturePersona.SessionUsage]: { name: 'Session Usage Agent' },
   [FixturePersona.ResponseUsage]: { name: 'Response Usage Agent' },
