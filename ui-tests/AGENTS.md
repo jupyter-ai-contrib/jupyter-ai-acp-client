@@ -35,38 +35,46 @@ one shared test server, but each suite works in its own directory with its own
 personas.
 
 A suite **declares its personas in the spec itself** and installs them in
-`beforeAll`, then creates its chats under the same directory:
+`beforeAll`; a `TestHelpers` instance (from `tests/test-helpers.ts`) drives the
+chat under the suite's directory:
 
 ```ts
-import { installPersonas, openChat } from './persona-fixtures';
+import { FixturePersona, installPersonas, TestHelpers } from './test-helpers';
 
 const TEST_DIR = 'replies'; // this suite's working directory
+const PERSONAS = [FixturePersona.Hello]; // its personas
 
 test.describe('…', () => {
   test.beforeAll(async ({ request }) => {
-    await installPersonas(request, TEST_DIR, ['hello']); // its personas
+    await installPersonas(request, TEST_DIR, PERSONAS);
   });
 
   test('…', async ({ page }) => {
-    const chat = await openChat(page, TEST_DIR); // chat lives under TEST_DIR
-    // → the PersonaManager loads only <TEST_DIR>/.jupyter/personas/
+    const helpers = new TestHelpers({ dir: TEST_DIR, page });
+    await helpers.openChat(); // chat lives under TEST_DIR
+    await helpers.selectPersona(FixturePersona.Hello);
+    const reply = await helpers.sendMessage('hi');
+    // → routed to only this suite's persona
   });
 });
 ```
 
-`installPersonas` (in `tests/persona-fixtures.ts`) reads each fixture persona's
-source from `fixtures/personas/` and uploads it to
-`<TEST_DIR>/.jupyter/personas/` via Galata's contents API. `openChat` creates the
-chat under `<TEST_DIR>/`. So the persona set is owned by the test file that uses
-it — no central registry, and two suites can request overlapping or disjoint
-persona sets without interfering.
+The available fixtures are the `FixturePersona` enum in `test-helpers.ts`, whose
+`FIXTURE_PERSONAS` table is the single source of truth for each persona's display
+name — so specs never hardcode persona names. `installPersonas` reads each
+fixture's source from `fixtures/personas/<value>_persona.py` and uploads it to
+`<TEST_DIR>/.jupyter/personas/` via Galata's contents API; `TestHelpers` methods
+(`openChat`, `selectPersona`, `setControl`, `sendMessage`, …) take `{ dir, page }`
+once at construction so specs stay minimal. The persona set is owned by the test
+file that uses it — two suites can request overlapping or disjoint sets without
+interfering.
 
 Notes:
 
 - **No entry points.** The real vendored personas are `jupyter_ai.personas`
   entry points and would load in every install; the fixtures deliberately are
   not. `jupyter_server_test_config.py` sets
-  `JUPYTER_AI_ACP_CLIENT_E2E_TESTING_CI_ONLY=1`, which disables the vendored set
+  `JUPYTER_AI_ACP_CLIENT_E2E_TESTING_ONLY=1`, which disables the vendored set
   (gated in `jupyter_ai_acp_client/acp_personas/__init__.py`) so only the
   fixtures load — deterministic regardless of which agent CLIs are installed.
 - **`beforeAll`, not per-test setup**, and it uses the worker-scoped `request`
@@ -103,19 +111,23 @@ cd ..            # repo root
 jlpm lint        # fixes formatting; jlpm lint:check to verify without writing
 ```
 
-## Watching tests run
+## Running tests interactively
 
-Use **headed mode**:
+```bash
+cd ui-tests && jlpm && jlpm playwright test --ui
+```
+
+Other useful modes:
 
 ```bash
 jlpm playwright test replies.spec.ts --headed   # real browser, auto-runs
 jlpm playwright test replies.spec.ts --debug    # step through with Inspector
 ```
 
-Playwright's `--ui` mode renders the page from reconstructed trace snapshots,
-which for a Galata/JupyterLab app can paint **blank** even though the test runs
-and the action list goes green. `jlpm playwright test --ui --headed` forces a
-real browser window if you want the UI explorer.
+Note: `--ui` mode renders the page from reconstructed trace snapshots, which for
+a Galata/JupyterLab app can paint **blank** even though the test runs and the
+action list goes green. `jlpm playwright test --ui --headed` forces a real
+browser window per run.
 
 ## Writing a spec
 

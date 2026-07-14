@@ -3,7 +3,7 @@
  *
  * A single test server serves every suite. Each spec declares and installs the
  * fake personas it needs into its own working directory (see
- * tests/persona-fixtures.ts and AGENTS.md); the PersonaManager loads the nearest
+ * tests/test-helpers.ts and AGENTS.md); the PersonaManager loads the nearest
  * `.jupyter/personas/` walking up from a chat's directory, so suites stay
  * isolated on one server.
  */

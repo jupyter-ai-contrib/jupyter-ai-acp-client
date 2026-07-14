@@ -22,10 +22,10 @@ configure_jupyter_server(c)
 # jupyter_ai_acp_client/acp_personas/__init__.py.) This keeps the persona list
 # deterministic regardless of which agent CLIs happen to be installed on the
 # machine running the tests.
-os.environ["JUPYTER_AI_ACP_CLIENT_E2E_TESTING_CI_ONLY"] = "1"
+os.environ["JUPYTER_AI_ACP_CLIENT_E2E_TESTING_ONLY"] = "1"
 
 # Each test suite installs the fake personas it needs at runtime, into its own
-# working directory (see tests/persona-fixtures.ts). The PersonaManager loads the
+# working directory (see tests/test-helpers.ts). The PersonaManager loads the
 # nearest `.jupyter/personas/` walking up from a chat's directory, so a suite's
 # chats see only its personas. The fixture persona files locate their fake agent
 # scripts via this env var.
