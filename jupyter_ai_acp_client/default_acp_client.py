@@ -426,7 +426,7 @@ class JaiAcpClient(Client):
                 persona.acp_slash_commands = update.available_commands
             # Also advertise the commands over the awareness channel.
             if persona is not None:
-                persona.update_slash_commands([
+                persona.report_slash_commands([
                     CommandOption(
                         name=cmd.name if cmd.name.startswith("/") else "/" + cmd.name,
                         description=cmd.description,

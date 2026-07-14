@@ -843,13 +843,14 @@ class BaseAcpPersona(BasePersona):
         mode/config itself).
         """
         model, settings = self._build_awareness_config()
-        self.set_configuration(model, settings)
+        self.report_model_configuration(model)
+        self.report_settings_configuration(settings)
 
     def _sync_awareness_usage(self) -> None:
         """
         Map the raw ACP usage state onto the awareness `Usage` model and merge it
         into the broadcast usage. ACP reports cumulative counts and a live
-        context snapshot, so the default replace semantics of `update_usage` are
+        context snapshot, so the default replace semantics of `report_usage` are
         correct here.
         """
         usage = AwarenessUsage()
@@ -868,7 +869,7 @@ class BaseAcpPersona(BasePersona):
             usage.cached_read_tokens = tokens.cached_read_tokens
             usage.cached_write_tokens = tokens.cached_write_tokens
             usage.thought_tokens = tokens.thought_tokens
-        self.update_usage(usage)
+        self.report_usage(usage)
 
     def _coerce_config_value(self, config_id: str, value: str) -> str | bool:
         """

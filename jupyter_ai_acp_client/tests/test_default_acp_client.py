@@ -249,7 +249,7 @@ def _real_usage_persona():
     persona.log = logging.getLogger("test")
     persona.awareness = MagicMock()
     persona.ychat = MagicMock()
-    # Awareness state so `_sync_awareness_usage` -> `update_usage` has somewhere
+    # Awareness state so `_sync_awareness_usage` -> `report_usage` has somewhere
     # to merge into (normally set by `BasePersona.__init__`, skipped here).
     persona._awareness_state = PersonaAwarenessState(id="test-persona")
     return persona
@@ -297,7 +297,7 @@ class TestAwarenessPush:
     async def test_available_commands_update_advertises_over_awareness(self):
         client, _, persona = _make_client_and_persona()
         client._loading_sessions = {}
-        persona.update_slash_commands = MagicMock()
+        persona.report_slash_commands = MagicMock()
         update = AvailableCommandsUpdate(
             sessionUpdate="available_commands_update",
             availableCommands=[
@@ -308,7 +308,7 @@ class TestAwarenessPush:
 
         await client.session_update(SESSION_ID, update)
 
-        commands = persona.update_slash_commands.call_args[0][0]
+        commands = persona.report_slash_commands.call_args[0][0]
         # Names are leading-slash normalized.
         assert [(c.name, c.description) for c in commands] == [
             ("/compact", "Compact context"),
