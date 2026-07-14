@@ -6,7 +6,11 @@ from jupyter_server.base.handlers import APIHandler
 import tornado
 from pydantic import BaseModel
 from acp.schema import SessionConfigOptionBoolean, SessionConfigOptionSelect
-from .base_acp_persona import BaseAcpPersona
+from .base_acp_persona import (
+    MODE_CONTROL_ID,
+    BaseAcpPersona,
+    _flatten_select_options,
+)
 
 if TYPE_CHECKING:
     from jupyter_server_fileid.manager import BaseFileIdManager
@@ -82,7 +86,6 @@ class AcpSlashCommandsHandler(APIHandler):
 
 
 MODEL_CONTROL_ID = "__model__"
-MODE_CONTROL_ID = "__mode__"
 
 class AcpControlChoice(BaseModel):
     value: str
@@ -102,19 +105,6 @@ class AcpControl(BaseModel):
     current_value: str | bool | None = None
     # Available choices, for selects.
     choices: list[AcpControlChoice] = []
-
-def _flatten_select_options(options) -> list:
-    """
-    Yield the flat choice items of an ACP select option, whether the agent sent
-    a flat list or grouped options. Unknown shapes are skipped.
-    """
-    flat = []
-    for item in options or []:
-        if hasattr(item, "value"):
-            flat.append(item)
-        elif hasattr(item, "options"):
-            flat.extend(item.options or [])
-    return flat
 
 def build_controls(persona: BaseAcpPersona) -> list[AcpControl]:
     """

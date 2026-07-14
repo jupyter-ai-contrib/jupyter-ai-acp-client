@@ -8,11 +8,17 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from acp.exceptions import RequestError
 from acp.schema import (
+    AvailableCommand,
+    AvailableCommandsUpdate,
+    ConfigOptionUpdate,
+    CurrentModeUpdate,
     ResourceContentBlock,
     TextContentBlock,
     Usage,
     UsageUpdate,
 )
+
+from jupyter_ai_persona_manager import PersonaAwarenessState
 
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
 from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
@@ -243,6 +249,9 @@ def _real_usage_persona():
     persona.log = logging.getLogger("test")
     persona.awareness = MagicMock()
     persona.ychat = MagicMock()
+    # Awareness state so `_sync_awareness_usage` -> `update_usage` has somewhere
+    # to merge into (normally set by `BasePersona.__init__`, skipped here).
+    persona._awareness_state = PersonaAwarenessState(id="test-persona")
     return persona
 
 
@@ -280,6 +289,87 @@ class TestUsageStorage:
         await client.prompt_and_reply(session_id=SESSION_ID, prompt="hello")
 
         assert persona.acp_session_usage is None
+
+
+class TestAwarenessPush:
+    """The client pushes ACP updates onto the persona's awareness API too."""
+
+    async def test_available_commands_update_advertises_over_awareness(self):
+        client, _, persona = _make_client_and_persona()
+        client._loading_sessions = {}
+        persona.update_slash_commands = MagicMock()
+        update = AvailableCommandsUpdate(
+            sessionUpdate="available_commands_update",
+            availableCommands=[
+                AvailableCommand(name="compact", description="Compact context"),
+                AvailableCommand(name="/clear", description="Clear"),
+            ],
+        )
+
+        await client.session_update(SESSION_ID, update)
+
+        commands = persona.update_slash_commands.call_args[0][0]
+        # Names are leading-slash normalized.
+        assert [(c.name, c.description) for c in commands] == [
+            ("/compact", "Compact context"),
+            ("/clear", "Clear"),
+        ]
+
+    async def test_current_mode_update_rebuilds_awareness_config(self):
+        client, _, persona = _make_client_and_persona()
+        client._loading_sessions = {}
+        persona._sync_awareness_config = MagicMock()
+        update = CurrentModeUpdate(sessionUpdate="current_mode_update", currentModeId="code")
+
+        await client.session_update(SESSION_ID, update)
+
+        persona.update_acp_current_mode.assert_called_once_with("code")
+        persona._sync_awareness_config.assert_called_once()
+
+    async def test_config_option_update_rebuilds_awareness_config(self):
+        client, _, persona = _make_client_and_persona()
+        client._loading_sessions = {}
+        persona._sync_awareness_config = MagicMock()
+        update = ConfigOptionUpdate(
+            sessionUpdate="config_option_update", configOptions=[]
+        )
+
+        await client.session_update(SESSION_ID, update)
+
+        persona.update_acp_config_options.assert_called_once()
+        persona._sync_awareness_config.assert_called_once()
+
+    async def test_usage_update_pushes_awareness_usage(self):
+        client, _, persona = _make_client_and_persona()
+        client._loading_sessions = {}
+        persona._sync_awareness_usage = MagicMock()
+        update = UsageUpdate(sessionUpdate="usage_update", used=1, size=2)
+
+        await client.session_update(SESSION_ID, update)
+
+        persona.update_acp_context_usage.assert_called_once_with(update)
+        persona._sync_awareness_usage.assert_called_once()
+
+    async def test_persona_without_helpers_does_not_crash(self):
+        """A persona missing the awareness helpers is tolerated (defensive)."""
+
+        class _Bare:
+            log = logging.getLogger("test")
+
+            def __init__(self):
+                self.acp_slash_commands = []
+
+        client, _, _ = _make_client_and_persona()
+        client._loading_sessions = {}
+        # Lacks update_slash_commands / _sync_* helpers entirely.
+        client._personas_by_session[SESSION_ID] = _Bare()
+        update = AvailableCommandsUpdate(
+            sessionUpdate="available_commands_update",
+            availableCommands=[AvailableCommand(name="x", description="d")],
+        )
+
+        # No exception despite the missing helper.
+        await client.session_update(SESSION_ID, update)
 
 
 class TestLoadSessionCleanup:
