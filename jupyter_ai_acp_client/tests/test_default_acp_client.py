@@ -18,6 +18,10 @@ from acp.schema import (
     UsageUpdate,
 )
 
+from jupyterlab_chat.models import User
+from jupyterlab_chat.ychat import YChat
+from pycrdt import Awareness
+
 from jupyter_ai_persona_manager import PersonaAwareness
 
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
@@ -27,21 +31,15 @@ from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
 SESSION_ID = "sess-1"
 
 
-class _FakePersonaAwareness(PersonaAwareness):
-    """A PersonaAwareness backed by a plain dict — the typed properties work as
-    in production, but there's no YChat, client-ID juggling, or heartbeat."""
-
-    def __init__(self):
-        self._state: dict = {}
-
-    def get_local_state(self):
-        return self._state
-
-    def set_local_state(self, state):
-        self._state = state or {}
-
-    def set_local_state_field(self, field, value):
-        self._state[field] = value
+def _awareness() -> PersonaAwareness:
+    """A real PersonaAwareness over a fresh in-memory YChat. Constructed outside
+    an event loop, so the heartbeat is skipped — everything else is real."""
+    ychat = YChat()
+    ychat.awareness = Awareness(ydoc=ychat._ydoc)
+    user = User(username="test-persona", name="Test", display_name="Test")
+    return PersonaAwareness(
+        ychat=ychat, log=logging.getLogger("test"), user=user, id="test-persona"
+    )
 
 
 def _make_client_and_persona():
@@ -264,9 +262,9 @@ def _real_usage_persona():
     persona._acp_context_usage = None
     persona._acp_session_usage = None
     persona.log = logging.getLogger("test")
-    # A dict-backed awareness slot so `_sync_awareness_usage` -> `report_usage`
-    # round-trips through the real typed properties (no YChat/heartbeat).
-    persona.awareness = _FakePersonaAwareness()
+    # A real awareness slot so `_sync_awareness_usage` -> `report_usage`
+    # round-trips through the real typed properties.
+    persona.awareness = _awareness()
     persona.ychat = MagicMock()
     return persona
 

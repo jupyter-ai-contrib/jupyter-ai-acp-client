@@ -22,26 +22,24 @@ from acp.schema import (
     Usage,
     UsageUpdate,
 )
+from jupyterlab_chat.models import User
+from jupyterlab_chat.ychat import YChat
+from pycrdt import Awareness
+
 from jupyter_ai_persona_manager import PersonaAwareness
 
 from jupyter_ai_acp_client.base_acp_persona import MODE_CONTROL_ID, BaseAcpPersona
 
 
-class _FakePersonaAwareness(PersonaAwareness):
-    """A PersonaAwareness backed by a plain dict — the typed properties work as
-    in production, but there's no YChat, client-ID juggling, or heartbeat."""
-
-    def __init__(self):
-        self._state: dict = {}
-
-    def get_local_state(self):
-        return self._state
-
-    def set_local_state(self, state):
-        self._state = state or {}
-
-    def set_local_state_field(self, field, value):
-        self._state[field] = value
+def _awareness() -> PersonaAwareness:
+    """A real PersonaAwareness over a fresh in-memory YChat. Constructed outside
+    an event loop, so the heartbeat is skipped — everything else is real."""
+    ychat = YChat()
+    ychat.awareness = Awareness(ydoc=ychat._ydoc)
+    user = User(username="test-persona", name="Test", display_name="Test")
+    return PersonaAwareness(
+        ychat=ychat, log=logging.getLogger("test"), user=user, id="test-persona"
+    )
 
 
 def _select_option(
@@ -94,7 +92,7 @@ def _awareness_persona(
 
     persona = _Concrete.__new__(_Concrete)
     persona.log = logging.getLogger("test")
-    persona.awareness = _FakePersonaAwareness()
+    persona.awareness = _awareness()
     persona.ychat = MagicMock()
     persona._acp_models = models or []
     persona._acp_current_model_id = current_model
