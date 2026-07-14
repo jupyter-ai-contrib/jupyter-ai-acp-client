@@ -21,10 +21,6 @@ const PORT = Number(process.env.JAI_TEST_PORT);
 module.exports = {
   ...baseConfig,
   use: { ...(baseConfig.use || {}), baseURL: `http://localhost:${PORT}` },
-  projects: [
-    { name: 'replies', testMatch: '**/replies.spec.ts' },
-    { name: 'ui-controls', testMatch: '**/ui-controls.spec.ts' }
-  ],
   webServer: {
     // MCP port offset from the HTTP port so it doesn't collide with a default
     // (3001) or a dev server. CLI args win over galata's config defaults.

@@ -96,8 +96,8 @@ server. Both ports are passed as `jlpm start` CLI args, which win over galata's
 config defaults. `reuseExistingServer` is `false` so a run never silently reuses
 a dev server that lacks the E2E config — free the port before running locally.
 
-The two `projects` in the config just group tests by file in the output; they
-share the one server.
+Every `*.spec.ts` under `tests/` runs against that one server; the config
+defines no `projects`, so adding a spec file needs no config change.
 
 ## Linting (CI gate)
 

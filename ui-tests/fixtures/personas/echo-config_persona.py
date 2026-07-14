@@ -2,11 +2,13 @@
 Fixture persona for E2E tests: an ACP persona whose agent echoes its current
 session config options as YAML (see ../agents/echo_config_agent.py).
 
-This file is not part of the shipped package. The server config copies it into
-`<root>/.jupyter/personas/` when a suite requests the "echo" persona, and the
-PersonaManager auto-loads any `*persona*.py` there. Because the loader only keeps
-classes defined in this module (`obj.__module__ == module stem`), the persona
-class must be declared here rather than imported.
+This file is not part of the shipped package. A suite that requests the
+`echo-config` fixture installs it at runtime: its `beforeAll` calls
+`installPersonas` (see `tests/test-helpers.ts`), which uploads this file to the
+suite's `<dir>/.jupyter/personas/`, where the PersonaManager auto-loads any
+`*persona*.py`. Because the loader only keeps classes defined in this module
+(`obj.__module__ == module stem`), the persona class must be declared here
+rather than imported.
 
 The path to the fake agent script is read from `JAI_TEST_AGENTS_DIR`, which the
 server config exports, so this file works regardless of where it is copied.
