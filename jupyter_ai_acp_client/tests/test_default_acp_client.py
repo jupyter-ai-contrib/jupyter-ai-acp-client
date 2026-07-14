@@ -350,27 +350,6 @@ class TestAwarenessPush:
         persona.update_acp_context_usage.assert_called_once_with(update)
         persona._sync_awareness_usage.assert_called_once()
 
-    async def test_persona_without_helpers_does_not_crash(self):
-        """A persona missing the awareness helpers is tolerated (defensive)."""
-
-        class _Bare:
-            log = logging.getLogger("test")
-
-            def __init__(self):
-                self.acp_slash_commands = []
-
-        client, _, _ = _make_client_and_persona()
-        client._loading_sessions = {}
-        # Lacks update_slash_commands / _sync_* helpers entirely.
-        client._personas_by_session[SESSION_ID] = _Bare()
-        update = AvailableCommandsUpdate(
-            sessionUpdate="available_commands_update",
-            availableCommands=[AvailableCommand(name="x", description="d")],
-        )
-
-        # No exception despite the missing helper.
-        await client.session_update(SESSION_ID, update)
-
 
 class TestLoadSessionCleanup:
     """Tests for _loading_sessions cleanup on failure."""

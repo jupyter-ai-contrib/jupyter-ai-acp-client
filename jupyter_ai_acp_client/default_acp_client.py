@@ -424,11 +424,9 @@ class JaiAcpClient(Client):
                 return
             if persona and hasattr(persona, 'acp_slash_commands'):
                 persona.acp_slash_commands = update.available_commands
-            # Also advertise the commands over the awareness channel. Guard for
-            # non-ACP or partially-mocked personas in tests.
-            update_slash_commands = getattr(persona, "update_slash_commands", None)
-            if callable(update_slash_commands):
-                update_slash_commands([
+            # Also advertise the commands over the awareness channel.
+            if persona is not None:
+                persona.update_slash_commands([
                     CommandOption(
                         name=cmd.name if cmd.name.startswith("/") else "/" + cmd.name,
                         description=cmd.description,
@@ -486,22 +484,17 @@ class JaiAcpClient(Client):
     def _sync_awareness_config(persona: BasePersona) -> None:
         """
         Ask the persona to rebuild and rebroadcast its awareness model/settings
-        config. Defensive: no-op for non-ACP or partially-mocked personas that
-        lack the helper.
+        config.
         """
-        sync = getattr(persona, "_sync_awareness_config", None)
-        if callable(sync):
-            sync()
+        persona._sync_awareness_config()
 
     @staticmethod
     def _sync_awareness_usage(persona: BasePersona) -> None:
         """
         Ask the persona to map its raw ACP usage onto the awareness `Usage` model
-        and rebroadcast. Defensive: no-op when the helper is absent.
+        and rebroadcast.
         """
-        sync = getattr(persona, "_sync_awareness_usage", None)
-        if callable(sync):
-            sync()
+        persona._sync_awareness_usage()
 
     def includes_session(self, session_id: str) -> bool:
         """Returns whether this client manages the given session."""

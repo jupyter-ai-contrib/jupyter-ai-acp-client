@@ -725,9 +725,9 @@ class BaseAcpPersona(BasePersona):
     #
     # Maps the raw ACP state above onto the persona-manager awareness schema
     # (`ModelConfiguration` + general `SettingConfiguration`s) and implements the
-    # three abstract `update_*` methods `BasePersona` requires. This mirrors the
-    # normalization in `routes.py:build_controls`, keeping the REST toolbar and
-    # the awareness broadcast in agreement.
+    # three abstract `update_*` methods `BasePersona` requires. The awareness
+    # broadcast is now the single source of truth for session info; the frontend
+    # reads it directly rather than polling a REST endpoint.
     ################################################
     def _config_option_to_setting(
         self, opt: AcpConfigOption
@@ -772,7 +772,7 @@ class BaseAcpPersona(BasePersona):
         Build the awareness `ModelConfiguration` and general
         `SettingConfiguration` list from the current raw ACP state.
 
-        Bucketing (mirrors the issue FAQ and `build_controls` dedup):
+        Bucketing (mirrors the issue FAQ):
 
         - Model: the dedicated `_acp_models`/`_acp_current_model_id` fields are
           the primary source. Only when no models are advertised there do we

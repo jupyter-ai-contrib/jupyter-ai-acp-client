@@ -6,6 +6,7 @@ import {
 import {
   IChatCommandProvider,
   IChatCommandRegistry,
+  IChatContext,
   IInputModel,
   IMessagePreambleRegistry,
   IInputToolbarRegistryFactory,
@@ -13,11 +14,32 @@ import {
   ChatCommand
 } from '@jupyter/chat';
 
+import { Awareness } from 'y-protocols/awareness';
+
 import { ToolCallsComponent } from './tool-calls';
 
-import { getAcpSlashCommands } from './request';
+import {
+  findPersonaList,
+  readPersonaStateById,
+  resolvePersonaByMention
+} from './awareness';
 import { AcpStopButton } from './stop-button';
 import { AcpPersonaControls } from './persona-controls';
+
+/**
+ * Reach the Yjs awareness channel through the input's chat context. The
+ * concrete `LabChatContext` wraps the `LabChatModel`, whose `sharedModel`
+ * carries the `awareness` object; the generic `IChatContext` type does not
+ * surface either, so we read them structurally.
+ */
+function getAwarenessFromContext(
+  chatContext: IChatContext | undefined
+): Awareness | null {
+  const model = (chatContext as { _model?: unknown })?._model;
+  const shared = (model as { sharedModel?: { awareness?: Awareness } })
+    ?.sharedModel;
+  return shared?.awareness ?? null;
+}
 
 const SLASH_COMMAND_PROVIDER_ID =
   '@jupyter-ai/acp-client:slash-command-provider';
@@ -51,6 +73,12 @@ export class SlashCommandProvider implements IChatCommandProvider {
 
   /**
    * Returns slash command completions for the current input.
+   *
+   * Slash commands are read from the target persona's `PersonaAwarenessState`
+   * on the chat's awareness channel — the same source the toolbar reads — with
+   * no REST call. The target persona is the one named in the input's mention
+   * (if the user typed one) or, failing that, the persona currently selected in
+   * the picker (stamped onto the input metadata as `to_persona`).
    */
   async listCommandCompletions(
     inputModel: IInputModel
@@ -62,37 +90,48 @@ export class SlashCommandProvider implements IChatCommandProvider {
       return [];
     }
 
-    if (!inputModel.chatContext) {
+    const awareness = getAwarenessFromContext(inputModel.chatContext);
+    if (!awareness) {
       return [];
     }
-    const chatPath = inputModel.chatContext.name;
-    const existingMentions = this._getExistingMentions(inputModel);
 
+    const existingMentions = this._getExistingMentions(inputModel);
     // return early if >1 persona is mentioned in the input. we never show ACP
     // slash command suggestions in this case.
     if (existingMentions.size > 1) {
       return [];
     }
 
-    // otherwise, call the `/ai/acp/slash_commands` endpoint to get slash
-    // command suggestions
-    let personaMentionName: string | null = null;
+    // Resolve the target persona: a typed mention wins; otherwise fall back to
+    // the persona selected in the picker (carried on the input metadata).
+    const personas = findPersonaList(awareness);
+    let personaId: string | null = null;
     if (existingMentions.size) {
-      personaMentionName = existingMentions.values().next().value ?? null;
+      const mention = existingMentions.values().next().value ?? null;
+      personaId = resolvePersonaByMention(personas, mention);
+    } else {
+      personaId = inputModel.getMetadata?.().to_persona ?? null;
     }
-    const response = await getAcpSlashCommands(chatPath, personaMentionName);
+    if (!personaId) {
+      return [];
+    }
+
+    const state = readPersonaStateById(awareness, personaId);
+    if (!state) {
+      return [];
+    }
+
     const commandSuggestions: ChatCommand[] = [];
-    for (const cmd of response) {
+    for (const cmd of state.slash_commands) {
+      const name = cmd.name.startsWith('/') ? cmd.name : `/${cmd.name}`;
       // continue if command does not match current word
-      if (!cmd.name.startsWith(currentWord)) {
+      if (!name.startsWith(currentWord)) {
         continue;
       }
-
-      // otherwise add it as a suggestion
       commandSuggestions.push({
-        name: cmd.name,
+        name,
         providerId: this.id,
-        description: cmd.description,
+        description: cmd.description ?? undefined,
         spaceOnAccept: true
       });
     }
