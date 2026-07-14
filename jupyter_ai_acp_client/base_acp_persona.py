@@ -843,8 +843,7 @@ class BaseAcpPersona(BasePersona):
         mode/config itself).
         """
         model, settings = self._build_awareness_config()
-        self.set_model_configuration(model)
-        self.set_setting_configurations(settings)
+        self.set_configuration(model, settings)
 
     def _sync_awareness_usage(self) -> None:
         """

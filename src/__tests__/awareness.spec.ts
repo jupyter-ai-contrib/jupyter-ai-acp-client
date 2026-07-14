@@ -49,6 +49,7 @@ function personaState(
       cost_currency: null
     },
     slash_commands: [],
+    isWriting: false,
     ...partial
   };
 }
@@ -75,7 +76,7 @@ describe('readPersonaList', () => {
 describe('findPersonaList', () => {
   it('finds the manager slot by scanning, without a known client ID', () => {
     const awareness = fakeAwareness({
-      42: { persona: personaState() },
+      42: personaState(),
       [MANAGER_CLIENT_ID]: {
         personas: [
           { id: 'kiro', name: 'Kiro', avatar_url: null, yjs_client_id: 42 }
@@ -122,7 +123,7 @@ describe('readPersonaState', () => {
       },
       slash_commands: [{ name: '/compact', description: 'Compact context' }]
     });
-    const awareness = fakeAwareness({ 42: { persona: state } });
+    const awareness = fakeAwareness({ 42: state });
 
     const read = readPersonaState(awareness, 42);
     expect(read?.model.current).toBe('opus-48');
@@ -147,11 +148,9 @@ describe('readPersonaStateById', () => {
           { id: 'kiro', name: 'Kiro', avatar_url: null, yjs_client_id: 42 }
         ]
       },
-      42: {
-        persona: personaState({
-          slash_commands: [{ name: '/login', description: null }]
-        })
-      }
+      42: personaState({
+        slash_commands: [{ name: '/login', description: null }]
+      })
     });
     const state = readPersonaStateById(awareness, 'kiro');
     expect(state?.slash_commands).toEqual([

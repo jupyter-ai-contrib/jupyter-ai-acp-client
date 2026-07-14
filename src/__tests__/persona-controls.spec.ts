@@ -28,6 +28,7 @@ function state(
       cost_currency: null
     },
     slash_commands: [],
+    isWriting: false,
     ...partial
   };
 }

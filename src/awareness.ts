@@ -89,7 +89,11 @@ export type CommandOption = {
 };
 
 /**
- * A single persona's awareness state. Mirrors `PersonaAwarenessState`.
+ * A single persona's awareness state. Mirrors `PersonaAwarenessState`, and is
+ * the persona's awareness slot itself — each field is a top-level entry of the
+ * slot. `isWriting` (false when idle, else the ID of the message being written)
+ * is written on the streaming hot path and read by jupyter-chat; other slot
+ * entries (e.g. the `user` object) are not part of this state.
  */
 export type PersonaAwarenessState = {
   id: string;
@@ -97,6 +101,7 @@ export type PersonaAwarenessState = {
   settings: SettingConfiguration[];
   usage: Usage;
   slash_commands: CommandOption[];
+  isWriting: boolean | string;
 };
 
 /**
@@ -125,12 +130,10 @@ export const EMPTY_USAGE: Usage = {
 };
 
 /**
- * The awareness field the manager writes its persona list under, and the field
- * each persona writes its state under. Kept in sync with the persona-manager
- * `set_local_state_field` calls.
+ * The awareness field the manager writes its persona list under. Kept in sync
+ * with the persona-manager `PersonaManagerAwarenessState`.
  */
 const MANAGER_PERSONAS_FIELD = 'personas';
-const PERSONA_STATE_FIELD = 'persona';
 
 /**
  * Read the persona list the `PersonaManager` published under `managerClientId`.
@@ -147,16 +150,19 @@ export function readPersonaList(
 
 /**
  * Read a single persona's `PersonaAwarenessState` from the awareness slot named
- * by its `yjs_client_id`. Returns null when that slot is absent (the persona
- * has not published yet, or reloaded under a new client ID).
+ * by its `yjs_client_id`. The slot itself is the state (each field is a
+ * top-level entry). Returns null when the slot is absent or has no `model` yet
+ * (the persona has not published its configuration, or reloaded under a new
+ * client ID).
  */
 export function readPersonaState(
   awareness: Awareness,
   yjsClientId: number
 ): PersonaAwarenessState | null {
   const state = awareness.getStates().get(yjsClientId);
-  const persona = state?.[PERSONA_STATE_FIELD];
-  return persona ? (persona as PersonaAwarenessState) : null;
+  // `model` is present once the persona has broadcast its configuration; use it
+  // to tell a populated persona slot from an empty/other client's slot.
+  return state && state.model ? (state as PersonaAwarenessState) : null;
 }
 
 /**
