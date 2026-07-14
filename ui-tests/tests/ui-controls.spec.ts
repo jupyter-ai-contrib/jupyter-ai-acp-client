@@ -9,7 +9,7 @@ import {
   Locator,
   test
 } from '@jupyterlab/galata';
-import { UUID } from '@lumino/coreutils';
+import { installPersonas, openChat } from './persona-fixtures';
 
 /**
  * Verifies the toolbar's model/settings controls drive the persona's session
@@ -17,8 +17,7 @@ import { UUID } from '@lumino/coreutils';
  * select config options — `model` (default claude-haiku-45) and `effort_level`
  * (default medium) — and replies to every message with its current config as
  * YAML. Changing a control therefore shows up in the next reply, which is what
- * these tests assert. Fixture personas are loaded by the shared test server via
- * JAI_TEST_PERSONAS (see jupyter_server_test_config.py / AGENTS.md).
+ * these tests assert. The suite declares its own personas below.
  */
 
 const PERSONA_NAME = 'Echo Config Agent';
@@ -30,24 +29,9 @@ const PICKER = '.jp-jupyter-ai-acp-client-personaControls-persona-btn';
 // (whose duplicate buttons compute as `hidden`).
 const VISIBLE_CONTROL_BTN =
   '.jp-jupyter-ai-acp-client-personaControls-controls > .jp-jupyter-ai-acp-client-personaControls-control-btn';
-// This test file's working directory. The server installs this suite's personas
-// (see playwright.config.js SUITES) under `<TEST_DIR>/.jupyter/personas/`, so
-// chats created here load only those personas.
+// This suite's working directory; its personas are installed under
+// `<TEST_DIR>/.jupyter/personas/` so chats created here load only those.
 const TEST_DIR = 'ui-controls';
-
-/** Create and open a chat file under TEST_DIR, returning its panel locator. */
-async function openChat(page: IJupyterLabPageFixture): Promise<Locator> {
-  const filepath = `${TEST_DIR}/chat-${UUID.uuid4()}.chat`;
-  await page.filebrowser.contents.uploadContent('{}', 'text', filepath);
-  await page.evaluate(async (name: string) => {
-    await window.jupyterapp.commands.execute('jupyterlab-chat:open', {
-      filepath: name
-    });
-  }, filepath);
-  const tab = filepath.split('/').pop()!;
-  await page.waitForCondition(async () => page.activity.isTabActive(tab));
-  return page.activity.getPanelLocator(tab);
-}
 
 /** Select the Echo persona and wait for its config controls to load. */
 async function selectEchoPersona(
@@ -107,8 +91,12 @@ function expectConfig(reply: string, model: string, effort: string): void {
 }
 
 test.describe('echo config agent', () => {
+  test.beforeAll(async ({ request }) => {
+    await installPersonas(request, TEST_DIR, ['echo']);
+  });
+
   test('reports default config before any change', async ({ page }) => {
-    const chat = await openChat(page);
+    const chat = await openChat(page, TEST_DIR);
     await selectEchoPersona(page, chat);
     const reply = await sendAndReadReply(page, chat, 'show config');
     expectConfig(reply, 'claude-haiku-45', 'medium');
@@ -117,7 +105,7 @@ test.describe('echo config agent', () => {
   test('changing just the model is reflected in the reply', async ({
     page
   }) => {
-    const chat = await openChat(page);
+    const chat = await openChat(page, TEST_DIR);
     await selectEchoPersona(page, chat);
     await setControl(page, chat, 'Model', 'claude-opus-48');
     const reply = await sendAndReadReply(page, chat, 'show config');
@@ -127,7 +115,7 @@ test.describe('echo config agent', () => {
   test('changing just a non-model setting is reflected in the reply', async ({
     page
   }) => {
-    const chat = await openChat(page);
+    const chat = await openChat(page, TEST_DIR);
     await selectEchoPersona(page, chat);
     await setControl(page, chat, 'Effort Level', 'high');
     const reply = await sendAndReadReply(page, chat, 'show config');
@@ -137,7 +125,7 @@ test.describe('echo config agent', () => {
   test('changing both model and setting is reflected in the reply', async ({
     page
   }) => {
-    const chat = await openChat(page);
+    const chat = await openChat(page, TEST_DIR);
     await selectEchoPersona(page, chat);
     await setControl(page, chat, 'Model', 'claude-fable-5');
     await setControl(page, chat, 'Effort Level', 'low');

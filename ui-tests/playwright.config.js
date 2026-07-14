@@ -1,20 +1,13 @@
 /**
  * Configuration for Playwright using default from @jupyterlab/galata.
  *
- * A single test server serves every suite. Each test file works in its own
- * directory with its own persona set: SUITES below is the source of truth,
- * mapping a directory name to the fixture personas installed under
- * `<dir>/.jupyter/personas/` (see jupyter_server_test_config.py, which does the
- * copying at startup from JAI_TEST_LAYOUT). A spec creates its chats under its
- * own directory, so the PersonaManager loads only that directory's personas.
+ * A single test server serves every suite. Each spec declares and installs the
+ * fake personas it needs into its own working directory (see
+ * tests/persona-fixtures.ts and AGENTS.md); the PersonaManager loads the nearest
+ * `.jupyter/personas/` walking up from a chat's directory, so suites stay
+ * isolated on one server.
  */
 const baseConfig = require('@jupyterlab/galata/lib/playwright-config');
-
-// Source of truth: test-file directory -> personas available to it.
-const SUITES = [
-  { name: 'replies', personas: ['hello'] },
-  { name: 'ui-controls', personas: ['echo'] }
-];
 
 // Random port so a run doesn't collide with a dev server (or another run) on a
 // fixed port. Playwright re-`require`s this config in each worker, so compute it
@@ -38,16 +31,9 @@ module.exports = {
     command: `jlpm start --ServerApp.port=${PORT} --MCPExtensionApp.mcp_port=${PORT + 100}`,
     url: `http://localhost:${PORT}/lab`,
     timeout: 120 * 1000,
-    // Never reuse an already-running server: the tests need one started with the
-    // persona layout below, and reusing an unrelated dev server would silently
-    // run them with no personas. Free the port before running locally.
-    reuseExistingServer: false,
-    env: {
-      ...process.env,
-      // dir -> personas, consumed by jupyter_server_test_config.py.
-      JAI_TEST_LAYOUT: JSON.stringify(
-        Object.fromEntries(SUITES.map(s => [s.name, s.personas]))
-      )
-    }
+    // Never reuse an already-running server: reusing an unrelated dev server
+    // would leave the E2E persona-disabling config unapplied. Free the port
+    // before running locally.
+    reuseExistingServer: false
   }
 };

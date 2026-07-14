@@ -3,40 +3,28 @@
  * Distributed under the terms of the Modified BSD License.
  */
 
-import { expect, IJupyterLabPageFixture, test } from '@jupyterlab/galata';
-import { UUID } from '@lumino/coreutils';
+import { expect, test } from '@jupyterlab/galata';
+import { installPersonas, openChat } from './persona-fixtures';
 
 /**
  * Verifies an ACP persona's reply reaches the chat: selects the "Hello Test
  * Agent" fixture persona (which always replies "hello") and asserts the reply
- * renders. The fixture personas are loaded by the shared test server via
- * JAI_TEST_PERSONAS (see jupyter_server_test_config.py / AGENTS.md).
+ * renders. The suite declares its own personas below.
  */
 
 const PERSONA_NAME = 'Hello Test Agent';
 const PICKER = '.jp-jupyter-ai-acp-client-personaControls-persona-btn';
-// This test file's working directory. The server installs this suite's personas
-// (see playwright.config.js SUITES) under `<TEST_DIR>/.jupyter/personas/`, so
-// chats created here load only those personas.
+// This suite's working directory; its personas are installed under
+// `<TEST_DIR>/.jupyter/personas/` so chats created here load only those.
 const TEST_DIR = 'replies';
 
-/** Create and open a chat file under TEST_DIR, returning its panel locator. */
-async function openChat(page: IJupyterLabPageFixture) {
-  const filepath = `${TEST_DIR}/chat-${UUID.uuid4()}.chat`;
-  await page.filebrowser.contents.uploadContent('{}', 'text', filepath);
-  await page.evaluate(async (name: string) => {
-    await window.jupyterapp.commands.execute('jupyterlab-chat:open', {
-      filepath: name
-    });
-  }, filepath);
-  const tab = filepath.split('/').pop()!;
-  await page.waitForCondition(async () => page.activity.isTabActive(tab));
-  return page.activity.getPanelLocator(tab);
-}
-
 test.describe('hello test agent', () => {
+  test.beforeAll(async ({ request }) => {
+    await installPersonas(request, TEST_DIR, ['hello']);
+  });
+
   test('replies "hello" when selected as the persona', async ({ page }) => {
-    const chat = await openChat(page);
+    const chat = await openChat(page, TEST_DIR);
 
     // The persona picker appears once the PersonaManager registers its personas.
     const picker = chat.locator(PICKER);
