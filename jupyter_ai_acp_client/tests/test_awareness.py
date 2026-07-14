@@ -324,15 +324,34 @@ class TestSyncAwarenessUsage:
 # sync awareness, or swallow errors.
 
 class TestUpdateModel:
-    """update_model dispatches to the ACP model setter."""
+    """update_model routes symmetrically with how the model was sourced."""
 
-    async def test_calls_set_acp_model(self):
-        persona = MagicMock()
+    async def test_dedicated_model_calls_set_acp_model(self):
+        # Agent advertises models via the dedicated field -> session/set_model.
+        persona = _awareness_persona(
+            models=[ModelInfo(modelId="opus", name="Opus")], current_model="opus"
+        )
         persona.set_acp_model = AsyncMock()
+        persona.set_acp_config_option = AsyncMock()
 
         await BaseAcpPersona.update_model(persona, "opus")
 
         persona.set_acp_model.assert_awaited_once_with("opus")
+        persona.set_acp_config_option.assert_not_awaited()
+
+    async def test_config_model_fallback_calls_set_acp_config_option(self):
+        # No dedicated models; the model is a "model" config option. Such an
+        # agent implements no session/set_model, so apply it as a config option.
+        persona = _awareness_persona(
+            config_options=[_select_option("model", "gpt", ["gpt", "claude"])]
+        )
+        persona.set_acp_model = AsyncMock()
+        persona.set_acp_config_option = AsyncMock()
+
+        await BaseAcpPersona.update_model(persona, "claude")
+
+        persona.set_acp_config_option.assert_awaited_once_with("model", "claude")
+        persona.set_acp_model.assert_not_awaited()
 
 
 class TestUpdateModelSettings:

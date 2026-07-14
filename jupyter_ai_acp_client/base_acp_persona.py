@@ -883,8 +883,21 @@ class BaseAcpPersona(BasePersona):
         return value
 
     async def update_model(self, model_id: str) -> None:
-        """Switch the ACP session's model. `BasePersona` rebroadcasts."""
-        await self.set_acp_model(model_id)
+        """
+        Switch the ACP session's model. `BasePersona` rebroadcasts.
+
+        Routes symmetrically with how `_build_awareness_config` sources the
+        model: when the agent advertises models via the dedicated field, apply
+        through `session/set_model`; when the model is instead a `"model"`
+        config option (the fallback that field bucketing folds in), apply it as
+        a config option, since such an agent implements no `session/set_model`.
+        """
+        if self._acp_models:
+            await self.set_acp_model(model_id)
+        else:
+            await self.set_acp_config_option(
+                "model", self._coerce_config_value("model", model_id)
+            )
 
     async def update_model_settings(self, settings: dict[str, str | None]) -> None:
         """
