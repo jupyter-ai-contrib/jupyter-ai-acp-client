@@ -191,27 +191,3 @@ export function readPersonaStateById(
   }
   return readPersonaState(awareness, persona.yjs_client_id);
 }
-
-/**
- * The mention name jupyter-chat derives for a persona: its display name with
- * whitespace runs collapsed to single hyphens (e.g. "Kiro Agent" → "Kiro-Agent").
- * Used to match a typed `@mention` back to a persona.
- */
-export function mentionName(name: string): string {
-  return name.trim().replace(/\s+/g, '-');
-}
-
-/**
- * Resolve a typed `@mention` name to a persona ID from the manager's persona
- * list. Returns null when no persona's mention name matches.
- */
-export function resolvePersonaByMention(
-  personas: PersonaOption[],
-  mention: string | null
-): string | null {
-  if (!mention) {
-    return null;
-  }
-  const match = personas.find(p => mentionName(p.name) === mention);
-  return match ? match.id : null;
-}

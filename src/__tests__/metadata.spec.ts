@@ -3,7 +3,7 @@
  * metadata in the shape the persona-manager expects — the single mechanism by
  * which selections reach the server (no REST calls). Covers building the
  * metadata, seeding a selection from a persona's awareness state, and folding
- * picker changes back into the selection.
+ * control changes back into the selection.
  */
 
 import {
@@ -13,7 +13,7 @@ import {
   selectionForPersona
 } from '../metadata';
 import { PersonaAwarenessState } from '../awareness';
-import { applyPickerChange, Picker } from '../persona-controls';
+import { applyControlChange, Control } from '../persona-controls';
 
 function state(
   partial: Partial<PersonaAwarenessState> = {}
@@ -39,9 +39,9 @@ function state(
   };
 }
 
-function picker(
-  partial: Partial<Picker> & { id: string; kind: Picker['kind'] }
-): Picker {
+function control(
+  partial: Partial<Control> & { id: string; kind: Control['kind'] }
+): Control {
   return {
     label: partial.id,
     current: null,
@@ -165,7 +165,7 @@ describe('selectionForPersona', () => {
   });
 });
 
-describe('applyPickerChange', () => {
+describe('applyControlChange', () => {
   const base: PersonaSelection = {
     personaId: 'kiro',
     modelId: null,
@@ -173,10 +173,10 @@ describe('applyPickerChange', () => {
     settings: { __mode__: null }
   };
 
-  it('routes a model picker change to modelId', () => {
-    const next = applyPickerChange(
+  it('routes a model control change to modelId', () => {
+    const next = applyControlChange(
       base,
-      picker({ id: '__model__', kind: 'model' }),
+      control({ id: '__model__', kind: 'model' }),
       'opus-48'
     );
     expect(next.modelId).toBe('opus-48');
@@ -184,39 +184,39 @@ describe('applyPickerChange', () => {
   });
 
   it('routes a model-setting change to modelSettings by id', () => {
-    const next = applyPickerChange(
+    const next = applyControlChange(
       base,
-      picker({ id: 'context_size', kind: 'model_setting' }),
+      control({ id: 'context_size', kind: 'model_setting' }),
       '200k'
     );
     expect(next.modelSettings).toEqual({ context_size: '200k' });
   });
 
   it('routes a general-setting change to settings by id', () => {
-    const next = applyPickerChange(
+    const next = applyControlChange(
       base,
-      picker({ id: '__mode__', kind: 'setting' }),
+      control({ id: '__mode__', kind: 'setting' }),
       'code'
     );
     expect(next.settings).toEqual({ __mode__: 'code' });
   });
 
   it('resets a control to default when the value is null', () => {
-    const chosen = applyPickerChange(
+    const chosen = applyControlChange(
       base,
-      picker({ id: '__mode__', kind: 'setting' }),
+      control({ id: '__mode__', kind: 'setting' }),
       'code'
     );
-    const reset = applyPickerChange(
+    const reset = applyControlChange(
       chosen,
-      picker({ id: '__mode__', kind: 'setting' }),
+      control({ id: '__mode__', kind: 'setting' }),
       null
     );
     expect(reset.settings).toEqual({ __mode__: null });
   });
 
   it('does not mutate the input selection', () => {
-    applyPickerChange(base, picker({ id: '__model__', kind: 'model' }), 'x');
+    applyControlChange(base, control({ id: '__model__', kind: 'model' }), 'x');
     expect(base.modelId).toBeNull();
   });
 });

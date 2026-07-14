@@ -613,7 +613,6 @@ class BaseAcpPersona(BasePersona):
         await client.set_session_model(model_id, session_id)
         self._acp_current_model_id = model_id
         self._record_model_choice(model_id)
-        self._sync_awareness_config()
 
     def _record_model_choice(self, model_id: str) -> None:
         """Persist the selected model in chat metadata, keyed by persona ID."""
@@ -663,7 +662,6 @@ class BaseAcpPersona(BasePersona):
         await client.set_session_mode(mode_id, session_id)
         self._acp_current_mode_id = mode_id
         self._record_mode_choice(mode_id)
-        self._sync_awareness_config()
 
     def _record_mode_choice(self, mode_id: str) -> None:
         """Persist the selected mode in chat metadata, keyed by persona ID."""
@@ -706,7 +704,6 @@ class BaseAcpPersona(BasePersona):
                 option.current_value = value
                 break
         self._record_config_choice(config_id, value)
-        self._sync_awareness_config()
 
     def _record_config_choice(self, config_id: str, value: str | bool) -> None:
         """Persist a config option value in chat metadata, keyed by persona ID."""
@@ -725,9 +722,12 @@ class BaseAcpPersona(BasePersona):
     #
     # Maps the raw ACP state above onto the persona-manager awareness schema
     # (`ModelConfiguration` + general `SettingConfiguration`s) and implements the
-    # three abstract `update_*` methods `BasePersona` requires. The awareness
-    # broadcast is now the single source of truth for session info; the frontend
-    # reads it directly rather than polling a REST endpoint.
+    # `update_*` methods from `BasePersona` over the ACP RPCs. `BasePersona`
+    # records the new current values and rebroadcasts after an `update_*`; the
+    # `_sync_awareness_config` here publishes the *full* configuration (options
+    # included) when the session is (re)initialized or the agent changes it
+    # itself. The awareness broadcast is the single source of truth for session
+    # info; the frontend reads it directly rather than polling a REST endpoint.
     ################################################
     def _config_option_to_setting(
         self, opt: AcpConfigOption
@@ -879,74 +879,37 @@ class BaseAcpPersona(BasePersona):
         """
         for opt in self._acp_config_options:
             if opt.id == config_id and isinstance(opt, SessionConfigOptionBoolean):
-                return value == "true" if isinstance(value, str) else value
+                return value == "true"
         return value
 
-    async def _apply_config_option(self, config_id: str, value: str) -> None:
+    async def update_model(self, model_id: str) -> None:
+        """Switch the ACP session's model. `BasePersona` rebroadcasts."""
+        await self.set_acp_model(model_id)
+
+    async def update_model_settings(self, settings: dict[str, str | None]) -> None:
         """
-        Apply a single config option by ID, tolerating unknown IDs and RPC
-        failures (mirroring the tolerance of the reapply-stored-config logic).
+        Apply model settings — ACP `model_config` category config options — by
+        setting each as a config option. `BasePersona` passes only the settings
+        that changed and rebroadcasts afterward.
         """
-        if not any(opt.id == config_id for opt in self._acp_config_options):
-            self.log.warning(
-                "Ignoring unknown config option '%s' for '%s'.",
-                config_id,
-                self.__class__.__name__,
-            )
-            return
-        try:
+        for config_id, value in settings.items():
             await self.set_acp_config_option(
                 config_id, self._coerce_config_value(config_id, value)
             )
-        except Exception:
-            self.log.warning(
-                "Failed to set config option '%s' for '%s'.",
-                config_id,
-                self.__class__.__name__,
-                exc_info=True,
-            )
 
-    async def update_model(self, model_id: str) -> None:
-        """Switch the ACP session's model, then rebroadcast the awareness config."""
-        await self.set_acp_model(model_id)
-        self._sync_awareness_config()
-
-    async def update_model_settings(self, settings: dict[str, str]) -> None:
+    async def update_settings(self, settings: dict[str, str | None]) -> None:
         """
-        Apply model settings (ACP `model_config` category config options), keyed
-        by option ID, then rebroadcast. Keys not present in the model_config
-        category are ignored.
-        """
-        model_config_ids = {
-            opt.id
-            for opt in self._acp_config_options
-            if getattr(opt, "category", None) == _MODEL_CONFIG_CATEGORY
-        }
-        for config_id, value in settings.items():
-            if config_id in model_config_ids:
-                await self._apply_config_option(config_id, value)
-        self._sync_awareness_config()
-
-    async def update_settings(self, settings: dict[str, str]) -> None:
-        """
-        Apply general settings, keyed by setting ID, then rebroadcast. The mode
-        pseudo-setting (`MODE_CONTROL_ID`) routes to `set_acp_mode`; everything
-        else is treated as a config option.
+        Apply general settings. The mode pseudo-setting (`MODE_CONTROL_ID`)
+        routes to `set_acp_mode`; everything else is a config option.
+        `BasePersona` passes only the settings that changed and rebroadcasts.
         """
         for setting_id, value in settings.items():
             if setting_id == MODE_CONTROL_ID:
-                try:
-                    await self.set_acp_mode(value)
-                except Exception:
-                    self.log.warning(
-                        "Failed to set mode '%s' for '%s'.",
-                        value,
-                        self.__class__.__name__,
-                        exc_info=True,
-                    )
-                continue
-            await self._apply_config_option(setting_id, value)
-        self._sync_awareness_config()
+                await self.set_acp_mode(value)
+            else:
+                await self.set_acp_config_option(
+                    setting_id, self._coerce_config_value(setting_id, value)
+                )
 
     @property
     def acp_context_usage(self) -> Optional[UsageUpdate]:

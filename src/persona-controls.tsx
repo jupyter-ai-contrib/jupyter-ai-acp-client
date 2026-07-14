@@ -40,8 +40,8 @@ const MENU_CLASS = 'jp-jupyter-ai-acp-client-controlMenu';
 const USAGE_CLASS = 'jp-jupyter-ai-acp-client-usage';
 const NO_ONE_LABEL = 'No one';
 
-// Stable picker ID for the model selector (setting IDs are used verbatim).
-const MODEL_PICKER_ID = '__model__';
+// Stable control ID for the model selector (setting IDs are used verbatim).
+const MODEL_CONTROL_ID = '__model__';
 
 // Context-fill fractions at which the chip starts demanding attention: the
 // ring and percent turn warn, then error, colored.
@@ -76,11 +76,11 @@ const menuAnchorProps = {
 };
 
 /**
- * A UI picker for one control (the model, a model setting, or a general
+ * A UI control for one control (the model, a model setting, or a general
  * setting). It carries the persona's current value (from awareness) and the
  * user's per-message selection (null = use the persona's default).
  */
-export type Picker = {
+export type Control = {
   id: string;
   kind: 'model' | 'model_setting' | 'setting';
   label: string;
@@ -92,15 +92,15 @@ export type Picker = {
 };
 
 /**
- * Convert a persona's awareness `SettingConfiguration` into a `Picker` of the
+ * Convert a persona's awareness `SettingConfiguration` into a `Control` of the
  * given kind, seeding the user selection from the current per-persona
  * selection (defaulting to null = default).
  */
-function settingToPicker(
+function settingToControl(
   setting: SettingConfiguration,
   kind: 'model_setting' | 'setting',
   selection: string | null
-): Picker {
+): Control {
   return {
     id: setting.id,
     kind,
@@ -116,21 +116,21 @@ function settingToPicker(
 }
 
 /**
- * Build the list of pickers to render for a persona: the model picker (when the
+ * Build the list of controls to render for a persona: the model control (when the
  * persona advertises models), its model settings, then its general settings.
- * The user's current selection seeds each picker's `selection`.
+ * The user's current selection seeds each control's `selection`.
  */
-export function buildPickers(
+export function buildControls(
   state: PersonaAwarenessState | null,
   selection: PersonaSelection
-): Picker[] {
+): Control[] {
   if (!state) {
     return [];
   }
-  const pickers: Picker[] = [];
+  const controls: Control[] = [];
   if (state.model.options.length) {
-    pickers.push({
-      id: MODEL_PICKER_ID,
+    controls.push({
+      id: MODEL_CONTROL_ID,
       kind: 'model',
       label: 'Model',
       current: state.model.current,
@@ -143,8 +143,8 @@ export function buildPickers(
     });
   }
   for (const setting of state.model.settings) {
-    pickers.push(
-      settingToPicker(
+    controls.push(
+      settingToControl(
         setting,
         'model_setting',
         selection.modelSettings[setting.id] ?? null
@@ -152,24 +152,24 @@ export function buildPickers(
     );
   }
   for (const setting of state.settings) {
-    pickers.push(
-      settingToPicker(
+    controls.push(
+      settingToControl(
         setting,
         'setting',
         selection.settings[setting.id] ?? null
       )
     );
   }
-  return pickers;
+  return controls;
 }
 
 /**
- * Fold a changed picker value back into the user's `PersonaSelection`, keyed by
- * the picker's kind. A null value resets that control to the persona's default.
+ * Fold a changed control value back into the user's `PersonaSelection`, keyed by
+ * the control's kind. A null value resets that control to the persona's default.
  */
-export function applyPickerChange(
+export function applyControlChange(
   selection: PersonaSelection,
-  picker: Picker,
+  control: Control,
   value: string | null
 ): PersonaSelection {
   const next: PersonaSelection = {
@@ -178,22 +178,22 @@ export function applyPickerChange(
     modelSettings: { ...selection.modelSettings },
     settings: { ...selection.settings }
   };
-  if (picker.kind === 'model') {
+  if (control.kind === 'model') {
     next.modelId = value;
-  } else if (picker.kind === 'model_setting') {
-    next.modelSettings[picker.id] = value;
+  } else if (control.kind === 'model_setting') {
+    next.modelSettings[control.id] = value;
   } else {
-    next.settings[picker.id] = value;
+    next.settings[control.id] = value;
   }
   return next;
 }
 
 /**
- * The value a picker currently reflects: the user's selection if they picked
+ * The value a control currently reflects: the user's selection if they picked
  * one, otherwise the persona's current value (the default).
  */
-function effectiveValue(picker: Picker): string | null {
-  return picker.selection ?? picker.current;
+function effectiveValue(control: Control): string | null {
+  return control.selection ?? control.current;
 }
 
 /**
@@ -207,17 +207,17 @@ function Avatar(props: { url: string | null | undefined }): JSX.Element {
 }
 
 /**
- * The label shown on a picker's button: the name of its effective value, or the
+ * The label shown on a control's button: the name of its effective value, or the
  * control's own label when nothing resolves (no options, no current value).
  */
-function currentPickerLabel(picker: Picker): string {
-  const value = effectiveValue(picker);
-  const option = picker.options.find(o => o.id === value);
-  return option?.name ?? value ?? picker.label;
+function currentControlLabel(control: Control): string {
+  const value = effectiveValue(control);
+  const option = control.options.find(o => o.id === value);
+  return option?.name ?? value ?? control.label;
 }
 
 /**
- * One choice row in a picker dropdown. Shows the choice name, and a secondary
+ * One choice row in a control dropdown. Shows the choice name, and a secondary
  * description only when it adds information (some agents repeat the name as the
  * description, which is just noise). The full description is available on hover.
  */
@@ -255,25 +255,25 @@ function ChoiceMenuItem(props: {
 }
 
 /**
- * The "Default" row shown at the top of every picker. Selecting it sets the
+ * The "Default" row shown at the top of every control. Selecting it sets the
  * user's value to null, i.e. "use the persona's current value". Its label shows
  * that current value so the user sees what the default points to.
  */
-function defaultChoiceLabel(picker: Picker): string {
-  const current = picker.options.find(o => o.id === picker.current);
-  const name = current?.name ?? picker.current;
+function defaultChoiceLabel(control: Control): string {
+  const current = control.options.find(o => o.id === control.current);
+  const name = current?.name ?? control.current;
   return name ? `Default (${name})` : 'Default';
 }
 
 /**
- * A dropdown for a picker. The first row is "Default" (selection = null); the
+ * A dropdown for a control. The first row is "Default" (selection = null); the
  * rest are the persona's advertised options (selection = that option's id).
  */
-function PickerControl(props: {
-  picker: Picker;
+function ControlItem(props: {
+  control: Control;
   onSelect: (value: string | null) => void;
 }): JSX.Element {
-  const { picker, onSelect } = props;
+  const { control, onSelect } = props;
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   return (
     <>
@@ -284,10 +284,10 @@ function PickerControl(props: {
         disableRipple
         endIcon={<ArrowDropDownIcon className={`${SELECTOR_CLASS}-arrow`} />}
         onClick={event => setAnchor(event.currentTarget)}
-        title={picker.label}
+        title={control.label}
       >
         <span className={`${SELECTOR_CLASS}-control-value`}>
-          {currentPickerLabel(picker)}
+          {currentControlLabel(control)}
         </span>
       </Button>
       <Menu
@@ -297,20 +297,20 @@ function PickerControl(props: {
         {...menuAnchorProps}
       >
         <ChoiceMenuItem
-          primary={defaultChoiceLabel(picker)}
+          primary={defaultChoiceLabel(control)}
           description={null}
-          selected={picker.selection === null}
+          selected={control.selection === null}
           onSelect={() => {
             setAnchor(null);
             onSelect(null);
           }}
         />
-        {picker.options.map(option => (
+        {control.options.map(option => (
           <ChoiceMenuItem
             key={option.id}
             primary={option.name}
             description={option.description}
-            selected={picker.selection === option.id}
+            selected={control.selection === option.id}
             onSelect={() => {
               setAnchor(null);
               onSelect(option.id);
@@ -323,19 +323,19 @@ function PickerControl(props: {
 }
 
 /**
- * The overflow popover: pickers that did not fit inline, shown as a single flat
- * menu (no nested dropdowns). Each picker renders as a `ListSubheader` group
+ * The overflow popover: controls that did not fit inline, shown as a single flat
+ * menu (no nested dropdowns). Each control renders as a `ListSubheader` group
  * label followed by its Default row and choices. Using MUI primitives keeps the
  * menu keyboard-navigable: `ListSubheader` has no tabindex so arrow-key focus
  * skips it.
  */
 function OverflowMenu(props: {
-  pickers: Picker[];
+  controls: Control[];
   anchor: HTMLElement | null;
   onClose: () => void;
-  onChange: (picker: Picker, value: string | null) => void;
+  onChange: (control: Control, value: string | null) => void;
 }): JSX.Element {
-  const { pickers, anchor, onClose, onChange } = props;
+  const { controls, anchor, onClose, onChange } = props;
   return (
     <Menu
       anchorEl={anchor}
@@ -343,33 +343,33 @@ function OverflowMenu(props: {
       onClose={onClose}
       {...menuAnchorProps}
     >
-      {pickers.flatMap(picker => [
+      {controls.flatMap(control => [
         <ListSubheader
-          key={`${picker.id}-label`}
+          key={`${control.id}-label`}
           disableSticky
           className={`${SELECTOR_CLASS}-overflow-subheader`}
         >
-          {picker.label}
+          {control.label}
         </ListSubheader>,
         <ChoiceMenuItem
-          key={`${picker.id}-default`}
-          primary={defaultChoiceLabel(picker)}
+          key={`${control.id}-default`}
+          primary={defaultChoiceLabel(control)}
           description={null}
-          selected={picker.selection === null}
+          selected={control.selection === null}
           onSelect={() => {
             onClose();
-            onChange(picker, null);
+            onChange(control, null);
           }}
         />,
-        ...picker.options.map(option => (
+        ...control.options.map(option => (
           <ChoiceMenuItem
-            key={`${picker.id}-${option.id}`}
+            key={`${control.id}-${option.id}`}
             primary={option.name}
             description={option.description}
-            selected={picker.selection === option.id}
+            selected={control.selection === option.id}
             onSelect={() => {
               onClose();
-              onChange(picker, option.id);
+              onChange(control, option.id);
             }}
           />
         ))
@@ -379,25 +379,27 @@ function OverflowMenu(props: {
 }
 
 /**
- * A single-row, width-aware list of pickers. Shows as many as fit inline and
+ * A single-row, width-aware list of controls. Shows as many as fit inline and
  * collapses the rest into an overflow ("...") popover, recomputing on resize.
  */
 function ControlsRow(props: {
-  pickers: Picker[];
-  onChange: (picker: Picker, value: string | null) => void;
+  controls: Control[];
+  onChange: (control: Control, value: string | null) => void;
 }): JSX.Element {
-  const { pickers, onChange } = props;
+  const { controls, onChange } = props;
   const rowRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const overflowBtnRef = useRef<HTMLButtonElement>(null);
-  const [visibleCount, setVisibleCount] = useState(pickers.length);
+  const [visibleCount, setVisibleCount] = useState(controls.length);
   const [overflowAnchor, setOverflowAnchor] = useState<HTMLElement | null>(
     null
   );
 
-  // Re-measure only when a picker's displayed width could change (its set of
+  // Re-measure only when a control's displayed width could change (its set of
   // ids or effective values), not on every re-render.
-  const pickersKey = pickers.map(p => `${p.id}:${effectiveValue(p)}`).join('|');
+  const controlsKey = controls
+    .map(p => `${p.id}:${effectiveValue(p)}`)
+    .join('|');
 
   useLayoutEffect(() => {
     const row = rowRef.current;
@@ -405,7 +407,7 @@ function ControlsRow(props: {
     if (!row || !measure) {
       return;
     }
-    // The measurement copy exists only to size pickers; keep its buttons out of
+    // The measurement copy exists only to size controls; keep its buttons out of
     // the tab order and the accessibility tree.
     measure.inert = true;
     const GAP = 2;
@@ -448,33 +450,33 @@ function ControlsRow(props: {
       cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [pickersKey]);
+  }, [controlsKey]);
 
-  const visible = pickers.slice(0, visibleCount);
-  const overflow = pickers.slice(visibleCount);
+  const visible = controls.slice(0, visibleCount);
+  const overflow = controls.slice(visibleCount);
 
   return (
     <div className={`${SELECTOR_CLASS}-controls`} ref={rowRef}>
-      {/* Hidden full-width copy used only to measure each picker's width. */}
+      {/* Hidden full-width copy used only to measure each control's width. */}
       <div
         className={`${SELECTOR_CLASS}-controls-measure`}
         ref={measureRef}
         aria-hidden="true"
       >
-        {pickers.map(picker => (
-          <PickerControl
-            key={picker.id}
-            picker={picker}
-            onSelect={v => onChange(picker, v)}
+        {controls.map(control => (
+          <ControlItem
+            key={control.id}
+            control={control}
+            onSelect={v => onChange(control, v)}
           />
         ))}
       </div>
 
-      {visible.map(picker => (
-        <PickerControl
-          key={picker.id}
-          picker={picker}
-          onSelect={v => onChange(picker, v)}
+      {visible.map(control => (
+        <ControlItem
+          key={control.id}
+          control={control}
+          onSelect={v => onChange(control, v)}
         />
       ))}
 
@@ -491,7 +493,7 @@ function ControlsRow(props: {
             <MoreHorizIcon fontSize="small" />
           </button>
           <OverflowMenu
-            pickers={overflow}
+            controls={overflow}
             anchor={overflowAnchor}
             onClose={() => setOverflowAnchor(null)}
             onChange={onChange}
@@ -766,7 +768,7 @@ function getAwareness(chatModel: unknown): Awareness | null {
 /**
  * The persona control for the chat input toolbar. Shows which persona a message
  * will be directed to (with its avatar), lets the user switch it, and, when the
- * selected persona advertises model/settings, renders those pickers next to it.
+ * selected persona advertises model/settings, renders those controls next to it.
  * Hides itself when the chat has no personas.
  *
  * All session information (the persona list, each persona's model/settings
@@ -908,15 +910,15 @@ export function AcpPersonaControls(
   const personaLabel = selectedPersona?.name ?? NO_ONE_LABEL;
   const activeAvatar = selectedPersona?.avatar_url ?? null;
   const usage = personaState?.usage ?? EMPTY_USAGE;
-  const pickers = buildPickers(personaState, selection);
+  const controls = buildControls(personaState, selection);
 
   const handlePersona = (personaId: string | null) => {
     setPersonaAnchor(null);
     setSelectedId(personaId);
   };
 
-  const handlePicker = (picker: Picker, value: string | null) => {
-    setSelection(prev => applyPickerChange(prev, picker, value));
+  const handleControl = (control: Control, value: string | null) => {
+    setSelection(prev => applyControlChange(prev, control, value));
   };
 
   return (
@@ -972,10 +974,10 @@ export function AcpPersonaControls(
 
       <UsageChip usage={usage} />
 
-      {pickers.length ? (
+      {controls.length ? (
         <>
           <span className={`${SELECTOR_CLASS}-divider`} />
-          <ControlsRow pickers={pickers} onChange={handlePicker} />
+          <ControlsRow controls={controls} onChange={handleControl} />
         </>
       ) : null}
     </div>

@@ -18,11 +18,7 @@ import { Awareness } from 'y-protocols/awareness';
 
 import { ToolCallsComponent } from './tool-calls';
 
-import {
-  findPersonaList,
-  readPersonaStateById,
-  resolvePersonaByMention
-} from './awareness';
+import { readPersonaStateById } from './awareness';
 import { AcpStopButton } from './stop-button';
 import { AcpPersonaControls } from './persona-controls';
 
@@ -74,11 +70,10 @@ export class SlashCommandProvider implements IChatCommandProvider {
   /**
    * Returns slash command completions for the current input.
    *
-   * Slash commands are read from the target persona's `PersonaAwarenessState`
+   * Slash commands are read from the selected persona's `PersonaAwarenessState`
    * on the chat's awareness channel — the same source the toolbar reads — with
-   * no REST call. The target persona is the one named in the input's mention
-   * (if the user typed one) or, failing that, the persona currently selected in
-   * the picker (stamped onto the input metadata as `to_persona`).
+   * no REST call. The target persona is the one the picker stamped onto the
+   * input metadata as `to_persona`.
    */
   async listCommandCompletions(
     inputModel: IInputModel
@@ -95,23 +90,7 @@ export class SlashCommandProvider implements IChatCommandProvider {
       return [];
     }
 
-    const existingMentions = this._getExistingMentions(inputModel);
-    // return early if >1 persona is mentioned in the input. we never show ACP
-    // slash command suggestions in this case.
-    if (existingMentions.size > 1) {
-      return [];
-    }
-
-    // Resolve the target persona: a typed mention wins; otherwise fall back to
-    // the persona selected in the picker (carried on the input metadata).
-    const personas = findPersonaList(awareness);
-    let personaId: string | null = null;
-    if (existingMentions.size) {
-      const mention = existingMentions.values().next().value ?? null;
-      personaId = resolvePersonaByMention(personas, mention);
-    } else {
-      personaId = inputModel.getMetadata?.().to_persona ?? null;
-    }
+    const personaId = inputModel.getMetadata?.().to_persona ?? null;
     if (!personaId) {
       return [];
     }
@@ -137,25 +116,6 @@ export class SlashCommandProvider implements IChatCommandProvider {
     }
 
     return commandSuggestions;
-  }
-
-  /**
-   * Returns the set of mention names that have already been @-mentioned in the
-   * input.
-   */
-  _getExistingMentions(inputModel: IInputModel): Set<string> {
-    const matches = inputModel.value?.matchAll(/@([\w-]*)/g);
-    const existingMentions = new Set<string>();
-    for (const match of matches) {
-      const mention = match?.[1];
-      // ignore if 1st group capturing the mention name is an empty string
-      if (!mention) {
-        continue;
-      }
-      existingMentions.add(mention);
-    }
-
-    return existingMentions;
   }
 
   async onSubmit(inputModel: IInputModel): Promise<void> {

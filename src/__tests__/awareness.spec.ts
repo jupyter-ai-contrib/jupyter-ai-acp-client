@@ -8,11 +8,9 @@
 import { Awareness } from 'y-protocols/awareness';
 import {
   findPersonaList,
-  mentionName,
   readPersonaList,
   readPersonaState,
   readPersonaStateById,
-  resolvePersonaByMention,
   PersonaAwarenessState
 } from '../awareness';
 
@@ -166,26 +164,5 @@ describe('readPersonaStateById', () => {
       [MANAGER_CLIENT_ID]: { personas: [] }
     });
     expect(readPersonaStateById(awareness, 'ghost')).toBeNull();
-  });
-});
-
-describe('mention resolution', () => {
-  it('derives the mention name by hyphenating whitespace', () => {
-    expect(mentionName('Claude')).toBe('Claude');
-    expect(mentionName('Kiro Agent')).toBe('Kiro-Agent');
-  });
-
-  it('resolves a mention to the matching persona id', () => {
-    const personas = [
-      { id: 'k', name: 'Kiro Agent', avatar_url: null, yjs_client_id: 1 },
-      { id: 'c', name: 'Claude', avatar_url: null, yjs_client_id: 2 }
-    ];
-    expect(resolvePersonaByMention(personas, 'Kiro-Agent')).toBe('k');
-    expect(resolvePersonaByMention(personas, 'Claude')).toBe('c');
-  });
-
-  it('returns null for no mention or an unknown mention', () => {
-    expect(resolvePersonaByMention([], null)).toBeNull();
-    expect(resolvePersonaByMention([], 'nobody')).toBeNull();
   });
 });

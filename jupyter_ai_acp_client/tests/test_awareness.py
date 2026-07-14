@@ -1,8 +1,8 @@
 """Tests for the persona-manager awareness mapping on BaseAcpPersona.
 
 These cover the ACP-state -> awareness-schema translation
-(`_build_awareness_config`, `_sync_awareness_usage`) and the three abstract
-`update_*` methods dispatching to the right ACP setter. Following the style of
+(`_build_awareness_config`, `_sync_awareness_usage`) and the `update_*` methods
+dispatching to the right ACP setter. Following the style of
 `test_base_acp_persona.py`, the persona is a MagicMock (or a real
 `BaseAcpPersona` built without `__init__`) and unbound methods are called
 directly as `BaseAcpPersona.<method>(persona, ...)`.
@@ -304,47 +304,39 @@ class TestSyncAwarenessUsage:
         assert usage.total_tokens is None
 
 
-class TestUpdateModel:
-    """update_model dispatches to set_acp_model and rebroadcasts."""
+# These `update_*` methods are thin: they tell the ACP session to switch and
+# nothing more. `BasePersona` decides what changed (passing only changed keys),
+# records the new current values, and rebroadcasts — so these no longer filter,
+# sync awareness, or swallow errors.
 
-    async def test_calls_set_acp_model_then_syncs(self):
+class TestUpdateModel:
+    """update_model dispatches to the ACP model setter."""
+
+    async def test_calls_set_acp_model(self):
         persona = MagicMock()
         persona.set_acp_model = AsyncMock()
 
         await BaseAcpPersona.update_model(persona, "opus")
 
         persona.set_acp_model.assert_awaited_once_with("opus")
-        persona._sync_awareness_config.assert_called_once()
 
 
 class TestUpdateModelSettings:
-    """update_model_settings applies only model_config category options."""
+    """update_model_settings applies each given setting as a config option."""
 
-    async def test_applies_only_model_config_options(self):
+    async def test_applies_each_given_setting(self):
         persona = _awareness_persona(
             config_options=[
                 _select_option(
                     "context_size", "small", ["small", "large"], category="model_config"
                 ),
-                _select_option("effort", "high", ["low", "high"]),
             ]
         )
         persona.set_acp_config_option = AsyncMock()
 
-        await BaseAcpPersona.update_model_settings(
-            persona, {"context_size": "large", "effort": "low"}
-        )
+        await BaseAcpPersona.update_model_settings(persona, {"context_size": "large"})
 
-        # Only the model_config option is applied; "effort" is general.
         persona.set_acp_config_option.assert_awaited_once_with("context_size", "large")
-
-    async def test_ignores_unknown_ids(self):
-        persona = _awareness_persona(config_options=[])
-        persona.set_acp_config_option = AsyncMock()
-
-        await BaseAcpPersona.update_model_settings(persona, {"nope": "x"})
-
-        persona.set_acp_config_option.assert_not_awaited()
 
 
 class TestUpdateSettings:
@@ -379,20 +371,3 @@ class TestUpdateSettings:
         await BaseAcpPersona.update_settings(persona, {"allow_all": "true"})
 
         persona.set_acp_config_option.assert_awaited_once_with("allow_all", True)
-
-    async def test_unknown_config_id_ignored(self):
-        persona = _awareness_persona(config_options=[])
-        persona.set_acp_config_option = AsyncMock()
-
-        await BaseAcpPersona.update_settings(persona, {"ghost": "x"})
-
-        persona.set_acp_config_option.assert_not_awaited()
-
-    async def test_set_config_failure_is_tolerated(self):
-        persona = _awareness_persona(
-            config_options=[_select_option("effort", "high", ["low", "high"])]
-        )
-        persona.set_acp_config_option = AsyncMock(side_effect=RuntimeError("boom"))
-
-        # Should not raise despite the setter failing.
-        await BaseAcpPersona.update_settings(persona, {"effort": "low"})
