@@ -15,8 +15,11 @@ it.
 
 - Fake agents live in [`fixtures/agents/`](./fixtures/agents/). `hello_agent.py`
   replies `"hello"` to every prompt (~40 lines); `echo_config_agent.py`
-  advertises config options and echoes its current config as YAML. Base new ones
-  on these (and on the SDK's `examples/echo_agent.py` upstream).
+  advertises config options and echoes its current config as YAML;
+  `usage_agent.py` reports usage via ACP's two channels, selected by a `--mode`
+  CLI flag (see "Testing usage" below). Base new ones on these (and on the SDK's
+  `examples/echo_agent.py` upstream). An agent can take config as CLI flags on
+  its `executable` — that's how one script backs several personas.
 - Fixture personas live in [`fixtures/personas/`](./fixtures/personas/), named
   `<name>_persona.py`. Each subclasses `BaseAcpPersona`, sets `defaults`, and
   points `executable` at a fake agent script.
@@ -149,6 +152,33 @@ toolbar controls and asserting the effect. Load-bearing selectors:
   `.jp-chat-send-button`.
 - **Assert the reply:** rendered messages are `.jp-chat-rendered-message`. The
   first is the human's; the agent's reply follows.
+
+## Testing usage (the two ACP usage channels)
+
+ACP v1 reports usage through two distinct channels, which the toolbar's usage
+chip renders differently:
+
+- **`session/usage`** ([standard](https://agentclientprotocol.com/rfds/session-usage))
+  — a `usage_update` session update carrying the context window fill
+  (`used`/`size`) and an optional cumulative `cost`. The chip shows a **ring
+  gauge + percent**; the popover shows a Context section and the cost.
+- **`response.usage`** ([experimental](https://agentclientprotocol.com/rfds/end-turn-token-usage))
+  — a `usage` object on the `PromptResponse` carrying cumulative session token
+  counts (input/output/total, …). The chip shows a **token total with no ring**;
+  the popover lists the token breakdown.
+
+An agent may report one, the other, or both. `usage_agent.py` does all three via
+a `--mode {session,response,both}` flag, and three fixture personas
+(`session-usage`, `response-usage`, `both-usage`) wrap it with the respective
+flag. `session-usage.spec.ts` loads all three and asserts each rendering — ring
+presence, the chip's percent/token text, and the popover's sections. `TestHelpers`
+exposes `waitForUsage`, `hasUsageRing`, `usageChipText`, and `openUsageCard` for
+this. The usage popover is a MUI portal at the page root, so `openUsageCard`
+returns a **page-scoped** locator, not a chat-scoped one.
+
+Numbers are fixed in the agent so the expected UI text is deterministic (e.g.
+`1200/4000` → `"30%"`, `total_tokens: 1500` → `"1.5k"`); the client formats
+token counts compactly (`formatTokens`), so assert the compact form.
 
 ## Gotchas
 

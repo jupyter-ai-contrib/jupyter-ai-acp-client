@@ -27,7 +27,10 @@ const PERSONAS_SRC = path.resolve(__dirname, '..', 'fixtures', 'personas');
  */
 export enum FixturePersona {
   Hello = 'hello',
-  EchoConfig = 'echo-config'
+  EchoConfig = 'echo-config',
+  SessionUsage = 'session-usage',
+  ResponseUsage = 'response-usage',
+  BothUsage = 'both-usage'
 }
 
 interface FixturePersonaInfo {
@@ -38,7 +41,10 @@ interface FixturePersonaInfo {
 /** Single source of truth for each fixture persona's metadata. */
 export const FIXTURE_PERSONAS: Record<FixturePersona, FixturePersonaInfo> = {
   [FixturePersona.Hello]: { name: 'Hello Test Agent' },
-  [FixturePersona.EchoConfig]: { name: 'Echo Config Agent' }
+  [FixturePersona.EchoConfig]: { name: 'Echo Config Agent' },
+  [FixturePersona.SessionUsage]: { name: 'Session Usage Agent' },
+  [FixturePersona.ResponseUsage]: { name: 'Response Usage Agent' },
+  [FixturePersona.BothUsage]: { name: 'Both Usage Agent' }
 };
 
 const PICKER = '.jp-jupyter-ai-acp-client-personaControls-persona-btn';
@@ -50,6 +56,14 @@ const VISIBLE_CONTROL_BTN =
   '.jp-jupyter-ai-acp-client-personaControls-controls > .jp-jupyter-ai-acp-client-personaControls-control-btn';
 const INPUT = '.jp-chat-input-container';
 const MESSAGE = '.jp-chat-rendered-message';
+
+// The usage chip and the parts that distinguish which usage channel an agent
+// reported: a context ring + percent (session/usage) and/or a session-token
+// breakdown in the popover card (response.usage). See persona-controls.tsx.
+const USAGE_CHIP = '.jp-jupyter-ai-acp-client-usage-chip';
+const USAGE_RING = '.jp-jupyter-ai-acp-client-usage-ring';
+const USAGE_PCT = '.jp-jupyter-ai-acp-client-usage-pct';
+const USAGE_CARD = '.jp-jupyter-ai-acp-client-usage-card';
 
 const TIMEOUT = 30000;
 
@@ -136,6 +150,37 @@ export class TestHelpers {
     await this.page
       .getByRole('menuitem', { name: optionValue, exact: true })
       .click();
+  }
+
+  /** The usage chip in the toolbar (present only once the agent reports usage). */
+  get usageChip(): Locator {
+    return this.chat.locator(USAGE_CHIP);
+  }
+
+  /** Wait for the usage chip to appear (the agent reported some usage). */
+  async waitForUsage(): Promise<void> {
+    await expect(this.usageChip).toBeVisible({ timeout: TIMEOUT });
+  }
+
+  /** Whether the chip shows a context ring (i.e. the agent reported context fill). */
+  async hasUsageRing(): Promise<boolean> {
+    return (await this.usageChip.locator(USAGE_RING).count()) > 0;
+  }
+
+  /** The chip's percent/token label text (e.g. "30%" or "1.5k"). */
+  async usageChipText(): Promise<string> {
+    return (await this.usageChip.locator(USAGE_PCT).textContent()) ?? '';
+  }
+
+  /**
+   * Open the usage popover and return its card. The popover is a MUI portal at
+   * the page root, so it's page-scoped rather than chat-scoped.
+   */
+  async openUsageCard(): Promise<Locator> {
+    await this.usageChip.click();
+    const card = this.page.locator(USAGE_CARD);
+    await expect(card).toBeVisible({ timeout: TIMEOUT });
+    return card;
   }
 
   /**
