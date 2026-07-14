@@ -37,7 +37,10 @@ module.exports = {
     use: { ...(baseConfig.use || {}), baseURL: `http://localhost:${s.port}` }
   })),
   webServer: SUITES.map(s => ({
-    command: 'jlpm start',
+    // Each suite's server gets its own HTTP port and MCP port (the MCP extension
+    // otherwise defaults to a fixed 3001 and two servers would collide). CLI args
+    // win over galata's config defaults.
+    command: `jlpm start --ServerApp.port=${s.port} --MCPExtensionApp.mcp_port=${s.port + 100}`,
     url: `http://localhost:${s.port}/lab`,
     timeout: 120 * 1000,
     // Never reuse an already-running server: the tests need one started with the
@@ -46,8 +49,6 @@ module.exports = {
     reuseExistingServer: false,
     env: {
       ...process.env,
-      // The server config reads these (galata's config ignores --ServerApp.port).
-      JAI_TEST_PORT: String(s.port),
       JAI_TEST_PERSONAS: s.personas
     }
   }))

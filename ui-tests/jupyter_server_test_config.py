@@ -12,16 +12,9 @@ from jupyterlab.galata import configure_jupyter_server
 
 configure_jupyter_server(c)
 
-# `configure_jupyter_server` hardcodes port 8888 (and port_retries=0), which
-# overrides any `--ServerApp.port` CLI arg. Since we run one server per test
-# suite, read the port from JAI_TEST_PORT and set it here so each suite's server
-# binds its own port (see playwright.config.js).
-if os.environ.get("JAI_TEST_PORT"):
-    port = int(os.environ["JAI_TEST_PORT"])
-    c.ServerApp.port = port
-    # jupyter_server_mcp defaults to a fixed MCP port (3001); give each suite's
-    # server its own so two concurrent servers don't collide on it.
-    c.MCPExtensionApp.mcp_port = port + 100
+# The HTTP port (--ServerApp.port) and MCP port (--MCPExtensionApp.mcp_port) are
+# passed on the `jlpm start` command line per suite (see playwright.config.js) —
+# CLI args win over the defaults set above, so nothing to do here for ports.
 
 # Uncomment to set server log level to debug level
 # c.ServerApp.log_level = "DEBUG"
