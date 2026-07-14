@@ -18,7 +18,7 @@ module.exports = {
     // with its own webServer env — see AGENTS.md.
     env: {
       ...process.env,
-      JAI_TEST_PERSONAS: process.env.JAI_TEST_PERSONAS || 'hello'
+      JAI_TEST_PERSONAS: process.env.JAI_TEST_PERSONAS || 'hello,echo'
     }
   }
 };

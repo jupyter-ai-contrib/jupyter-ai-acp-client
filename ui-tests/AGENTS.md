@@ -133,3 +133,14 @@ page. Workaround if you want the UI explorer anyway: `jlpm playwright test --ui
 - **Backend changes need a server restart, frontend changes a rebuild.** A
   `.py`-only change to a fake agent or persona is picked up on the next server
   start; changes to the extension's `src/` need `jlpm build` first.
+- **The session controls render twice.** `ControlsRow` renders each model/mode/
+  config control in a real, visible row _and_ in an `aria-hidden`, `inert`
+  measurement copy used to size the row. A naive `.control-btn` locator matches
+  the hidden copy first (it resolves but computes as `hidden`, so `toBeVisible`
+  fails). Target the visible ones with the direct-child combinator
+  `.…-controls > .…-control-btn` (see `echo-config.spec.ts`).
+- **A fake agent can advertise config options and echo them back.** The
+  `echo_config_agent` advertises `config_options`, honors `set_config_option`,
+  and replies with its current config as YAML — so a test can change a control,
+  send a message, and assert the reply reflects the change. Mirror this for any
+  behavior where you need to observe server-side state a control drove.
