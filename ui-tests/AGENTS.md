@@ -8,7 +8,7 @@ covers what's specific to testing ACP agent behavior.
 
 An ACP persona (`BaseAcpPersona`) is constructed with an `executable: list[str]`.
 It spawns that command and speaks the Agent Client Protocol to it over stdio;
-that's the *entire* contract. So to test the UI against a deterministic agent we
+that's the _entire_ contract. So to test the UI against a deterministic agent we
 don't need a real CLI or network — we write a small Python script that implements
 `acp.Agent`, serve it with `acp.run_agent`, and point a persona's `executable` at
 it.
@@ -44,7 +44,7 @@ we use the PersonaManager's local-persona loader: it auto-loads any
 Constraints from the loader worth knowing:
 
 - The persona **class must be defined in** the fixture file itself — the loader
-  only keeps classes whose `__module__` equals the file's stem. It *may* import
+  only keeps classes whose `__module__` equals the file's stem. It _may_ import
   `BaseAcpPersona`, `PersonaDefaults`, etc. (they're on `sys.path`), but the
   class declaration has to be local.
 - The filename must contain `persona` and not start with `_` or `.`.
@@ -58,7 +58,7 @@ persona set:
 
 - **Whole run:** `JAI_TEST_PERSONAS=foo,bar jlpm playwright test`. Fine when all
   suites in the run want the same set.
-- **Per suite (recommended when sets differ):** define a Playwright *project* per
+- **Per suite (recommended when sets differ):** define a Playwright _project_ per
   persona set, each with its own `webServer` (distinct port + `JAI_TEST_PERSONAS`),
   and select the project with `test.describe.configure({ ... })` / project
   `testMatch`. This is the idiomatic Playwright answer to "different server config
@@ -91,6 +91,35 @@ Note the picker's default selection comes from the `jupyter_ai_default_persona`
 PageConfig value (the persona-manager default, Jupyternaut). That persona is
 usually not installed in the test env, so the picker reconciles to the sole
 available persona — still, select explicitly in the test to exercise the picker.
+
+## Linting (CI gate)
+
+The repo's `lint:check` runs in CI and **covers `ui-tests/`** — eslint ignores
+this directory, but **prettier does not** (its glob is repo-wide). An
+unformatted spec or fixture will fail the build. Before pushing, run the root
+`jlpm lint` (prettier `--write` + stylelint + eslint) from the repo root, not
+just from `ui-tests/`:
+
+```bash
+cd ..            # repo root
+jlpm lint        # fixes formatting; jlpm lint:check to verify without writing
+```
+
+## Watching tests run
+
+Use **headed mode**, not UI mode:
+
+```bash
+jlpm playwright test hello-agent.spec.ts --headed   # real browser, auto-runs
+jlpm playwright test hello-agent.spec.ts --debug    # step through with Inspector
+```
+
+Playwright's `--ui` mode renders the page from reconstructed trace snapshots, and
+for a Galata/JupyterLab app those snapshots usually paint **blank** (the app's
+assets are served by the ephemeral test server and many requests are mocked). The
+test still runs and the action list still goes green — you just can't see the
+page. Workaround if you want the UI explorer anyway: `jlpm playwright test --ui
+--headed` forces a real browser window per run.
 
 ## Gotchas
 

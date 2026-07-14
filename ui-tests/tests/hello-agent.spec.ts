@@ -45,7 +45,9 @@ test.describe('hello test agent', () => {
     await expect(picker).toContainText(PERSONA_NAME);
 
     // Send a message.
-    const input = chat.locator('.jp-chat-input-container').getByRole('combobox');
+    const input = chat
+      .locator('.jp-chat-input-container')
+      .getByRole('combobox');
     await input.pressSequentially('hi there');
     await chat.locator('.jp-chat-input-container .jp-chat-send-button').click();
 
