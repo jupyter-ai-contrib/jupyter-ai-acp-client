@@ -18,13 +18,30 @@ from acp.schema import (
     UsageUpdate,
 )
 
-from jupyter_ai_persona_manager import PersonaAwarenessState
+from jupyter_ai_persona_manager import PersonaAwareness
 
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
 from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
 
 
 SESSION_ID = "sess-1"
+
+
+class _FakePersonaAwareness(PersonaAwareness):
+    """A PersonaAwareness backed by a plain dict — the typed properties work as
+    in production, but there's no YChat, client-ID juggling, or heartbeat."""
+
+    def __init__(self):
+        self._state: dict = {}
+
+    def get_local_state(self):
+        return self._state
+
+    def set_local_state(self, state):
+        self._state = state or {}
+
+    def set_local_state_field(self, field, value):
+        self._state[field] = value
 
 
 def _make_client_and_persona():
@@ -247,11 +264,10 @@ def _real_usage_persona():
     persona._acp_context_usage = None
     persona._acp_session_usage = None
     persona.log = logging.getLogger("test")
-    persona.awareness = MagicMock()
+    # A dict-backed awareness slot so `_sync_awareness_usage` -> `report_usage`
+    # round-trips through the real typed properties (no YChat/heartbeat).
+    persona.awareness = _FakePersonaAwareness()
     persona.ychat = MagicMock()
-    # Awareness state so `_sync_awareness_usage` -> `report_usage` has somewhere
-    # to merge into (normally set by `BasePersona.__init__`, skipped here).
-    persona._awareness_state = PersonaAwarenessState(id="test-persona")
     return persona
 
 

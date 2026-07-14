@@ -22,9 +22,26 @@ from acp.schema import (
     Usage,
     UsageUpdate,
 )
-from jupyter_ai_persona_manager import PersonaAwarenessState
+from jupyter_ai_persona_manager import PersonaAwareness
 
 from jupyter_ai_acp_client.base_acp_persona import MODE_CONTROL_ID, BaseAcpPersona
+
+
+class _FakePersonaAwareness(PersonaAwareness):
+    """A PersonaAwareness backed by a plain dict — the typed properties work as
+    in production, but there's no YChat, client-ID juggling, or heartbeat."""
+
+    def __init__(self):
+        self._state: dict = {}
+
+    def get_local_state(self):
+        return self._state
+
+    def set_local_state(self, state):
+        self._state = state or {}
+
+    def set_local_state_field(self, field, value):
+        self._state[field] = value
 
 
 def _select_option(
@@ -77,7 +94,7 @@ def _awareness_persona(
 
     persona = _Concrete.__new__(_Concrete)
     persona.log = logging.getLogger("test")
-    persona.awareness = MagicMock()
+    persona.awareness = _FakePersonaAwareness()
     persona.ychat = MagicMock()
     persona._acp_models = models or []
     persona._acp_current_model_id = current_model
@@ -86,7 +103,6 @@ def _awareness_persona(
     persona._acp_config_options = config_options or []
     persona._acp_context_usage = context
     persona._acp_session_usage = session_usage
-    persona._awareness_state = PersonaAwarenessState(id="test-persona")
     return persona
 
 
