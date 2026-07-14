@@ -4,6 +4,7 @@
 opens the server to the world and provide access to JupyterLab
 JavaScript objects through the global window variable.
 """
+import json
 import os
 import shutil
 from pathlib import Path
@@ -27,42 +28,38 @@ os.environ["JUPYTER_AI_ACP_CLIENT_E2E_TESTING_CI_ONLY"] = "1"
 
 # --- Test persona fixtures ---------------------------------------------------
 #
-# The PersonaManager auto-loads persona classes from `<root>/.jupyter/personas/`.
-# We use that to install fake ACP personas per test suite without shipping
-# anything in the package: a suite sets `JAI_TEST_PERSONAS` to a comma-separated
-# list of fixture names before starting the server, and we copy the matching
-# `fixtures/personas/<name>_persona.py` into `.jupyter/personas/`. Each fixture
+# The PersonaManager loads personas from the nearest `.jupyter/personas/` walking
+# up from a chat's own directory. We exploit that to give each test file its own
+# persona set from one shared server: each gets its own working directory with
+# `<dir>/.jupyter/personas/` populated with the personas it declared. A spec
+# creates its chats under its own directory, so it sees only those personas.
+#
+# `JAI_TEST_LAYOUT` (set in playwright.config.js, the source of truth) is a JSON
+# object mapping directory name -> list of fixture persona names. Each fixture
 # persona spawns a fake agent from `fixtures/agents/`, whose path we export via
-# `JAI_TEST_AGENTS_DIR` so the copied file can find it.
+# `JAI_TEST_AGENTS_DIR`.
 
 _UI_TESTS_DIR = Path(__file__).parent.resolve()
 _FIXTURES = _UI_TESTS_DIR / "fixtures"
 _PERSONAS_SRC = _FIXTURES / "personas"
 _AGENTS_SRC = _FIXTURES / "agents"
 
-# Server root: galata runs the server from the ui-tests dir by default.
+# Server root: galata runs the server from a fresh mkdtemp by default.
 _ROOT = Path(c.ServerApp.root_dir).resolve() if c.ServerApp.root_dir else _UI_TESTS_DIR
-_PERSONAS_DEST = _ROOT / ".jupyter" / "personas"
 
 # Let fixture persona files locate the fake agent scripts.
 os.environ["JAI_TEST_AGENTS_DIR"] = str(_AGENTS_SRC)
 
-# Start from a clean personas dir each launch so a prior suite's personas don't
-# leak into this one.
-if _PERSONAS_DEST.exists():
-    shutil.rmtree(_PERSONAS_DEST)
-
-_requested = [
-    name.strip()
-    for name in os.environ.get("JAI_TEST_PERSONAS", "").split(",")
-    if name.strip()
-]
-if _requested:
-    _PERSONAS_DEST.mkdir(parents=True, exist_ok=True)
-    for name in _requested:
+_layout = json.loads(os.environ.get("JAI_TEST_LAYOUT", "{}"))
+for dir_name, personas in _layout.items():
+    dest_dir = _ROOT / dir_name / ".jupyter" / "personas"
+    if dest_dir.exists():
+        shutil.rmtree(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for name in personas:
         src = _PERSONAS_SRC / f"{name}_persona.py"
         if not src.exists():
             raise FileNotFoundError(
-                f"Requested test persona '{name}' has no fixture at {src}"
+                f"Test persona '{name}' (for '{dir_name}') has no fixture at {src}"
             )
-        shutil.copy(src, _PERSONAS_DEST / src.name)
+        shutil.copy(src, dest_dir / src.name)

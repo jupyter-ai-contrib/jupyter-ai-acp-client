@@ -7,26 +7,29 @@ import { expect, IJupyterLabPageFixture, test } from '@jupyterlab/galata';
 import { UUID } from '@lumino/coreutils';
 
 /**
- * This suite needs the "hello" fixture persona, which the server config installs
- * when JAI_TEST_PERSONAS includes it (see jupyter_server_test_config.py). The
- * webServer command sets JAI_TEST_PERSONAS=hello. To run a suite against a
- * different persona set, give it its own Playwright project with its own
- * webServer env — see ui-tests/AGENTS.md.
+ * Verifies an ACP persona's reply reaches the chat: selects the "Hello Test
+ * Agent" fixture persona (which always replies "hello") and asserts the reply
+ * renders. The fixture personas are loaded by the shared test server via
+ * JAI_TEST_PERSONAS (see jupyter_server_test_config.py / AGENTS.md).
  */
 
 const PERSONA_NAME = 'Hello Test Agent';
 const PICKER = '.jp-jupyter-ai-acp-client-personaControls-persona-btn';
+// This test file's working directory. The server installs this suite's personas
+// (see playwright.config.js SUITES) under `<TEST_DIR>/.jupyter/personas/`, so
+// chats created here load only those personas.
+const TEST_DIR = 'replies';
 
-/** Create and open a chat file, returning its panel locator. */
+/** Create and open a chat file under TEST_DIR, returning its panel locator. */
 async function openChat(page: IJupyterLabPageFixture) {
-  const filename = `hello-${UUID.uuid4()}.chat`;
-  await page.filebrowser.contents.uploadContent('{}', 'text', filename);
+  const filepath = `${TEST_DIR}/chat-${UUID.uuid4()}.chat`;
+  await page.filebrowser.contents.uploadContent('{}', 'text', filepath);
   await page.evaluate(async (name: string) => {
     await window.jupyterapp.commands.execute('jupyterlab-chat:open', {
       filepath: name
     });
-  }, filename);
-  const tab = filename.split('/').pop()!;
+  }, filepath);
+  const tab = filepath.split('/').pop()!;
   await page.waitForCondition(async () => page.activity.isTabActive(tab));
   return page.activity.getPanelLocator(tab);
 }

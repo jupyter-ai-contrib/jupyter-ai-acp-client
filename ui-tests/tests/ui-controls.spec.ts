@@ -12,14 +12,13 @@ import {
 import { UUID } from '@lumino/coreutils';
 
 /**
- * This suite needs the "echo" fixture persona (see fixtures/personas/echo_persona.py),
- * which the server config installs when JAI_TEST_PERSONAS includes it. The webServer
- * env sets JAI_TEST_PERSONAS=hello,echo by default. See ui-tests/AGENTS.md.
- *
- * The Echo agent advertises two select config options — `model` (default
- * claude-haiku-45) and `effort_level` (default medium) — and replies to every
- * message with its current config as YAML. Changing a control in the toolbar
- * therefore shows up in the next reply, which is what these tests assert.
+ * Verifies the toolbar's model/settings controls drive the persona's session
+ * config. Uses the "Echo Config Agent" fixture persona, which advertises two
+ * select config options — `model` (default claude-haiku-45) and `effort_level`
+ * (default medium) — and replies to every message with its current config as
+ * YAML. Changing a control therefore shows up in the next reply, which is what
+ * these tests assert. Fixture personas are loaded by the shared test server via
+ * JAI_TEST_PERSONAS (see jupyter_server_test_config.py / AGENTS.md).
  */
 
 const PERSONA_NAME = 'Echo Config Agent';
@@ -31,17 +30,21 @@ const PICKER = '.jp-jupyter-ai-acp-client-personaControls-persona-btn';
 // (whose duplicate buttons compute as `hidden`).
 const VISIBLE_CONTROL_BTN =
   '.jp-jupyter-ai-acp-client-personaControls-controls > .jp-jupyter-ai-acp-client-personaControls-control-btn';
+// This test file's working directory. The server installs this suite's personas
+// (see playwright.config.js SUITES) under `<TEST_DIR>/.jupyter/personas/`, so
+// chats created here load only those personas.
+const TEST_DIR = 'ui-controls';
 
-/** Create and open a chat file, returning its panel locator. */
+/** Create and open a chat file under TEST_DIR, returning its panel locator. */
 async function openChat(page: IJupyterLabPageFixture): Promise<Locator> {
-  const filename = `echo-${UUID.uuid4()}.chat`;
-  await page.filebrowser.contents.uploadContent('{}', 'text', filename);
+  const filepath = `${TEST_DIR}/chat-${UUID.uuid4()}.chat`;
+  await page.filebrowser.contents.uploadContent('{}', 'text', filepath);
   await page.evaluate(async (name: string) => {
     await window.jupyterapp.commands.execute('jupyterlab-chat:open', {
       filepath: name
     });
-  }, filename);
-  const tab = filename.split('/').pop()!;
+  }, filepath);
+  const tab = filepath.split('/').pop()!;
   await page.waitForCondition(async () => page.activity.isTabActive(tab));
   return page.activity.getPanelLocator(tab);
 }
