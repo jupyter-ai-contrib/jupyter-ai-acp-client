@@ -180,16 +180,17 @@ Numbers are fixed in the agent so the expected UI text is deterministic (e.g.
 `1200/4000` → `"30%"`, `total_tokens: 1500` → `"1.5k"`); the client formats
 token counts compactly (`formatTokens`), so assert the compact form.
 
-**These multi-persona suites are `test.describe.skip`ped until metadata routing
-is published.** `session-usage.spec.ts` and `persona-control.spec.ts` load
-several personas and route by the picker's `to_persona` metadata, which needs
-the PersonaManager change from jupyter-ai-persona-manager PR #59. The latest
-published version (0.0.12) — what CI installs via acp-client's
-`jupyter_ai_persona_manager>=0.0.9` floor — routes only by `@`-mention and
-auto-replies only when a chat has exactly one persona, so a multi-persona suite
-routes to nobody and no reply renders. Drop the `.skip` once that floor is
-bumped to the release including #59. (`replies`/`ui-controls` are unaffected:
-one persona each, so 0.0.12's single-persona auto-reply covers them.)
+**These multi-persona suites (`session-usage.spec.ts` and
+`persona-control.spec.ts`) rely on metadata routing.** They load several
+personas and route by the picker's `to_persona` metadata, which needs the
+PersonaManager change from jupyter-ai-persona-manager PR #59 (shipped in
+0.1.0b1). Older published versions (≤0.0.12) routed only by `@`-mention and
+auto-replied only when a chat had exactly one persona, so a multi-persona suite
+reached nobody and no reply rendered. They ran unconditionally once acp-client's
+`jupyter_ai_persona_manager` floor was bumped to `>=0.1.0b1`; keep that floor at
+or above the release including #59 for these suites to pass on CI.
+(`replies`/`ui-controls` are unaffected: one persona each, covered even by the
+old single-persona auto-reply.)
 
 ## Gotchas
 
