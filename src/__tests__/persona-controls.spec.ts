@@ -5,35 +5,10 @@
  */
 
 import { buildControls } from '../persona-controls';
-import { PersonaAwarenessState } from '../awareness';
-import { emptySelection, PersonaSelection } from '../metadata';
+import { emptyPersonaSettings, PersonaSettings } from '../metadata';
+import { personaAwareness } from './awareness-fixture';
 
-function state(
-  partial: Partial<PersonaAwarenessState> = {}
-): PersonaAwarenessState {
-  return {
-    id: 'kiro',
-    model: { current: null, options: [], settings: [] },
-    settings: [],
-    usage: {
-      context_tokens: null,
-      context_size: null,
-      input_tokens: null,
-      output_tokens: null,
-      cached_read_tokens: null,
-      cached_write_tokens: null,
-      thought_tokens: null,
-      total_tokens: null,
-      cost_amount: null,
-      cost_currency: null
-    },
-    slash_commands: [],
-    isWriting: false,
-    ...partial
-  };
-}
-
-const withControls = state({
+const withControls = personaAwareness({
   model: {
     current: 'opus-48',
     options: [
@@ -66,11 +41,11 @@ const withControls = state({
 
 describe('buildControls', () => {
   it('returns nothing when there is no persona state', () => {
-    expect(buildControls(null, emptySelection('kiro'))).toEqual([]);
+    expect(buildControls(null, emptyPersonaSettings())).toEqual([]);
   });
 
   it('builds a model control, its model settings, then general settings, in order', () => {
-    const controls = buildControls(withControls, emptySelection('kiro'));
+    const controls = buildControls(withControls, emptyPersonaSettings());
     expect(controls.map(p => [p.id, p.kind])).toEqual([
       ['__model__', 'model'],
       ['context_size', 'model_setting'],
@@ -80,7 +55,7 @@ describe('buildControls', () => {
 
   it('omits the model control when the persona advertises no models', () => {
     const controls = buildControls(
-      state({
+      personaAwareness({
         settings: [
           {
             id: '__mode__',
@@ -91,13 +66,13 @@ describe('buildControls', () => {
           }
         ]
       }),
-      emptySelection('kiro')
+      emptyPersonaSettings()
     );
     expect(controls.map(p => p.id)).toEqual(['__mode__']);
   });
 
   it('carries the persona current value from awareness onto each control', () => {
-    const controls = buildControls(withControls, emptySelection('kiro'));
+    const controls = buildControls(withControls, emptyPersonaSettings());
     const model = controls.find(p => p.id === '__model__')!;
     expect(model.current).toBe('opus-48');
     const mode = controls.find(p => p.id === '__mode__')!;
@@ -105,13 +80,12 @@ describe('buildControls', () => {
   });
 
   it('reflects the user selection on each control', () => {
-    const selection: PersonaSelection = {
-      personaId: 'kiro',
+    const settings: PersonaSettings = {
       modelId: 'fable-5',
       modelSettings: { context_size: null },
       settings: { __mode__: 'code' }
     };
-    const controls = buildControls(withControls, selection);
+    const controls = buildControls(withControls, settings);
     expect(controls.find(p => p.id === '__model__')!.selection).toBe('fable-5');
     // Left at default → null selection (renders as the persona's current value).
     expect(controls.find(p => p.id === 'context_size')!.selection).toBeNull();
@@ -119,7 +93,7 @@ describe('buildControls', () => {
   });
 
   it('maps each model option into the control choices', () => {
-    const controls = buildControls(withControls, emptySelection('kiro'));
+    const controls = buildControls(withControls, emptyPersonaSettings());
     const model = controls.find(p => p.id === '__model__')!;
     expect(model.options).toEqual([
       { id: 'opus-48', name: 'Opus 4.8', description: null },

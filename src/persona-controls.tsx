@@ -18,22 +18,20 @@ import CheckIcon from '@mui/icons-material/Check';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import { PageConfig } from '@jupyterlab/coreutils';
 import { InputToolbarRegistry } from '@jupyter/chat';
-import { Awareness } from 'y-protocols/awareness';
+import { IAwareness } from '@jupyter/ydoc';
 import {
   EMPTY_USAGE,
-  PersonaAwarenessState,
+  PersonaAwareness,
+  PersonaManagerAwareness,
   PersonaOption,
   SettingConfiguration,
-  Usage,
-  readPersonaList,
-  readPersonaState
-} from './awareness';
+  Usage
+} from '@jupyter-ai/persona-manager';
 import {
-  PersonaSelection,
-  buildSelectionMetadata,
-  selectionForPersona
+  PersonaSettings,
+  buildMessageMetadata,
+  emptyPersonaSettings
 } from './metadata';
-import { getPersonaManagerClientId } from './request';
 
 const SELECTOR_CLASS = 'jp-jupyter-ai-acp-client-personaControls';
 const MENU_CLASS = 'jp-jupyter-ai-acp-client-controlMenu';
@@ -55,15 +53,6 @@ const USAGE_ERROR_AT = 0.9;
  */
 const DEFAULT_PERSONA_ID =
   PageConfig.getOption('jupyter_ai_default_persona') || null;
-
-// The manager registers a moment after a chat opens, and a persona publishes
-// its state asynchronously while its agent session initializes, which can take
-// 20s+ for a slow agent (e.g. Kiro recovering a session). We poll the readiness
-// endpoint a bounded number of times to learn the manager's awareness client
-// ID; once we have it, awareness `change` events drive all further updates with
-// no polling.
-const POLL_MS = 1500;
-const MAX_POLLS = 24;
 
 // Width (px) reserved for the overflow ("...") button when not every control
 // fits inline.
@@ -121,42 +110,42 @@ function settingToControl(
  * The user's current selection seeds each control's `selection`.
  */
 export function buildControls(
-  state: PersonaAwarenessState | null,
-  selection: PersonaSelection
+  persona: PersonaAwareness | null,
+  settings: PersonaSettings
 ): Control[] {
-  if (!state) {
+  if (!persona) {
     return [];
   }
   const controls: Control[] = [];
-  if (state.model.options.length) {
+  if (persona.model.options.length) {
     controls.push({
       id: MODEL_CONTROL_ID,
       kind: 'model',
       label: 'Model',
-      current: state.model.current,
-      selection: selection.modelId,
-      options: state.model.options.map(o => ({
+      current: persona.model.current,
+      selection: settings.modelId,
+      options: persona.model.options.map(o => ({
         id: o.id,
         name: o.name ?? o.id,
         description: o.description
       }))
     });
   }
-  for (const setting of state.model.settings) {
+  for (const setting of persona.model.settings) {
     controls.push(
       settingToControl(
         setting,
         'model_setting',
-        selection.modelSettings[setting.id] ?? null
+        settings.modelSettings[setting.id] ?? null
       )
     );
   }
-  for (const setting of state.settings) {
+  for (const setting of persona.settings) {
     controls.push(
       settingToControl(
         setting,
         'setting',
-        selection.settings[setting.id] ?? null
+        settings.settings[setting.id] ?? null
       )
     );
   }
@@ -164,19 +153,18 @@ export function buildControls(
 }
 
 /**
- * Fold a changed control value back into the user's `PersonaSelection`, keyed by
- * the control's kind. A null value resets that control to the persona's default.
+ * Fold a changed control value into the user's `PersonaSettings`, keyed by the
+ * control's kind. A null value resets that control to the persona's default.
  */
 export function applyControlChange(
-  selection: PersonaSelection,
+  settings: PersonaSettings,
   control: Control,
   value: string | null
-): PersonaSelection {
-  const next: PersonaSelection = {
-    personaId: selection.personaId,
-    modelId: selection.modelId,
-    modelSettings: { ...selection.modelSettings },
-    settings: { ...selection.settings }
+): PersonaSettings {
+  const next: PersonaSettings = {
+    modelId: settings.modelId,
+    modelSettings: { ...settings.modelSettings },
+    settings: { ...settings.settings }
   };
   if (control.kind === 'model') {
     next.modelId = value;
@@ -759,8 +747,8 @@ export function UsageChip(props: { usage: Usage }): JSX.Element | null {
  * the channel personas broadcast their session state over. The generic
  * `IChatModel` type does not yet surface this, so we read it structurally.
  */
-function getAwareness(chatModel: unknown): Awareness | null {
-  const shared = (chatModel as { sharedModel?: { awareness?: Awareness } })
+function getAwareness(chatModel: unknown): IAwareness | null {
+  const shared = (chatModel as { sharedModel?: { awareness?: IAwareness } })
     ?.sharedModel;
   return shared?.awareness ?? null;
 }
@@ -783,59 +771,63 @@ export function AcpPersonaControls(
   const { chatModel, model } = props;
   const awareness = getAwareness(chatModel);
 
-  const [managerClientId, setManagerClientId] = useState<number | null>(null);
+  // The manager's awareness view, resolved once its slot appears. Null until
+  // then. `PersonaManagerAwareness.from()` polls internally, so nothing here
+  // polls; once resolved, awareness `change` events drive all updates.
+  const [manager, setManager] = useState<PersonaManagerAwareness | null>(null);
   const [personas, setPersonas] = useState<PersonaOption[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(
     DEFAULT_PERSONA_ID
   );
-  const [personaState, setPersonaState] =
-    useState<PersonaAwarenessState | null>(null);
-  const [selection, setSelection] = useState<PersonaSelection>(
-    selectionForPersona(DEFAULT_PERSONA_ID, null)
+  const [personaState, setPersonaState] = useState<PersonaAwareness | null>(
+    null
   );
+  // Per-persona settings the user has chosen, indexed by persona ID. Remembers
+  // each persona's picks so switching away and back restores them, rather than
+  // resetting to defaults. Component-lifetime only (not persisted across
+  // reloads). A persona absent from the cache has made no changes yet.
+  const [settingsCache, setSettingsCache] = useState<
+    Record<string, PersonaSettings>
+  >({});
   const [personaAnchor, setPersonaAnchor] = useState<HTMLElement | null>(null);
-  const [polls, setPolls] = useState(0);
 
-  const chatPath = chatModel?.name ?? null;
+  // The selected persona's settings: its cache entry, or empty (all defaults)
+  // when it has none yet.
+  const settings = selectedId
+    ? (settingsCache[selectedId] ?? emptyPersonaSettings())
+    : emptyPersonaSettings();
 
-  // Learn the manager's fixed awareness client ID from the readiness endpoint.
-  // Poll a bounded number of times until the manager registers; once resolved,
-  // it never changes, so we stop polling.
+  // Resolve the manager's awareness view once the manager registers its slot.
   useEffect(() => {
-    if (!chatPath || managerClientId !== null || polls >= MAX_POLLS) {
+    if (!awareness) {
       return;
     }
     let cancelled = false;
-    const timer = window.setTimeout(
-      async () => {
-        const id = await getPersonaManagerClientId(chatPath);
-        if (cancelled) {
-          return;
+    PersonaManagerAwareness.from(awareness)
+      .then(pm => {
+        if (!cancelled) {
+          setManager(pm);
         }
-        if (id !== null) {
-          setManagerClientId(id);
-        } else {
-          setPolls(p => p + 1);
-        }
-      },
-      polls === 0 ? 0 : POLL_MS
-    );
+      })
+      .catch(() => {
+        // Manager never registered (e.g. extension disabled); the toolbar stays
+        // hidden. `.from()` already logged the timeout reason.
+      });
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
     };
-  }, [chatPath, managerClientId, polls]);
+  }, [awareness]);
 
-  // Re-read the persona list from awareness and reconcile the selection: if the
-  // current selection isn't present in this chat, fall back to the sole persona
-  // (if there's exactly one) or to no one, so we never point at a persona the
-  // chat doesn't have. This is the reactive plumbing that replaces polling: a
-  // persona publishing or updating its state fires an awareness `change` event.
-  const readAwareness = useCallback(() => {
-    if (!awareness || managerClientId === null) {
+  // Re-read the persona list from the manager view and reconcile the selection:
+  // if the current selection isn't present in this chat, fall back to the sole
+  // persona (if there's exactly one) or to no one. This is the reactive
+  // plumbing that replaces polling: a persona publishing or updating its state
+  // fires an awareness `change` event.
+  const readManager = useCallback(() => {
+    if (!manager) {
       return;
     }
-    const list = readPersonaList(awareness, managerClientId);
+    const list = manager.personas;
     setPersonas(list);
     setSelectedId(current => {
       if (current && list.some(p => p.id === current)) {
@@ -843,63 +835,54 @@ export function AcpPersonaControls(
       }
       return list.length === 1 ? list[0].id : null;
     });
-  }, [awareness, managerClientId]);
+  }, [manager]);
 
   useEffect(() => {
-    if (!awareness) {
+    if (!awareness || !manager) {
       return;
     }
-    readAwareness();
-    const onChange = () => readAwareness();
+    readManager();
+    const onChange = () => readManager();
     awareness.on('change', onChange);
     return () => {
       awareness.off('change', onChange);
     };
-  }, [awareness, readAwareness]);
+  }, [awareness, manager, readManager]);
 
-  // Derive the selected persona's state from awareness. Re-runs on every
-  // awareness change (a persona updating usage, model, or commands) and on a
-  // persona switch, so the toolbar always reflects the latest published state.
-  const selectedClientId =
-    personas.find(p => p.id === selectedId)?.yjs_client_id ?? null;
+  // Build a view of the selected persona's slot from the manager's list, or
+  // null when nothing is selected / the persona isn't present yet.
+  const readSelectedPersona = (): PersonaAwareness | null => {
+    if (!awareness || !manager || !selectedId) {
+      return null;
+    }
+    const option = manager.personas.find(p => p.id === selectedId);
+    return option ? PersonaAwareness.from(awareness, option) : null;
+  };
+
+  // Track the selected persona's view in state, re-reading on every awareness
+  // change (a persona updating usage, model, or commands) so the toolbar
+  // reflects the latest published state.
   useEffect(() => {
-    if (!awareness || selectedClientId === null) {
+    if (!awareness || !manager || !selectedId) {
       setPersonaState(null);
       return;
     }
-    const read = () =>
-      setPersonaState(readPersonaState(awareness, selectedClientId));
+    const read = () => setPersonaState(readSelectedPersona());
     read();
     awareness.on('change', read);
     return () => {
       awareness.off('change', read);
     };
-  }, [awareness, selectedClientId]);
+  }, [awareness, manager, selectedId]);
 
-  // Reseed the per-message selection to defaults whenever the persona switches.
-  // Keyed on `selectedId` only so an awareness re-read never clobbers the
-  // user's in-progress selection.
-  useEffect(() => {
-    if (!awareness || selectedClientId === null) {
-      setSelection(selectionForPersona(selectedId, null));
-      return;
-    }
-    setSelection(
-      selectionForPersona(
-        selectedId,
-        readPersonaState(awareness, selectedClientId)
-      )
-    );
-  }, [selectedId]);
-
-  // Stamp the current selection onto the input model's metadata, so it rides
-  // out with the next message and the PersonaManager routes and applies it.
-  // Keyed on a signature of the selection so we only write when it changes.
-  const selectionSignature = JSON.stringify(selection);
+  // Stamp the current persona + its settings onto the input model's metadata,
+  // so it rides out with the next message and the PersonaManager routes and
+  // applies it. Keyed on a signature so we only write when it changes.
+  const metadataSignature = JSON.stringify({ selectedId, settings });
   useEffect(() => {
     model.clearMetadata();
-    model.updateMetadata(buildSelectionMetadata(selection));
-  }, [model, selectionSignature]);
+    model.updateMetadata(buildMessageMetadata(selectedId, settings));
+  }, [model, metadataSignature]);
 
   // No personas in the chat: nothing to show.
   if (!personas.length) {
@@ -910,7 +893,7 @@ export function AcpPersonaControls(
   const personaLabel = selectedPersona?.name ?? NO_ONE_LABEL;
   const activeAvatar = selectedPersona?.avatar_url ?? null;
   const usage = personaState?.usage ?? EMPTY_USAGE;
-  const controls = buildControls(personaState, selection);
+  const controls = buildControls(personaState, settings);
 
   const handlePersona = (personaId: string | null) => {
     setPersonaAnchor(null);
@@ -918,7 +901,19 @@ export function AcpPersonaControls(
   };
 
   const handleControl = (control: Control, value: string | null) => {
-    setSelection(prev => applyControlChange(prev, control, value));
+    if (!selectedId) {
+      return;
+    }
+    // Fold the change into this persona's cached settings, remembering it for
+    // when the user switches away and back.
+    setSettingsCache(prev => ({
+      ...prev,
+      [selectedId]: applyControlChange(
+        prev[selectedId] ?? emptyPersonaSettings(),
+        control,
+        value
+      )
+    }));
   };
 
   return (

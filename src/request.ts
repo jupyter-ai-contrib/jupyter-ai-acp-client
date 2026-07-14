@@ -44,34 +44,6 @@ export async function requestAPI<T>(
   return data;
 }
 
-type PersonaManagerReadinessResponse = {
-  persona_manager_client_id: number;
-};
-
-/**
- * Fetch the fixed Yjs client ID under which the `PersonaManager` publishes its
- * persona list. This readiness endpoint (served by the persona-manager server
- * extension) resolves only once the manager and its personas are registered, so
- * a successful response also signals that the awareness slot is populated.
- *
- * Returns null when the manager is not ready yet (the caller should retry) or
- * on any error.
- */
-export async function getPersonaManagerClientId(
-  chatPath: string
-): Promise<number | null> {
-  try {
-    const response = await requestAPI<PersonaManagerReadinessResponse>(
-      'api/ai',
-      `persona_manager_awareness?chat_path=${encodeURIComponent(chatPath)}`
-    );
-    return response.persona_manager_client_id ?? null;
-  } catch (e) {
-    // 503 until the manager registers; the caller polls, so this is expected.
-    return null;
-  }
-}
-
 /**
  * Send the user's permission decision to the backend.
  */

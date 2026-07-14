@@ -14,11 +14,14 @@ import {
   ChatCommand
 } from '@jupyter/chat';
 
-import { Awareness } from 'y-protocols/awareness';
+import { IAwareness } from '@jupyter/ydoc';
+import {
+  PersonaAwareness,
+  PersonaManagerAwareness
+} from '@jupyter-ai/persona-manager';
 
 import { ToolCallsComponent } from './tool-calls';
 
-import { readPersonaStateById } from './awareness';
 import { AcpStopButton } from './stop-button';
 import { AcpPersonaControls } from './persona-controls';
 
@@ -30,9 +33,9 @@ import { AcpPersonaControls } from './persona-controls';
  */
 function getAwarenessFromContext(
   chatContext: IChatContext | undefined
-): Awareness | null {
+): IAwareness | null {
   const model = (chatContext as { _model?: unknown })?._model;
-  const shared = (model as { sharedModel?: { awareness?: Awareness } })
+  const shared = (model as { sharedModel?: { awareness?: IAwareness } })
     ?.sharedModel;
   return shared?.awareness ?? null;
 }
@@ -70,10 +73,9 @@ export class SlashCommandProvider implements IChatCommandProvider {
   /**
    * Returns slash command completions for the current input.
    *
-   * Slash commands are read from the selected persona's `PersonaAwarenessState`
-   * on the chat's awareness channel — the same source the toolbar reads — with
-   * no REST call. The target persona is the one the picker stamped onto the
-   * input metadata as `to_persona`.
+   * Slash commands are read from the selected persona's awareness slot — the
+   * same source the toolbar reads — with no REST call. The target persona is the
+   * one the picker stamped onto the input metadata as `to_persona`.
    */
   async listCommandCompletions(
     inputModel: IInputModel
@@ -95,13 +97,23 @@ export class SlashCommandProvider implements IChatCommandProvider {
       return [];
     }
 
-    const state = readPersonaStateById(awareness, personaId);
-    if (!state) {
+    // `from()` resolves immediately when the manager is already registered
+    // (the normal case). If it never registers, this rejects after a bounded
+    // wait; a late/failed completion query is harmless.
+    let manager: PersonaManagerAwareness;
+    try {
+      manager = await PersonaManagerAwareness.from(awareness);
+    } catch {
       return [];
     }
+    const option = manager.personas.find(p => p.id === personaId);
+    if (!option) {
+      return [];
+    }
+    const persona = PersonaAwareness.from(awareness, option);
 
     const commandSuggestions: ChatCommand[] = [];
-    for (const cmd of state.slash_commands) {
+    for (const cmd of persona.slash_commands) {
       const name = cmd.name.startsWith('/') ? cmd.name : `/${cmd.name}`;
       // continue if command does not match current word
       if (!name.startsWith(currentWord)) {

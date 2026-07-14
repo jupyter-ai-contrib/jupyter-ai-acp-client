@@ -2293,7 +2293,9 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jupyter-ai/acp-client@workspace:."
   dependencies:
+    "@jupyter-ai/persona-manager": ^0.1.0-b0
     "@jupyter/chat": 0.23.0-alpha.3
+    "@jupyter/ydoc": "*"
     "@jupyterlab/application": ^4.0.0
     "@jupyterlab/builder": ^4.0.0
     "@jupyterlab/coreutils": ^6.0.0
@@ -2328,6 +2330,17 @@ __metadata:
     yjs: ^13.5.0
   languageName: unknown
   linkType: soft
+
+"@jupyter-ai/persona-manager@npm:^0.1.0-b0":
+  version: 0.1.0-b0
+  resolution: "@jupyter-ai/persona-manager@npm:0.1.0-b0"
+  dependencies:
+    "@jupyterlab/application": ^4.0.0
+    "@jupyterlab/coreutils": ^6.0.0
+    "@jupyterlab/services": ^7.0.0
+  checksum: 3063280d11f256b9252d85d0822428fefec52f921523f7f9d54e888a3d3b4f8de5f57d89fb1ceeb54ed8fa29676725babeae17b585e856bfd8461e1ca26d23fd
+  languageName: node
+  linkType: hard
 
 "@jupyter/chat@npm:0.23.0-alpha.3":
   version: 0.23.0-alpha.3
@@ -2410,6 +2423,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@jupyter/ydoc@npm:*, @jupyter/ydoc@npm:^4.0.0":
+  version: 4.1.1
+  resolution: "@jupyter/ydoc@npm:4.1.1"
+  dependencies:
+    "@jupyterlab/nbformat": ^3.0.0 || ^4.0.0-alpha.21 || ^4.0.0
+    "@lumino/coreutils": ^1.11.0 || ^2.0.0
+    "@lumino/disposable": ^1.10.0 || ^2.0.0
+    "@lumino/signaling": ^1.10.0 || ^2.0.0
+    y-protocols: ^1.0.5
+    yjs: ^13.5.40
+  checksum: 46ee6f70d2a971b352f5c89ab3bd36cf6e58317b3bdbb41b0d0e98f7fe7a96fe31eb733c3da0363a08d48cdaf0ecb596116e2fdbebd307e3b4c768da5b4d7e65
+  languageName: node
+  linkType: hard
+
 "@jupyter/ydoc@npm:^3.1.0":
   version: 3.3.4
   resolution: "@jupyter/ydoc@npm:3.3.4"
@@ -2421,20 +2448,6 @@ __metadata:
     y-protocols: ^1.0.5
     yjs: ^13.5.40
   checksum: c059c3d4390430796b12fd69c3fba69fc50095298d31371402d46a1cd013667e82af3078dd90c9dc15d2381703212918391c7df30ed4a24c70ed47d075e4f9e8
-  languageName: node
-  linkType: hard
-
-"@jupyter/ydoc@npm:^4.0.0":
-  version: 4.1.1
-  resolution: "@jupyter/ydoc@npm:4.1.1"
-  dependencies:
-    "@jupyterlab/nbformat": ^3.0.0 || ^4.0.0-alpha.21 || ^4.0.0
-    "@lumino/coreutils": ^1.11.0 || ^2.0.0
-    "@lumino/disposable": ^1.10.0 || ^2.0.0
-    "@lumino/signaling": ^1.10.0 || ^2.0.0
-    y-protocols: ^1.0.5
-    yjs: ^13.5.40
-  checksum: 46ee6f70d2a971b352f5c89ab3bd36cf6e58317b3bdbb41b0d0e98f7fe7a96fe31eb733c3da0363a08d48cdaf0ecb596116e2fdbebd307e3b4c768da5b4d7e65
   languageName: node
   linkType: hard
 
