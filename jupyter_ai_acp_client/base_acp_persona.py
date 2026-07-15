@@ -11,16 +11,21 @@ from acp import NewSessionResponse, LoadSessionResponse
 from acp.exceptions import RequestError
 from acp.schema import (
     AvailableCommand,
-    ModelInfo,
     SessionConfigOptionBoolean,
     SessionConfigOptionSelect,
     SessionMode,
-    SessionModelState,
     SessionModeState,
     Usage,
     UsageUpdate,
 )
-from jupyter_ai_persona_manager import BasePersona
+from jupyter_ai_persona_manager import (
+    BasePersona,
+    ModelConfiguration,
+    ModelOption,
+    SettingConfiguration,
+    SettingOption,
+)
+from jupyter_ai_persona_manager import Usage as AwarenessUsage
 from jupyterlab_chat.models import Message
 
 from .default_acp_client import JaiAcpClient
@@ -29,6 +34,34 @@ from .telemetry import emit_event, auto_emit_event
 # A single session config option the agent advertises: either a select (one of
 # several values) or a boolean toggle. Set via `session/set_config_option`.
 AcpConfigOption = SessionConfigOptionSelect | SessionConfigOptionBoolean
+
+# Stable setting ID for the ACP session mode in the awareness settings list.
+# Mirrors the REST toolbar's control ID so both surfaces agree. Defined here
+# (rather than in `routes.py`) so `routes.py` can import it without a cycle.
+MODE_CONTROL_ID = "__mode__"
+
+# ACP config-option categories (https://agentclientprotocol.com/protocol/v1/
+# session-config-options#option-categories). Categories are optional semantic
+# labels; the client uses them to place an option in the right toolbar group.
+# When several options share a category, ACP says to break the tie by array
+# order — the earliest wins the prominent slot.
+_MODEL_CATEGORY = "model"
+_MODE_CATEGORY = "mode"
+_MODEL_CONFIG_CATEGORY = "model_config"
+
+
+def _flatten_select_options(options) -> list:
+    """
+    Yield the flat choice items of an ACP select option, whether the agent sent
+    a flat list or grouped options. Unknown shapes are skipped.
+    """
+    flat = []
+    for item in options or []:
+        if hasattr(item, "value"):
+            flat.append(item)
+        elif hasattr(item, "options"):
+            flat.extend(item.options or [])
+    return flat
 
 
 class BaseAcpPersona(BasePersona):
@@ -70,17 +103,6 @@ class BaseAcpPersona(BasePersona):
     """
     List of slash commands broadcast by the ACP agent in the current session.
     This attribute is set automatically by the default ACP client.
-    """
-
-    _acp_models: list[ModelInfo]
-    """
-    Models the ACP agent advertises for the current session. Set by the persona
-    when a session is created or loaded.
-    """
-
-    _acp_current_model_id: Optional[str]
-    """
-    The model ID currently selected for the ACP session, if any.
     """
 
     _acp_modes: list[SessionMode]
@@ -162,8 +184,6 @@ class BaseAcpPersona(BasePersona):
             self._init_client_session()
         )
         self._acp_slash_commands = []
-        self._acp_models = []
-        self._acp_current_model_id = None
         self._acp_modes = []
         self._acp_current_mode_id = None
         self._acp_config_options = []
@@ -239,9 +259,9 @@ class BaseAcpPersona(BasePersona):
             self.__class__.__name__,
             existing_session_id,
         )
-        self._set_acp_model_state(response.models)
         self._set_acp_mode_state(response.modes)
         self.update_acp_config_options(response.config_options)
+        self._sync_awareness_config()
         return response
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
@@ -253,31 +273,13 @@ class BaseAcpPersona(BasePersona):
             response.session_id,
         )
         self._record_new_session(response.session_id)
-        self._set_acp_model_state(response.models)
         self._set_acp_mode_state(response.modes)
         self.update_acp_config_options(response.config_options)
 
-        # Reapply a previously selected model so the choice survives session
+        # Reapply a previously selected mode so the choice survives session
         # recreation (e.g. a server restart that creates a fresh ACP session).
-        stored_model_id = self._get_stored_model_choice()
-        advertised_model_ids = {m.model_id for m in self._acp_models}
-        if (
-            stored_model_id
-            and stored_model_id != self._acp_current_model_id
-            and stored_model_id in advertised_model_ids
-        ):
-            try:
-                await client.set_session_model(stored_model_id, response.session_id)
-                self._acp_current_model_id = stored_model_id
-            except Exception:
-                self.log.warning(
-                    "Failed to reapply stored model '%s' for '%s'.",
-                    stored_model_id,
-                    self.__class__.__name__,
-                    exc_info=True,
-                )
-
-        # Reapply a previously selected mode the same way.
+        # A model selection needs no special handling here: models are ordinary
+        # config options now, so they ride the config-option reapply loop below.
         stored_mode_id = self._get_stored_mode_choice()
         advertised_mode_ids = {m.id for m in self._acp_modes}
         if (
@@ -313,6 +315,8 @@ class BaseAcpPersona(BasePersona):
                     self.__class__.__name__,
                     exc_info=True,
                 )
+
+        self._sync_awareness_config()
         return response
 
     async def _init_client_session(self) -> NewSessionResponse | LoadSessionResponse:
@@ -546,51 +550,6 @@ class BaseAcpPersona(BasePersona):
         self._acp_slash_commands = commands
 
     @property
-    def acp_models(self) -> list[ModelInfo]:
-        """
-        Models the ACP agent advertises for the current session. Empty when the
-        agent does not advertise any. Set by the persona on session create/load.
-        """
-        return self._acp_models
-
-    @property
-    def acp_current_model_id(self) -> Optional[str]:
-        """The model ID currently selected for the ACP session, if any."""
-        return self._acp_current_model_id
-
-    def _set_acp_model_state(self, models: Optional[SessionModelState]) -> None:
-        """
-        Store the model state from a `session/new` or `session/load` response.
-        `models` is `None` when the agent does not advertise models.
-        """
-        if models is None:
-            self._acp_models = []
-            self._acp_current_model_id = None
-            return
-        self._acp_models = models.available_models
-        self._acp_current_model_id = models.current_model_id
-
-    async def set_acp_model(self, model_id: str) -> None:
-        """
-        Select a model for this persona's ACP session and persist the choice
-        with the chat so it survives session recreation.
-        """
-        client = await self.get_client()
-        session_id = await self.get_session_id()
-        await client.set_session_model(model_id, session_id)
-        self._acp_current_model_id = model_id
-        self._record_model_choice(model_id)
-
-    def _record_model_choice(self, model_id: str) -> None:
-        """Persist the selected model in chat metadata, keyed by persona ID."""
-        existing = self.ychat.get_metadata().get("acp_models", {})
-        self.ychat.set_metadata("acp_models", {**existing, self.id: model_id})
-
-    def _get_stored_model_choice(self) -> Optional[str]:
-        """Return the model previously selected for this persona in this chat."""
-        return self.ychat.get_metadata().get("acp_models", {}).get(self.id)
-
-    @property
     def acp_modes(self) -> list[SessionMode]:
         """
         Modes the ACP agent advertises for the current session. Empty when the
@@ -683,6 +642,264 @@ class BaseAcpPersona(BasePersona):
     def _get_stored_config_choices(self) -> dict[str, str | bool]:
         """Return config option values previously selected for this persona here."""
         return self.ychat.get_metadata().get("acp_config_options", {}).get(self.id, {})
+
+    ################################################
+    # persona-manager awareness API
+    #
+    # Maps the raw ACP state above onto the persona-manager awareness schema
+    # (`ModelConfiguration` + general `SettingConfiguration`s) and implements the
+    # `update_*` methods from `BasePersona` over the ACP RPCs. `BasePersona`
+    # records the new current values and rebroadcasts after an `update_*`; the
+    # `_sync_awareness_config` here publishes the *full* configuration (options
+    # included) when the session is (re)initialized or the agent changes it
+    # itself. The awareness broadcast is the single source of truth for session
+    # info; the frontend reads it directly rather than polling a REST endpoint.
+    ################################################
+    def _config_option_to_setting(
+        self, opt: AcpConfigOption
+    ) -> SettingConfiguration:
+        """
+        Convert an ACP config option into a `SettingConfiguration`.
+
+        Selects map their choices to `SettingOption`s directly. Booleans are
+        represented as a uniform two-option select ("true"/"false"); the ACP
+        `current_value` bool is stringified to match.
+        """
+        if isinstance(opt, SessionConfigOptionSelect):
+            return SettingConfiguration(
+                id=opt.id,
+                current=opt.current_value,
+                name=opt.name,
+                description=opt.description,
+                options=[
+                    SettingOption(id=c.value, name=c.name, description=c.description)
+                    for c in _flatten_select_options(opt.options)
+                ],
+            )
+        # SessionConfigOptionBoolean
+        current = None
+        if opt.current_value is not None:
+            current = "true" if opt.current_value else "false"
+        return SettingConfiguration(
+            id=opt.id,
+            current=current,
+            name=opt.name,
+            description=opt.description,
+            options=[
+                SettingOption(id="true", name="True"),
+                SettingOption(id="false", name="False"),
+            ],
+        )
+
+    def _model_config_option(self) -> Optional[SessionConfigOptionSelect]:
+        """
+        The config option backing the model picker: the first select with
+        category `"model"` (or, as a fallback, id `"model"`).
+
+        ACP models are ordinary config options now — the never-stabilized
+        `session/set_model` API and its response fields were removed from the
+        protocol. When several options share the `"model"` category, ACP breaks
+        the tie by array order, so the earliest wins the prominent model slot;
+        any later model-category options fall through to the general settings
+        list. `None` when the agent advertises no model option.
+        """
+        for opt in self._acp_config_options:
+            if isinstance(opt, SessionConfigOptionSelect) and (
+                opt.category == _MODEL_CATEGORY or opt.id == "model"
+            ):
+                return opt
+        return None
+
+    def _mode_config_option(self) -> Optional[SessionConfigOptionSelect]:
+        """
+        The config option backing the mode selector: the first select with
+        category `"mode"` (or, as a fallback, id `"mode"`).
+
+        ACP v1 lets an agent expose its mode either through the dedicated
+        `session/set_mode` state or as a config option; it tells clients to
+        prefer config options and respect a `"mode"` category. So a mode config
+        option wins over the dedicated mode state (see `_build_awareness_config`),
+        and same-category ties resolve by array order. `None` when no config
+        option advertises a mode.
+        """
+        for opt in self._acp_config_options:
+            if isinstance(opt, SessionConfigOptionSelect) and (
+                opt.category == _MODE_CATEGORY or opt.id == "mode"
+            ):
+                return opt
+        return None
+
+    def _build_awareness_config(
+        self,
+    ) -> tuple[ModelConfiguration, list[SettingConfiguration]]:
+        """
+        Build the awareness `ModelConfiguration` and general
+        `SettingConfiguration` list from the current raw ACP state.
+
+        Bucketing by ACP config-option category:
+
+        - Model: the `"model"`-category config option (`_model_config_option`).
+        - Mode: the `"mode"`-category config option if present, else the
+          dedicated `session/set_mode` state — surfaced as a general setting
+          keyed by `MODE_CONTROL_ID`. A mode config option is preferred, so a
+          duplicate mode advertised through both channels appears only once.
+        - Model settings (`ModelConfiguration.settings`): config options whose
+          category is `"model_config"`.
+        - General settings: every remaining config option.
+
+        The one option consumed as the prominent model picker or mode selector
+        is not also shown as a general setting; any *additional* same-category
+        options are (ACP resolves such ties by array order — earliest wins the
+        prominent slot).
+        """
+        model_opt = self._model_config_option()
+        mode_opt = self._mode_config_option()
+
+        model = ModelConfiguration()
+        if model_opt is not None:
+            model.current = model_opt.current_value
+            model.options = [
+                ModelOption(id=c.value, name=c.name, description=c.description)
+                for c in _flatten_select_options(model_opt.options)
+            ]
+
+        model_settings: list[SettingConfiguration] = []
+        general_settings: list[SettingConfiguration] = []
+
+        # Mode is surfaced as a general setting with a stable pseudo-ID. Prefer a
+        # mode config option; fall back to the dedicated set_mode state.
+        if mode_opt is not None:
+            general_settings.append(
+                SettingConfiguration(
+                    id=MODE_CONTROL_ID,
+                    current=mode_opt.current_value,
+                    name=mode_opt.name or "Mode",
+                    description=mode_opt.description,
+                    options=[
+                        SettingOption(id=c.value, name=c.name, description=c.description)
+                        for c in _flatten_select_options(mode_opt.options)
+                    ],
+                )
+            )
+        elif self._acp_modes:
+            general_settings.append(
+                SettingConfiguration(
+                    id=MODE_CONTROL_ID,
+                    current=self._acp_current_mode_id,
+                    name="Mode",
+                    options=[
+                        SettingOption(id=m.id, name=m.name, description=m.description)
+                        for m in self._acp_modes
+                    ],
+                )
+            )
+
+        for opt in self._acp_config_options:
+            # The option consumed as the model picker / mode selector is not also
+            # shown as a general setting.
+            if opt is model_opt or opt is mode_opt:
+                continue
+            setting = self._config_option_to_setting(opt)
+            if opt.category == _MODEL_CONFIG_CATEGORY:
+                model_settings.append(setting)
+            else:
+                general_settings.append(setting)
+
+        model.settings = model_settings
+        return model, general_settings
+
+    def _sync_awareness_config(self) -> None:
+        """
+        Rebuild the awareness model + settings configuration from current ACP
+        state and broadcast it. Called whenever the ACP state is (re)initialized
+        or changes (session create/load, a control is set, or the agent switches
+        mode/config itself).
+        """
+        model, settings = self._build_awareness_config()
+        self.report_model_configuration(model)
+        self.report_settings_configuration(settings)
+
+    def _sync_awareness_usage(self) -> None:
+        """
+        Map the raw ACP usage state onto the awareness `Usage` model and merge it
+        into the broadcast usage. ACP reports cumulative counts and a live
+        context snapshot, so the default replace semantics of `report_usage` are
+        correct here.
+        """
+        usage = AwarenessUsage()
+        context = self._acp_context_usage
+        if context is not None:
+            usage.context_tokens = context.used
+            usage.context_size = context.size
+            if context.cost is not None:
+                usage.cost_amount = context.cost.amount
+                usage.cost_currency = context.cost.currency
+        tokens = self._acp_session_usage
+        if tokens is not None:
+            usage.input_tokens = tokens.input_tokens
+            usage.output_tokens = tokens.output_tokens
+            usage.total_tokens = tokens.total_tokens
+            usage.cached_read_tokens = tokens.cached_read_tokens
+            usage.cached_write_tokens = tokens.cached_write_tokens
+            usage.thought_tokens = tokens.thought_tokens
+        self.report_usage(usage)
+
+    def _coerce_config_value(self, config_id: str, value: str) -> str | bool:
+        """
+        Coerce an incoming string setting value to the type the ACP option
+        expects. Booleans are advertised to clients as a "true"/"false" select,
+        so convert those strings back to a bool before calling the ACP RPC.
+        """
+        for opt in self._acp_config_options:
+            if opt.id == config_id and isinstance(opt, SessionConfigOptionBoolean):
+                return value == "true"
+        return value
+
+    async def update_model(self, model_id: str) -> None:
+        """
+        Switch the ACP session's model. `BasePersona` rebroadcasts.
+
+        Models are config options now (`session/set_model` was removed from the
+        protocol), so this applies the choice through the backing model config
+        option, matching how `_build_awareness_config` sourced it.
+        """
+        model_opt = self._model_config_option()
+        config_id = model_opt.id if model_opt is not None else "model"
+        await self.set_acp_config_option(
+            config_id, self._coerce_config_value(config_id, model_id)
+        )
+
+    async def update_model_settings(self, settings: dict[str, str | None]) -> None:
+        """
+        Apply model settings — ACP `model_config` category config options — by
+        setting each as a config option. `BasePersona` passes only the settings
+        that changed and rebroadcasts afterward.
+        """
+        for config_id, value in settings.items():
+            await self.set_acp_config_option(
+                config_id, self._coerce_config_value(config_id, value)
+            )
+
+    async def update_settings(self, settings: dict[str, str | None]) -> None:
+        """
+        Apply general settings. The mode pseudo-setting (`MODE_CONTROL_ID`)
+        routes to the mode config option if the agent advertised one, else to
+        the dedicated `session/set_mode`; everything else is a config option.
+        `BasePersona` passes only the settings that changed and rebroadcasts.
+        """
+        for setting_id, value in settings.items():
+            if setting_id == MODE_CONTROL_ID:
+                mode_opt = self._mode_config_option()
+                if mode_opt is not None:
+                    await self.set_acp_config_option(
+                        mode_opt.id, self._coerce_config_value(mode_opt.id, value)
+                    )
+                else:
+                    await self.set_acp_mode(value)
+            else:
+                await self.set_acp_config_option(
+                    setting_id, self._coerce_config_value(setting_id, value)
+                )
 
     @property
     def acp_context_usage(self) -> Optional[UsageUpdate]:

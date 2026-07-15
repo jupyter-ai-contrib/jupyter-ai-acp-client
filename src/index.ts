@@ -6,6 +6,7 @@ import {
 import {
   IChatCommandProvider,
   IChatCommandRegistry,
+  IChatContext,
   IInputModel,
   IMessagePreambleRegistry,
   IInputToolbarRegistryFactory,
@@ -13,11 +14,31 @@ import {
   ChatCommand
 } from '@jupyter/chat';
 
+import { IAwareness } from '@jupyter/ydoc';
+import {
+  PersonaAwareness,
+  PersonaManagerAwareness
+} from '@jupyter-ai/persona-manager';
+
 import { ToolCallsComponent } from './tool-calls';
 
-import { getAcpSlashCommands } from './request';
 import { AcpStopButton } from './stop-button';
 import { AcpPersonaControls } from './persona-controls';
+
+/**
+ * Reach the Yjs awareness channel through the input's chat context. The
+ * concrete `LabChatContext` wraps the `LabChatModel`, whose `sharedModel`
+ * carries the `awareness` object; the generic `IChatContext` type does not
+ * surface either, so we read them structurally.
+ */
+function getAwarenessFromContext(
+  chatContext: IChatContext | undefined
+): IAwareness | null {
+  const model = (chatContext as { _model?: unknown })?._model;
+  const shared = (model as { sharedModel?: { awareness?: IAwareness } })
+    ?.sharedModel;
+  return shared?.awareness ?? null;
+}
 
 const SLASH_COMMAND_PROVIDER_ID =
   '@jupyter-ai/acp-client:slash-command-provider';
@@ -51,6 +72,10 @@ export class SlashCommandProvider implements IChatCommandProvider {
 
   /**
    * Returns slash command completions for the current input.
+   *
+   * Slash commands are read from the selected persona's awareness slot — the
+   * same source the toolbar reads — with no REST call. The target persona is the
+   * one the picker stamped onto the input metadata as `to_persona`.
    */
   async listCommandCompletions(
     inputModel: IInputModel
@@ -62,61 +87,47 @@ export class SlashCommandProvider implements IChatCommandProvider {
       return [];
     }
 
-    if (!inputModel.chatContext) {
-      return [];
-    }
-    const chatPath = inputModel.chatContext.name;
-    const existingMentions = this._getExistingMentions(inputModel);
-
-    // return early if >1 persona is mentioned in the input. we never show ACP
-    // slash command suggestions in this case.
-    if (existingMentions.size > 1) {
+    const awareness = getAwarenessFromContext(inputModel.chatContext);
+    if (!awareness) {
       return [];
     }
 
-    // otherwise, call the `/ai/acp/slash_commands` endpoint to get slash
-    // command suggestions
-    let personaMentionName: string | null = null;
-    if (existingMentions.size) {
-      personaMentionName = existingMentions.values().next().value ?? null;
+    const personaId = inputModel.getMetadata?.().to_persona ?? null;
+    if (!personaId) {
+      return [];
     }
-    const response = await getAcpSlashCommands(chatPath, personaMentionName);
+
+    // `from()` resolves immediately when the manager is already registered
+    // (the normal case). If it never registers, this rejects after a bounded
+    // wait; a late/failed completion query is harmless.
+    let manager: PersonaManagerAwareness;
+    try {
+      manager = await PersonaManagerAwareness.from(awareness);
+    } catch {
+      return [];
+    }
+    const option = manager.personas.find(p => p.id === personaId);
+    if (!option) {
+      return [];
+    }
+    const persona = PersonaAwareness.from(awareness, option);
+
     const commandSuggestions: ChatCommand[] = [];
-    for (const cmd of response) {
+    for (const cmd of persona.slash_commands) {
+      const name = cmd.name.startsWith('/') ? cmd.name : `/${cmd.name}`;
       // continue if command does not match current word
-      if (!cmd.name.startsWith(currentWord)) {
+      if (!name.startsWith(currentWord)) {
         continue;
       }
-
-      // otherwise add it as a suggestion
       commandSuggestions.push({
-        name: cmd.name,
+        name,
         providerId: this.id,
-        description: cmd.description,
+        description: cmd.description ?? undefined,
         spaceOnAccept: true
       });
     }
 
     return commandSuggestions;
-  }
-
-  /**
-   * Returns the set of mention names that have already been @-mentioned in the
-   * input.
-   */
-  _getExistingMentions(inputModel: IInputModel): Set<string> {
-    const matches = inputModel.value?.matchAll(/@([\w-]*)/g);
-    const existingMentions = new Set<string>();
-    for (const match of matches) {
-      const mention = match?.[1];
-      // ignore if 1st group capturing the mention name is an empty string
-      if (!mention) {
-        continue;
-      }
-      existingMentions.add(mention);
-    }
-
-    return existingMentions;
   }
 
   async onSubmit(inputModel: IInputModel): Promise<void> {

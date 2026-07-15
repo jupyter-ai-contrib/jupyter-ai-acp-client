@@ -26,9 +26,12 @@ it.
 
 **Match the installed SDK, not the SDK repo.** `acp.Agent` method signatures
 differ between the pinned `agent-client-protocol` version (see the main
-`pyproject.toml`) and the SDK's `main` branch examples. Write against the
-installed version — e.g. `prompt(self, prompt, session_id, ...)` in 0.9.0. Check
-with `python -c "import acp, inspect; print(inspect.signature(acp.Agent.prompt))"`.
+`pyproject.toml`, currently 0.11) and the SDK's `main` branch examples, and
+across pinned versions too — e.g. `prompt` is `(self, prompt, session_id, ...)`
+in 0.9 but `(self, session_id, prompt, ...)` in 0.11, and `session/set_model`
+was removed entirely in 0.11 (models are `category: "model"` config options
+now). Write against the installed version and pass args by keyword. Check with
+`python -c "import acp, inspect; print(inspect.signature(acp.Agent.prompt))"`.
 
 ## Persona loading, isolation, and how a suite picks its personas
 
@@ -180,16 +183,61 @@ Numbers are fixed in the agent so the expected UI text is deterministic (e.g.
 `1200/4000` → `"30%"`, `total_tokens: 1500` → `"1.5k"`); the client formats
 token counts compactly (`formatTokens`), so assert the compact form.
 
-**These multi-persona suites are `test.describe.skip`ped until metadata routing
-is published.** `session-usage.spec.ts` and `persona-control.spec.ts` load
-several personas and route by the picker's `to_persona` metadata, which needs
-the PersonaManager change from jupyter-ai-persona-manager PR #59. The latest
-published version (0.0.12) — what CI installs via acp-client's
-`jupyter_ai_persona_manager>=0.0.9` floor — routes only by `@`-mention and
-auto-replies only when a chat has exactly one persona, so a multi-persona suite
-routes to nobody and no reply renders. Drop the `.skip` once that floor is
-bumped to the release including #59. (`replies`/`ui-controls` are unaffected:
-one persona each, so 0.0.12's single-persona auto-reply covers them.)
+**These multi-persona suites (`session-usage.spec.ts` and
+`persona-control.spec.ts`) rely on metadata routing.** They load several
+personas and route by the picker's `to_persona` metadata, which needs the
+PersonaManager change from jupyter-ai-persona-manager PR #59 (shipped in
+0.1.0b1). Older published versions (≤0.0.12) routed only by `@`-mention and
+auto-replied only when a chat had exactly one persona, so a multi-persona suite
+reached nobody and no reply rendered. They ran unconditionally once acp-client's
+`jupyter_ai_persona_manager` floor was bumped to `>=0.1.0b1`; keep that floor at
+or above the release including #59 for these suites to pass on CI.
+(`replies`/`ui-controls` are unaffected: one persona each, covered even by the
+old single-persona auto-reply.)
+
+## Config option categories: model, mode, and tie-breaking
+
+Session config options carry an optional
+[`category`](https://agentclientprotocol.com/protocol/v1/session-config-options#option-categories)
+that tells the client where to place the control. The adapter buckets by it:
+`"model"` → the prominent Model picker, `"mode"` → the Mode selector,
+`"model_config"` → settings beside the model, everything else → a general
+setting. (The dedicated `session/set_model` API was removed from the protocol, so
+a model is just a `"model"`-category config option now; a mode may come either
+through the dedicated `session/set_mode` state **or** a `"mode"` config option.)
+
+- **Modes — `mode_agent.py`** advertises a mode through one or both channels via
+  `--channel {set_mode,config_option,both}`; three fixtures (`set-mode`,
+  `config-mode`, `both-mode`) wrap it. `session-modes.spec.ts` asserts each
+  channel round-trips and — crucially — that a mode advertised through _both_
+  renders as a **single** control (the client prefers the config option and
+  de-dupes). It echoes its current mode as YAML so switching the control and
+  sending a message proves the round trip.
+- **Tie-breaking — `duplicate_groups_agent.py`** advertises two options in the
+  same category (two `model`, two `mode`). ACP resolves such ties by array order,
+  so the earliest wins the prominent slot and the runner-up shows as a plain
+  setting under its own label. `duplicate-config-option-groups.spec.ts` asserts
+  both the placement and that each still round-trips.
+
+`TestHelpers#controlCount(title)` counts visible controls with a given `title`
+(the control's label) — used to assert the no-duplication and tie-break layouts.
+
+## Testing slash commands
+
+An ACP agent advertises slash commands with an `available_commands_update` session
+notification (there's no field for them on the session response). The client reads
+that list from the persona's awareness slot and offers it as chat-input
+completions when the user types `/`. `slash_commands_agent.py` announces a fixed
+list (`/compact`, `/clear`, `/help`) shortly after `new_session`;
+`slash-commands.spec.ts` asserts they appear and filter by the typed prefix.
+
+`TestHelpers#slashCompletions(prefix, waitFor)` types `prefix` into the input and
+returns the command names in the autocomplete popup (a page-scoped MUI portal).
+The command list arrives over awareness **asynchronously** after the ACP session
+initializes, and the provider only re-queries on a keystroke — so the helper
+polls, clearing and retyping `prefix` each round, until every name in `waitFor` is
+present. Always pass the agent's commands as `waitFor`, or the read can race the
+update and see only built-ins (e.g. `/refresh-personas`).
 
 ## Gotchas
 

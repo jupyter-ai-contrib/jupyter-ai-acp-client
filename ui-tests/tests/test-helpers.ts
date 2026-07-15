@@ -32,7 +32,12 @@ export enum FixturePersona {
   EchoConfig = 'echo-config',
   SessionUsage = 'session-usage',
   ResponseUsage = 'response-usage',
-  BothUsage = 'both-usage'
+  BothUsage = 'both-usage',
+  SetMode = 'set-mode',
+  ConfigMode = 'config-mode',
+  BothMode = 'both-mode',
+  DuplicateGroups = 'duplicate-groups',
+  SlashCommands = 'slash-commands'
 }
 
 interface FixturePersonaInfo {
@@ -48,7 +53,12 @@ export const FIXTURE_PERSONAS: Record<FixturePersona, FixturePersonaInfo> = {
   [FixturePersona.EchoConfig]: { name: 'Echo Config Agent' },
   [FixturePersona.SessionUsage]: { name: 'Session Usage Agent' },
   [FixturePersona.ResponseUsage]: { name: 'Response Usage Agent' },
-  [FixturePersona.BothUsage]: { name: 'Both Usage Agent' }
+  [FixturePersona.BothUsage]: { name: 'Both Usage Agent' },
+  [FixturePersona.SetMode]: { name: 'Set Mode Agent' },
+  [FixturePersona.ConfigMode]: { name: 'Config Mode Agent' },
+  [FixturePersona.BothMode]: { name: 'Both Mode Agent' },
+  [FixturePersona.DuplicateGroups]: { name: 'Duplicate Groups Agent' },
+  [FixturePersona.SlashCommands]: { name: 'Slash Commands Agent' }
 };
 
 const PICKER = '.jp-jupyter-ai-acp-client-personaControls-persona-btn';
@@ -60,6 +70,9 @@ const VISIBLE_CONTROL_BTN =
   '.jp-jupyter-ai-acp-client-personaControls-controls > .jp-jupyter-ai-acp-client-personaControls-control-btn';
 const INPUT = '.jp-chat-input-container';
 const MESSAGE = '.jp-chat-rendered-message';
+// Each slash-command completion in the input's autocomplete popup renders its
+// name in a `.jp-chat-command-name` span (MUI list options, page-scoped portal).
+const COMMAND_NAME = '.jp-chat-command-name';
 
 // The usage chip and the parts that distinguish which usage channel an agent
 // reported: a context ring + percent (session/usage) and/or a session-token
@@ -156,6 +169,14 @@ export class TestHelpers {
       .click();
   }
 
+  /** How many visible controls carry the given `title` (e.g. to assert a mode
+   * advertised through two channels renders exactly once). */
+  async controlCount(title: string): Promise<number> {
+    return this.chat
+      .locator(`${VISIBLE_CONTROL_BTN}[title="${title}"]`)
+      .count();
+  }
+
   /** The usage chip in the toolbar (present only once the agent reports usage). */
   get usageChip(): Locator {
     return this.chat.locator(USAGE_CHIP);
@@ -205,5 +226,43 @@ export class TestHelpers {
       })
       .toBeGreaterThanOrEqual(before + 2);
     return (await this.chat.locator(MESSAGE).last().textContent()) ?? '';
+  }
+
+  /**
+   * Type `prefix` (e.g. "/" or "/c") into the chat input and return the slash
+   * command names offered in the autocomplete popup (page-scoped, since the
+   * popup is a MUI portal at the page root).
+   *
+   * A persona's commands arrive over awareness asynchronously after its ACP
+   * session initializes, and the provider only re-queries awareness on a
+   * keystroke — so this polls, clearing and retyping `prefix` each round to
+   * re-trigger the query, until every name in `waitFor` is present (or it times
+   * out). Pass the commands the agent advertises as `waitFor`.
+   */
+  async slashCompletions(
+    prefix: string,
+    waitFor: string[] = []
+  ): Promise<string[]> {
+    const combobox = this.chat.locator(INPUT).getByRole('combobox');
+    await combobox.click();
+    const names = this.page.locator(COMMAND_NAME);
+    let last: string[] = [];
+    await expect
+      .poll(
+        async () => {
+          // Clear the previous round's text, then retype to re-query awareness.
+          await combobox.press('ControlOrMeta+a');
+          await combobox.press('Backspace');
+          await combobox.pressSequentially(prefix);
+          if ((await names.count()) === 0) {
+            return false;
+          }
+          last = await names.allTextContents();
+          return waitFor.every(w => last.includes(w));
+        },
+        { timeout: TIMEOUT }
+      )
+      .toBe(true);
+    return last;
   }
 }

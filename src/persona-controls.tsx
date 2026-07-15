@@ -11,28 +11,35 @@ import {
   ListSubheader,
   Menu,
   MenuItem,
-  Popover,
-  Switch
+  Popover
 } from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CheckIcon from '@mui/icons-material/Check';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import { PageConfig } from '@jupyterlab/coreutils';
-import { IMessageMetadata, InputToolbarRegistry } from '@jupyter/chat';
+import { InputToolbarRegistry } from '@jupyter/chat';
+import { IAwareness } from '@jupyter/ydoc';
 import {
-  AcpControl,
-  AcpControlChoice,
-  AcpUsage,
   EMPTY_USAGE,
-  PersonaInfo,
-  getPersonas,
-  setAcpControl
-} from './request';
+  PersonaAwareness,
+  PersonaManagerAwareness,
+  PersonaOption,
+  SettingConfiguration,
+  Usage
+} from '@jupyter-ai/persona-manager';
+import {
+  PersonaSettings,
+  buildMessageMetadata,
+  emptyPersonaSettings
+} from './metadata';
 
 const SELECTOR_CLASS = 'jp-jupyter-ai-acp-client-personaControls';
 const MENU_CLASS = 'jp-jupyter-ai-acp-client-controlMenu';
 const USAGE_CLASS = 'jp-jupyter-ai-acp-client-usage';
 const NO_ONE_LABEL = 'No one';
+
+// Stable control ID for the model selector (setting IDs are used verbatim).
+const MODEL_CONTROL_ID = '__model__';
 
 // Context-fill fractions at which the chip starts demanding attention: the
 // ring and percent turn warn, then error, colored.
@@ -47,57 +54,6 @@ const USAGE_ERROR_AT = 0.9;
 const DEFAULT_PERSONA_ID =
   PageConfig.getOption('jupyter_ai_default_persona') || null;
 
-/**
- * Build the message metadata describing the current picker selection: the
- * target persona, its model, and its settings (mode + config options). This is
- * stamped onto the input model so every outgoing message is self-describing and
- * the PersonaManager can route it. A `null` persona means "no one".
- */
-export function buildSelectionMetadata(
-  selectedId: string | null,
-  controls: AcpControl[]
-): IMessageMetadata {
-  const metadata: IMessageMetadata = { to_persona: selectedId };
-
-  // With no persona selected ("No one"), there is nothing to configure — don't
-  // stamp a model/settings from whatever controls happen to be loaded.
-  if (!selectedId) {
-    return metadata;
-  }
-
-  const modelControl = controls.find(c => c.source === 'model');
-  if (modelControl && typeof modelControl.current_value === 'string') {
-    metadata.model = modelControl.current_value;
-  }
-
-  const settings: { [id: string]: string | boolean } = {};
-  for (const control of controls) {
-    if (control.source === 'model') {
-      continue;
-    }
-    if (control.current_value !== null) {
-      settings[control.id] = control.current_value;
-    }
-  }
-  if (Object.keys(settings).length) {
-    metadata.settings = settings;
-  }
-
-  return metadata;
-}
-
-// Personas register a moment after a chat opens, and an ACP persona's controls
-// load asynchronously while its agent session initializes, which can take 20s+
-// for a slow agent (e.g. Kiro recovering a session). Poll a bounded number of
-// times so the controls appear without needing a first message. The budget
-// resets when the active persona changes, so each persona gets a full window.
-const POLL_MS = 1500;
-const MAX_POLLS = 24;
-
-// Delay for the one trailing refresh after a burst of message updates, long
-// enough for the turn's usage report to be stored server-side.
-const TRAILING_REFRESH_MS = 1500;
-
 // Width (px) reserved for the overflow ("...") button when not every control
 // fits inline.
 const OVERFLOW_BTN_WIDTH = 36;
@@ -107,6 +63,126 @@ const menuAnchorProps = {
   transformOrigin: { vertical: 'bottom', horizontal: 'left' } as const,
   PaperProps: { className: `${MENU_CLASS}-paper` }
 };
+
+/**
+ * A UI control for one control (the model, a model setting, or a general
+ * setting). It carries the persona's current value (from awareness) and the
+ * user's per-message selection (null = use the persona's default).
+ */
+export type Control = {
+  id: string;
+  kind: 'model' | 'model_setting' | 'setting';
+  label: string;
+  /** The persona's current value, from awareness. Null when on its default. */
+  current: string | null;
+  /** The user's selection for this message. Null means "use the default". */
+  selection: string | null;
+  options: { id: string; name: string; description: string | null }[];
+};
+
+/**
+ * Convert a persona's awareness `SettingConfiguration` into a `Control` of the
+ * given kind, seeding the user selection from the current per-persona
+ * selection (defaulting to null = default).
+ */
+function settingToControl(
+  setting: SettingConfiguration,
+  kind: 'model_setting' | 'setting',
+  selection: string | null
+): Control {
+  return {
+    id: setting.id,
+    kind,
+    label: setting.name ?? setting.id,
+    current: setting.current,
+    selection,
+    options: setting.options.map(o => ({
+      id: o.id,
+      name: o.name ?? o.id,
+      description: o.description
+    }))
+  };
+}
+
+/**
+ * Build the list of controls to render for a persona: the model control (when the
+ * persona advertises models), its model settings, then its general settings.
+ * The user's current selection seeds each control's `selection`.
+ */
+export function buildControls(
+  persona: PersonaAwareness | null,
+  settings: PersonaSettings
+): Control[] {
+  if (!persona) {
+    return [];
+  }
+  const controls: Control[] = [];
+  if (persona.model.options.length) {
+    controls.push({
+      id: MODEL_CONTROL_ID,
+      kind: 'model',
+      label: 'Model',
+      current: persona.model.current,
+      selection: settings.modelId,
+      options: persona.model.options.map(o => ({
+        id: o.id,
+        name: o.name ?? o.id,
+        description: o.description
+      }))
+    });
+  }
+  for (const setting of persona.model.settings) {
+    controls.push(
+      settingToControl(
+        setting,
+        'model_setting',
+        settings.modelSettings[setting.id] ?? null
+      )
+    );
+  }
+  for (const setting of persona.settings) {
+    controls.push(
+      settingToControl(
+        setting,
+        'setting',
+        settings.settings[setting.id] ?? null
+      )
+    );
+  }
+  return controls;
+}
+
+/**
+ * Fold a changed control value into the user's `PersonaSettings`, keyed by the
+ * control's kind. A null value resets that control to the persona's default.
+ */
+export function applyControlChange(
+  settings: PersonaSettings,
+  control: Control,
+  value: string | null
+): PersonaSettings {
+  const next: PersonaSettings = {
+    modelId: settings.modelId,
+    modelSettings: { ...settings.modelSettings },
+    settings: { ...settings.settings }
+  };
+  if (control.kind === 'model') {
+    next.modelId = value;
+  } else if (control.kind === 'model_setting') {
+    next.modelSettings[control.id] = value;
+  } else {
+    next.settings[control.id] = value;
+  }
+  return next;
+}
+
+/**
+ * The value a control currently reflects: the user's selection if they picked
+ * one, otherwise the persona's current value (the default).
+ */
+function effectiveValue(control: Control): string | null {
+  return control.selection ?? control.current;
+}
 
 /**
  * A small round avatar image, or a same-sized spacer to keep labels aligned.
@@ -119,34 +195,31 @@ function Avatar(props: { url: string | null | undefined }): JSX.Element {
 }
 
 /**
- * Resolve the label to show on a select control's button.
+ * The label shown on a control's button: the name of its effective value, or the
+ * control's own label when nothing resolves (no options, no current value).
  */
-function currentSelectLabel(control: AcpControl): string {
-  return (
-    control.choices.find(c => c.value === control.current_value)?.label ??
-    (typeof control.current_value === 'string'
-      ? control.current_value
-      : null) ??
-    control.label
-  );
+function currentControlLabel(control: Control): string {
+  const value = effectiveValue(control);
+  const option = control.options.find(o => o.id === value);
+  return option?.name ?? value ?? control.label;
 }
 
 /**
- * One choice row in a select dropdown. Shows the choice name, and a secondary
+ * One choice row in a control dropdown. Shows the choice name, and a secondary
  * description only when it adds information (some agents repeat the name as the
  * description, which is just noise). The full description is available on hover.
  */
 function ChoiceMenuItem(props: {
-  choice: AcpControlChoice;
+  primary: string;
+  description: string | null;
   selected: boolean;
   onSelect: () => void;
 }): JSX.Element {
-  const { choice, selected, onSelect } = props;
+  const { primary, selected, onSelect } = props;
   const description =
-    choice.description &&
-    choice.description.trim().toLowerCase() !==
-      choice.label.trim().toLowerCase()
-      ? choice.description
+    props.description &&
+    props.description.trim().toLowerCase() !== primary.trim().toLowerCase()
+      ? props.description
       : null;
   return (
     <MenuItem
@@ -155,7 +228,7 @@ function ChoiceMenuItem(props: {
       title={description ?? undefined}
     >
       <ListItemText
-        primary={choice.label}
+        primary={primary}
         secondary={description}
         classes={{
           primary: `${MENU_CLASS}-name`,
@@ -170,11 +243,23 @@ function ChoiceMenuItem(props: {
 }
 
 /**
- * A dropdown for a select control (model, mode, or a select config option).
+ * The "Default" row shown at the top of every control. Selecting it sets the
+ * user's value to null, i.e. "use the persona's current value". Its label shows
+ * that current value so the user sees what the default points to.
  */
-function SelectControl(props: {
-  control: AcpControl;
-  onSelect: (value: string) => void;
+function defaultChoiceLabel(control: Control): string {
+  const current = control.options.find(o => o.id === control.current);
+  const name = current?.name ?? control.current;
+  return name ? `Default (${name})` : 'Default';
+}
+
+/**
+ * A dropdown for a control. The first row is "Default" (selection = null); the
+ * rest are the persona's advertised options (selection = that option's id).
+ */
+function ControlItem(props: {
+  control: Control;
+  onSelect: (value: string | null) => void;
 }): JSX.Element {
   const { control, onSelect } = props;
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -190,7 +275,7 @@ function SelectControl(props: {
         title={control.label}
       >
         <span className={`${SELECTOR_CLASS}-control-value`}>
-          {currentSelectLabel(control)}
+          {currentControlLabel(control)}
         </span>
       </Button>
       <Menu
@@ -199,14 +284,24 @@ function SelectControl(props: {
         onClose={() => setAnchor(null)}
         {...menuAnchorProps}
       >
-        {control.choices.map(choice => (
+        <ChoiceMenuItem
+          primary={defaultChoiceLabel(control)}
+          description={null}
+          selected={control.selection === null}
+          onSelect={() => {
+            setAnchor(null);
+            onSelect(null);
+          }}
+        />
+        {control.options.map(option => (
           <ChoiceMenuItem
-            key={choice.value}
-            choice={choice}
-            selected={choice.value === control.current_value}
+            key={option.id}
+            primary={option.name}
+            description={option.description}
+            selected={control.selection === option.id}
             onSelect={() => {
               setAnchor(null);
-              onSelect(choice.value);
+              onSelect(option.id);
             }}
           />
         ))}
@@ -216,58 +311,17 @@ function SelectControl(props: {
 }
 
 /**
- * A compact toggle for a boolean config option.
- */
-function BooleanControl(props: {
-  control: AcpControl;
-  onToggle: (value: boolean) => void;
-}): JSX.Element {
-  const { control, onToggle } = props;
-  const on = control.current_value === true;
-  return (
-    <button
-      type="button"
-      className={`${SELECTOR_CLASS}-toggle${on ? ` ${SELECTOR_CLASS}-toggle-on` : ''}`}
-      onClick={() => onToggle(!on)}
-      title={control.label}
-      aria-pressed={on}
-    >
-      <span className={`${SELECTOR_CLASS}-toggle-label`}>{control.label}</span>
-      <span className={`${SELECTOR_CLASS}-toggle-state`}>
-        {on ? 'On' : 'Off'}
-      </span>
-    </button>
-  );
-}
-
-/**
- * Render one control inline as a dropdown (select) or toggle (boolean).
- */
-function ControlItem(props: {
-  control: AcpControl;
-  onChange: (control: AcpControl, value: string | boolean) => void;
-}): JSX.Element {
-  const { control, onChange } = props;
-  return control.kind === 'boolean' ? (
-    <BooleanControl control={control} onToggle={v => onChange(control, v)} />
-  ) : (
-    <SelectControl control={control} onSelect={v => onChange(control, v)} />
-  );
-}
-
-/**
  * The overflow popover: controls that did not fit inline, shown as a single flat
- * menu (no nested dropdowns). Each select renders as a `ListSubheader` group
- * label followed by its choices; each boolean is one toggle `MenuItem`. Using
- * MUI primitives keeps the menu keyboard-navigable: `ListSubheader` has no
- * tabindex so arrow-key focus skips it, and the toggle row is a focusable
- * `MenuItem`.
+ * menu (no nested dropdowns). Each control renders as a `ListSubheader` group
+ * label followed by its Default row and choices. Using MUI primitives keeps the
+ * menu keyboard-navigable: `ListSubheader` has no tabindex so arrow-key focus
+ * skips it.
  */
 function OverflowMenu(props: {
-  controls: AcpControl[];
+  controls: Control[];
   anchor: HTMLElement | null;
   onClose: () => void;
-  onChange: (control: AcpControl, value: string | boolean) => void;
+  onChange: (control: Control, value: string | null) => void;
 }): JSX.Element {
   const { controls, anchor, onClose, onChange } = props;
   return (
@@ -277,50 +331,37 @@ function OverflowMenu(props: {
       onClose={onClose}
       {...menuAnchorProps}
     >
-      {controls.flatMap(control => {
-        if (control.kind === 'boolean') {
-          const on = control.current_value === true;
-          return [
-            <MenuItem
-              key={control.id}
-              className={`${SELECTOR_CLASS}-overflow-toggle`}
-              onClick={() => onChange(control, !on)}
-            >
-              <ListItemText
-                primary={control.label}
-                classes={{ primary: `${MENU_CLASS}-name` }}
-              />
-              <Switch
-                edge="end"
-                size="small"
-                checked={on}
-                tabIndex={-1}
-                disableRipple
-              />
-            </MenuItem>
-          ];
-        }
-        return [
-          <ListSubheader
-            key={`${control.id}-label`}
-            disableSticky
-            className={`${SELECTOR_CLASS}-overflow-subheader`}
-          >
-            {control.label}
-          </ListSubheader>,
-          ...control.choices.map(choice => (
-            <ChoiceMenuItem
-              key={`${control.id}-${choice.value}`}
-              choice={choice}
-              selected={choice.value === control.current_value}
-              onSelect={() => {
-                onClose();
-                onChange(control, choice.value);
-              }}
-            />
-          ))
-        ];
-      })}
+      {controls.flatMap(control => [
+        <ListSubheader
+          key={`${control.id}-label`}
+          disableSticky
+          className={`${SELECTOR_CLASS}-overflow-subheader`}
+        >
+          {control.label}
+        </ListSubheader>,
+        <ChoiceMenuItem
+          key={`${control.id}-default`}
+          primary={defaultChoiceLabel(control)}
+          description={null}
+          selected={control.selection === null}
+          onSelect={() => {
+            onClose();
+            onChange(control, null);
+          }}
+        />,
+        ...control.options.map(option => (
+          <ChoiceMenuItem
+            key={`${control.id}-${option.id}`}
+            primary={option.name}
+            description={option.description}
+            selected={control.selection === option.id}
+            onSelect={() => {
+              onClose();
+              onChange(control, option.id);
+            }}
+          />
+        ))
+      ])}
     </Menu>
   );
 }
@@ -330,8 +371,8 @@ function OverflowMenu(props: {
  * collapses the rest into an overflow ("...") popover, recomputing on resize.
  */
 function ControlsRow(props: {
-  controls: AcpControl[];
-  onChange: (control: AcpControl, value: string | boolean) => void;
+  controls: Control[];
+  onChange: (control: Control, value: string | null) => void;
 }): JSX.Element {
   const { controls, onChange } = props;
   const rowRef = useRef<HTMLDivElement>(null);
@@ -343,8 +384,10 @@ function ControlsRow(props: {
   );
 
   // Re-measure only when a control's displayed width could change (its set of
-  // ids or current values), not on every refresh that returns a new array.
-  const controlsKey = controls.map(c => `${c.id}:${c.current_value}`).join('|');
+  // ids or effective values), not on every re-render.
+  const controlsKey = controls
+    .map(p => `${p.id}:${effectiveValue(p)}`)
+    .join('|');
 
   useLayoutEffect(() => {
     const row = rowRef.current;
@@ -409,12 +452,20 @@ function ControlsRow(props: {
         aria-hidden="true"
       >
         {controls.map(control => (
-          <ControlItem key={control.id} control={control} onChange={onChange} />
+          <ControlItem
+            key={control.id}
+            control={control}
+            onSelect={v => onChange(control, v)}
+          />
         ))}
       </div>
 
       {visible.map(control => (
-        <ControlItem key={control.id} control={control} onChange={onChange} />
+        <ControlItem
+          key={control.id}
+          control={control}
+          onSelect={v => onChange(control, v)}
+        />
       ))}
 
       {overflow.length ? (
@@ -554,23 +605,29 @@ function UsageRow(props: {
 }
 
 /**
- * The usage chip for the input toolbar: a ring gauge and percent of the active
- * persona's context-window fill, shown next to the persona it describes, and
- * colored once fill crosses the warn threshold. Hover shows a one-line
- * summary; click opens a popover with the full breakdown (context, session
- * token totals, cost). Renders nothing when the agent has reported no usage
- * at all, so absence reads as unknown rather than empty.
+ * The usage chip for the input toolbar: a ring gauge and percent of the
+ * persona's context-window fill, colored once fill crosses the warn threshold.
+ * Hover shows a one-line summary; click opens a popover with the full breakdown
+ * (context, session token totals, cost). Renders nothing when the persona has
+ * reported no usage at all, so absence reads as unknown rather than empty.
  */
-function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
-  const { context, tokens, cost } = props.usage;
+export function UsageChip(props: { usage: Usage }): JSX.Element | null {
+  const usage = props.usage;
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
 
-  if (!context && !tokens && !cost) {
+  const hasContext =
+    usage.context_tokens !== null && usage.context_size !== null;
+  const hasTokens = usage.total_tokens !== null;
+  const hasCost = usage.cost_amount !== null && usage.cost_currency !== null;
+
+  if (!hasContext && !hasTokens && !hasCost) {
     return null;
   }
 
   const fraction =
-    context && context.size > 0 ? context.used / context.size : 0;
+    hasContext && (usage.context_size as number) > 0
+      ? (usage.context_tokens as number) / (usage.context_size as number)
+      : 0;
   const percent = Math.round(fraction * 100);
   const level =
     fraction >= USAGE_ERROR_AT
@@ -580,10 +637,12 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
         : 'ok';
 
   const summary = [
-    context &&
-      `Context: ${formatTokens(context.used)} of ${formatTokens(context.size)} tokens (${percent}%)`,
-    tokens && `Session tokens: ${formatTokens(tokens.total_tokens)}`,
-    cost && `Cost: ${formatCost(cost.amount, cost.currency)}`
+    hasContext &&
+      `Context: ${formatTokens(usage.context_tokens as number)} of ${formatTokens(usage.context_size as number)} tokens (${percent}%)`,
+    hasTokens &&
+      `Session tokens: ${formatTokens(usage.total_tokens as number)}`,
+    hasCost &&
+      `Cost: ${formatCost(usage.cost_amount as number, usage.cost_currency as string)}`
   ]
     .filter(Boolean)
     .join('\n');
@@ -595,17 +654,17 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
         className={`${USAGE_CLASS}-chip ${USAGE_CLASS}-${level}`}
         onClick={event => setAnchor(event.currentTarget)}
         title={summary}
-        aria-label={context ? `Context ${percent}% used` : 'Usage'}
+        aria-label={hasContext ? `Context ${percent}% used` : 'Usage'}
       >
-        {context ? (
+        {hasContext ? (
           <>
             <UsageRing fraction={fraction} />
             <span className={`${USAGE_CLASS}-pct`}>{percent}%</span>
           </>
         ) : null}
-        {!context && tokens ? (
+        {!hasContext && hasTokens ? (
           <span className={`${USAGE_CLASS}-pct`}>
-            {formatTokens(tokens.total_tokens)}
+            {formatTokens(usage.total_tokens as number)}
           </span>
         ) : null}
       </button>
@@ -616,57 +675,64 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
         {...menuAnchorProps}
       >
         <div className={`${USAGE_CLASS}-card`}>
-          {context ? (
+          {hasContext ? (
             <UsageSection
               label="Context"
-              value={`${formatTokens(context.used)} of ${formatTokens(context.size)} (${percent}%)`}
-              title={`${exactNumber.format(context.used)} of ${exactNumber.format(context.size)} tokens`}
+              value={`${formatTokens(usage.context_tokens as number)} of ${formatTokens(usage.context_size as number)} (${percent}%)`}
+              title={`${exactNumber.format(usage.context_tokens as number)} of ${exactNumber.format(usage.context_size as number)} tokens`}
             />
           ) : null}
-          {tokens ? (
+          {hasTokens ? (
             <>
               <UsageSection
                 label="Session tokens"
-                value={formatTokens(tokens.total_tokens)}
-                title={formatTokensExact(tokens.total_tokens)}
+                value={formatTokens(usage.total_tokens as number)}
+                title={formatTokensExact(usage.total_tokens as number)}
               />
-              <UsageRow
-                label="Input"
-                value={formatTokens(tokens.input_tokens)}
-                title={formatTokensExact(tokens.input_tokens)}
-              />
-              <UsageRow
-                label="Output"
-                value={formatTokens(tokens.output_tokens)}
-                title={formatTokensExact(tokens.output_tokens)}
-              />
-              {tokens.cached_read_tokens !== null ? (
+              {usage.input_tokens !== null ? (
+                <UsageRow
+                  label="Input"
+                  value={formatTokens(usage.input_tokens)}
+                  title={formatTokensExact(usage.input_tokens)}
+                />
+              ) : null}
+              {usage.output_tokens !== null ? (
+                <UsageRow
+                  label="Output"
+                  value={formatTokens(usage.output_tokens)}
+                  title={formatTokensExact(usage.output_tokens)}
+                />
+              ) : null}
+              {usage.cached_read_tokens !== null ? (
                 <UsageRow
                   label="Cache read"
-                  value={formatTokens(tokens.cached_read_tokens)}
-                  title={formatTokensExact(tokens.cached_read_tokens)}
+                  value={formatTokens(usage.cached_read_tokens)}
+                  title={formatTokensExact(usage.cached_read_tokens)}
                 />
               ) : null}
-              {tokens.cached_write_tokens !== null ? (
+              {usage.cached_write_tokens !== null ? (
                 <UsageRow
                   label="Cache write"
-                  value={formatTokens(tokens.cached_write_tokens)}
-                  title={formatTokensExact(tokens.cached_write_tokens)}
+                  value={formatTokens(usage.cached_write_tokens)}
+                  title={formatTokensExact(usage.cached_write_tokens)}
                 />
               ) : null}
-              {tokens.thought_tokens !== null ? (
+              {usage.thought_tokens !== null ? (
                 <UsageRow
                   label="Thinking"
-                  value={formatTokens(tokens.thought_tokens)}
-                  title={formatTokensExact(tokens.thought_tokens)}
+                  value={formatTokens(usage.thought_tokens)}
+                  title={formatTokensExact(usage.thought_tokens)}
                 />
               ) : null}
             </>
           ) : null}
-          {cost ? (
+          {hasCost ? (
             <UsageSection
               label="Session cost (est.)"
-              value={formatCost(cost.amount, cost.currency)}
+              value={formatCost(
+                usage.cost_amount as number,
+                usage.cost_currency as string
+              )}
               title="Estimated at API list prices"
             />
           ) : null}
@@ -677,120 +743,146 @@ function UsageChip(props: { usage: AcpUsage }): JSX.Element | null {
 }
 
 /**
+ * The concrete chat model exposes the Yjs shared model, whose `awareness` is
+ * the channel personas broadcast their session state over. The generic
+ * `IChatModel` type does not yet surface this, so we read it structurally.
+ */
+function getAwareness(chatModel: unknown): IAwareness | null {
+  const shared = (chatModel as { sharedModel?: { awareness?: IAwareness } })
+    ?.sharedModel;
+  return shared?.awareness ?? null;
+}
+
+/**
  * The persona control for the chat input toolbar. Shows which persona a message
  * will be directed to (with its avatar), lets the user switch it, and, when the
- * selected persona is an ACP persona, renders its session controls (model,
- * mode, and any config options) next to it. Hides itself when the chat has no
- * personas.
+ * selected persona advertises model/settings, renders those controls next to it.
+ * Hides itself when the chat has no personas.
  *
- * The selection is owned by the frontend and stamped onto each message's
- * metadata (there is no server-side "active persona"). It's seeded from the
- * default persona advertised over PageConfig.
+ * All session information (the persona list, each persona's model/settings
+ * configuration, usage, and slash commands) is read from the chat's Yjs
+ * awareness channel. The selection is owned by the frontend and stamped onto
+ * each message's metadata (there is no server-side "active persona" and no REST
+ * polling). It's seeded from the default persona advertised over PageConfig.
  */
 export function AcpPersonaControls(
   props: InputToolbarRegistry.IToolbarItemProps
 ): JSX.Element | null {
   const { chatModel, model } = props;
-  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
+  const awareness = getAwareness(chatModel);
+
+  // The manager's awareness view, resolved once its slot appears. Null until
+  // then. `PersonaManagerAwareness.from()` polls internally, so nothing here
+  // polls; once resolved, awareness `change` events drive all updates.
+  const [manager, setManager] = useState<PersonaManagerAwareness | null>(null);
+  const [personas, setPersonas] = useState<PersonaOption[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(
     DEFAULT_PERSONA_ID
   );
-  const [controls, setControls] = useState<AcpControl[]>([]);
-  const [usage, setUsage] = useState<AcpUsage>(EMPTY_USAGE);
+  const [personaState, setPersonaState] = useState<PersonaAwareness | null>(
+    null
+  );
+  // Per-persona settings the user has chosen, indexed by persona ID. Remembers
+  // each persona's picks so switching away and back restores them, rather than
+  // resetting to defaults. Component-lifetime only (not persisted across
+  // reloads). A persona absent from the cache has made no changes yet.
+  const [settingsCache, setSettingsCache] = useState<
+    Record<string, PersonaSettings>
+  >({});
   const [personaAnchor, setPersonaAnchor] = useState<HTMLElement | null>(null);
-  const [polls, setPolls] = useState(0);
-  const refreshSeq = useRef(0);
 
-  const chatPath = chatModel?.name ?? null;
+  // The selected persona's settings: its cache entry, or empty (all defaults)
+  // when it has none yet.
+  const settings = selectedId
+    ? (settingsCache[selectedId] ?? emptyPersonaSettings())
+    : emptyPersonaSettings();
 
-  // Fetch the persona list and the selected persona's controls. Keyed on the
-  // selection so switching personas pulls the right controls.
-  const refresh = useCallback(async () => {
-    if (!chatPath) {
-      return;
-    }
-    // Refreshes overlap (message events, polling, the trailing refresh, and
-    // persona switches), and a slow earlier response must not overwrite a newer
-    // one's state.
-    const seq = ++refreshSeq.current;
-    const response = await getPersonas(chatPath, selectedId);
-    if (seq !== refreshSeq.current) {
-      return;
-    }
-    setPersonas(response.personas);
-    setControls(response.controls);
-    setUsage(response.usage ?? EMPTY_USAGE);
-  }, [chatPath, selectedId]);
-
+  // Resolve the manager's awareness view once the manager registers its slot.
   useEffect(() => {
-    let trailing: number | undefined;
-    const onMessages = () => {
-      refresh();
-      // The agent's usage report is stored when the prompt response resolves,
-      // a beat after the turn's final message update, so a refresh driven only
-      // by message events always misses it. One trailing refresh after the
-      // burst settles picks it up.
-      window.clearTimeout(trailing);
-      trailing = window.setTimeout(refresh, TRAILING_REFRESH_MS);
-    };
-    refresh();
-    chatModel?.messagesUpdated?.connect(onMessages);
+    if (!awareness) {
+      return;
+    }
+    let cancelled = false;
+    PersonaManagerAwareness.from(awareness)
+      .then(pm => {
+        if (!cancelled) {
+          setManager(pm);
+        }
+      })
+      .catch(() => {
+        // Manager never registered (e.g. extension disabled); the toolbar stays
+        // hidden. `.from()` already logged the timeout reason.
+      });
     return () => {
-      window.clearTimeout(trailing);
-      chatModel?.messagesUpdated?.disconnect(onMessages);
+      cancelled = true;
     };
-  }, [chatModel, refresh]);
+  }, [awareness]);
 
-  // Once personas load, reconcile the selection: if the seeded default isn't
-  // present in this chat, fall back to the sole persona (if there's exactly
-  // one) or to no one, so we never point at a persona the chat doesn't have.
-  useEffect(() => {
-    if (!personas.length) {
+  // Re-read the persona list from the manager view and reconcile the selection:
+  // if the current selection isn't present in this chat, fall back to the sole
+  // persona (if there's exactly one) or to no one. This is the reactive
+  // plumbing that replaces polling: a persona publishing or updating its state
+  // fires an awareness `change` event.
+  const readManager = useCallback(() => {
+    if (!manager) {
       return;
     }
-    if (selectedId && personas.some(p => p.id === selectedId)) {
+    const list = manager.personas;
+    setPersonas(list);
+    setSelectedId(current => {
+      if (current && list.some(p => p.id === current)) {
+        return current;
+      }
+      return list.length === 1 ? list[0].id : null;
+    });
+  }, [manager]);
+
+  useEffect(() => {
+    if (!awareness || !manager) {
       return;
     }
-    setSelectedId(personas.length === 1 ? personas[0].id : null);
-  }, [personas, selectedId]);
+    readManager();
+    const onChange = () => readManager();
+    awareness.on('change', onChange);
+    return () => {
+      awareness.off('change', onChange);
+    };
+  }, [awareness, manager, readManager]);
 
-  // Reset the poll counter when the chat or the selection changes.
-  useEffect(() => {
-    setPolls(0);
-  }, [chatPath, selectedId]);
+  // Build a view of the selected persona's slot from the manager's list, or
+  // null when nothing is selected / the persona isn't present yet.
+  const readSelectedPersona = (): PersonaAwareness | null => {
+    if (!awareness || !manager || !selectedId) {
+      return null;
+    }
+    const option = manager.personas.find(p => p.id === selectedId);
+    return option ? PersonaAwareness.from(awareness, option) : null;
+  };
 
-  // Poll until the personas register and the selected ACP persona's controls
-  // load, so nothing waits on a first message. Depend on primitive flags, not
-  // the array references (which change on every refresh), to avoid restarting
-  // the timer on unrelated updates.
-  const selectedIsAcp =
-    personas.find(p => p.id === selectedId)?.is_acp ?? false;
-  const needPersonas = personas.length === 0;
-  const needControls = selectedIsAcp && controls.length === 0;
-  const shouldPoll = needPersonas || needControls;
+  // Track the selected persona's view in state, re-reading on every awareness
+  // change (a persona updating usage, model, or commands) so the toolbar
+  // reflects the latest published state.
   useEffect(() => {
-    if (!shouldPoll || polls >= MAX_POLLS) {
+    if (!awareness || !manager || !selectedId) {
+      setPersonaState(null);
       return;
     }
-    const timer = window.setTimeout(() => {
-      setPolls(p => p + 1);
-      refresh();
-    }, POLL_MS);
-    return () => window.clearTimeout(timer);
-  }, [shouldPoll, polls, refresh]);
+    const read = () => setPersonaState(readSelectedPersona());
+    read();
+    awareness.on('change', read);
+    return () => {
+      awareness.off('change', read);
+    };
+  }, [awareness, manager, selectedId]);
 
-  // Stamp the current selection onto the input model's metadata, so it rides
-  // out with the next message and the PersonaManager routes on it. Runs on
-  // initial load and whenever the persona or a control value changes. Keyed on
-  // a signature of the values (not the array reference, which changes on every
-  // refresh) to avoid redundant writes.
-  const controlsSignature = controls
-    .map(c => `${c.id}:${c.current_value}`)
-    .join('|');
+  // Stamp the current persona + its settings onto the input model's metadata,
+  // so it rides out with the next message and the PersonaManager routes and
+  // applies it. Keyed on a signature so we only write when it changes.
+  const metadataSignature = JSON.stringify({ selectedId, settings });
   useEffect(() => {
     model.clearMetadata();
-    model.updateMetadata(buildSelectionMetadata(selectedId, controls));
-  }, [model, selectedId, controlsSignature]);
+    model.updateMetadata(buildMessageMetadata(selectedId, settings));
+  }, [model, metadataSignature]);
 
   // No personas in the chat: nothing to show.
   if (!personas.length) {
@@ -798,43 +890,30 @@ export function AcpPersonaControls(
   }
 
   const selectedPersona = personas.find(p => p.id === selectedId) ?? null;
-  const activeName = selectedPersona?.name ?? null;
+  const personaLabel = selectedPersona?.name ?? NO_ONE_LABEL;
   const activeAvatar = selectedPersona?.avatar_url ?? null;
-  const personaLabel = activeName ?? NO_ONE_LABEL;
+  const usage = personaState?.usage ?? EMPTY_USAGE;
+  const controls = buildControls(personaState, settings);
 
   const handlePersona = (personaId: string | null) => {
     setPersonaAnchor(null);
-    // Update the local selection; the effect above refetches this persona's
-    // controls and the metadata sync effect stamps it onto the input model.
     setSelectedId(personaId);
-    // Usage is per persona; clearing it now keeps the previous persona's
-    // numbers from showing next to the new persona's name while the refresh
-    // is in flight.
-    setUsage(EMPTY_USAGE);
   };
 
-  const handleControl = async (
-    control: AcpControl,
-    value: string | boolean
-  ) => {
-    // Optimistic update for immediate feedback; the metadata sync effect picks
-    // up the new value and stamps it onto the input model.
-    setControls(prev =>
-      prev.map(c => (c.id === control.id ? { ...c, current_value: value } : c))
-    );
-    if (chatPath && selectedId) {
-      // POST so the change reaches the persona's live ACP session (which the
-      // metadata does not yet drive).
-      await setAcpControl(
-        chatPath,
-        selectedId,
-        control.id,
-        control.source,
-        value
-      );
-      // Refetch in case the change cascades (e.g. a mode switch alters options).
-      await refresh();
+  const handleControl = (control: Control, value: string | null) => {
+    if (!selectedId) {
+      return;
     }
+    // Fold the change into this persona's cached settings, remembering it for
+    // when the user switches away and back.
+    setSettingsCache(prev => ({
+      ...prev,
+      [selectedId]: applyControlChange(
+        prev[selectedId] ?? emptyPersonaSettings(),
+        control,
+        value
+      )
+    }));
   };
 
   return (
@@ -846,10 +925,7 @@ export function AcpPersonaControls(
         disableRipple
         startIcon={<Avatar url={activeAvatar} />}
         endIcon={<ArrowDropDownIcon className={`${SELECTOR_CLASS}-arrow`} />}
-        onClick={event => {
-          setPersonaAnchor(event.currentTarget);
-          refresh();
-        }}
+        onClick={event => setPersonaAnchor(event.currentTarget)}
         title="Choose which persona to message"
       >
         <span className={`${SELECTOR_CLASS}-persona`}>{personaLabel}</span>

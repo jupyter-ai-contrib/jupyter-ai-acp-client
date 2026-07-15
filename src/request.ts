@@ -3,23 +3,22 @@ import { URLExt } from '@jupyterlab/coreutils';
 import { ServerConnection } from '@jupyterlab/services';
 
 /**
- * Call the server extension
+ * Call a server extension endpoint under the given API namespace.
  *
- * @param endPoint API REST end point for the extension
- * @param init Initial values for the request
- * @returns The response body interpreted as JSON
+ * @param namespace API namespace, e.g. 'ai/acp' (this extension) or 'api/ai'
+ *   (the persona-manager extension).
+ * @param endPoint API REST endpoint, appended to the namespace.
+ * @param init Initial values for the request.
+ * @returns The response body interpreted as JSON.
  */
 export async function requestAPI<T>(
+  namespace: string,
   endPoint = '',
   init: RequestInit = {}
 ): Promise<T> {
   // Make request to Jupyter API
   const settings = ServerConnection.makeSettings();
-  const requestUrl = URLExt.join(
-    settings.baseUrl,
-    'ai/acp', // our server extension's API namespace
-    endPoint
-  );
+  const requestUrl = URLExt.join(settings.baseUrl, namespace, endPoint);
 
   let response: Response;
   try {
@@ -45,150 +44,6 @@ export async function requestAPI<T>(
   return data;
 }
 
-type AcpSlashCommand = {
-  name: string;
-  description: string;
-};
-
-type AcpSlashCommandsResponse = {
-  commands: AcpSlashCommand[];
-};
-
-export async function getAcpSlashCommands(
-  chatPath: string,
-  personaMentionName: string | null = null
-): Promise<AcpSlashCommand[]> {
-  let response: AcpSlashCommandsResponse;
-  try {
-    if (personaMentionName === null) {
-      response = await requestAPI(`/slash_commands?chat_path=${chatPath}`);
-    } else {
-      response = await requestAPI(
-        `/slash_commands/${personaMentionName}?chat_path=${chatPath}`
-      );
-    }
-  } catch (e) {
-    console.warn('Error retrieving ACP slash commands: ', e);
-    return [];
-  }
-
-  return response.commands;
-}
-export type AcpControlChoice = {
-  value: string;
-  label: string;
-  description: string | null;
-};
-
-export type AcpControl = {
-  id: string;
-  source: 'model' | 'mode' | 'config_option';
-  kind: 'select' | 'boolean';
-  label: string;
-  current_value: string | boolean | null;
-  choices: AcpControlChoice[];
-};
-
-export type PersonaInfo = {
-  id: string;
-  name: string;
-  mention_name: string;
-  is_acp: boolean;
-  avatar_url: string | null;
-};
-
-export type AcpContextUsage = {
-  used: number;
-  size: number;
-};
-
-export type AcpTokenUsage = {
-  input_tokens: number;
-  output_tokens: number;
-  total_tokens: number;
-  cached_read_tokens: number | null;
-  cached_write_tokens: number | null;
-  thought_tokens: number | null;
-};
-
-export type AcpCostUsage = {
-  amount: number;
-  currency: string;
-};
-
-/**
- * The selected persona's reported usage. Each field is null when the agent has
- * not reported that quantity; some agents report none of them.
- */
-export type AcpUsage = {
-  context: AcpContextUsage | null;
-  tokens: AcpTokenUsage | null;
-  cost: AcpCostUsage | null;
-};
-
-export const EMPTY_USAGE: AcpUsage = {
-  context: null,
-  tokens: null,
-  cost: null
-};
-
-export type PersonasResponse = {
-  personas: PersonaInfo[];
-  controls: AcpControl[];
-  usage: AcpUsage;
-};
-
-/**
- * Fetch the chat's personas and, for the given persona (defaulting to the
- * chat's default persona when `personaId` is null), its session controls.
- */
-export async function getPersonas(
-  chatPath: string,
-  personaId: string | null = null
-): Promise<PersonasResponse> {
-  const empty: PersonasResponse = {
-    personas: [],
-    controls: [],
-    usage: EMPTY_USAGE
-  };
-  try {
-    let endPoint = `/personas?chat_path=${encodeURIComponent(chatPath)}`;
-    if (personaId) {
-      endPoint += `&persona_id=${encodeURIComponent(personaId)}`;
-    }
-    return await requestAPI<PersonasResponse>(endPoint);
-  } catch (e) {
-    console.warn('Error retrieving personas: ', e);
-    return empty;
-  }
-}
-
-/**
- * Set a session control (model, mode, or config option) on an ACP persona.
- */
-export async function setAcpControl(
-  chatPath: string,
-  personaId: string,
-  controlId: string,
-  source: string,
-  value: string | boolean
-): Promise<void> {
-  try {
-    await requestAPI(`/control?chat_path=${encodeURIComponent(chatPath)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        persona_id: personaId,
-        control_id: controlId,
-        source,
-        value
-      })
-    });
-  } catch (e) {
-    console.warn('Error setting ACP control: ', e);
-  }
-}
-
 /**
  * Send the user's permission decision to the backend.
  */
@@ -197,7 +52,7 @@ export async function submitPermissionDecision(
   toolCallId: string,
   optionId: string
 ): Promise<void> {
-  await requestAPI('/permissions', {
+  await requestAPI('ai/acp', 'permissions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -208,17 +63,27 @@ export async function submitPermissionDecision(
   });
 }
 
+/**
+ * Interrupt/stop an in-progress agent response. With no persona name, the
+ * backend stops all personas in the chat.
+ */
 export async function stopStreaming(
   chatPath: string,
   personaMentionName: string | null = null
 ): Promise<void> {
   try {
     if (personaMentionName === null) {
-      await requestAPI(`/stop?chat_path=${chatPath}`, { method: 'POST' });
-    } else {
-      await requestAPI(`/stop/${personaMentionName}?chat_path=${chatPath}`, {
+      await requestAPI('ai/acp', `stop?chat_path=${chatPath}`, {
         method: 'POST'
       });
+    } else {
+      await requestAPI(
+        'ai/acp',
+        `stop/${personaMentionName}?chat_path=${chatPath}`,
+        {
+          method: 'POST'
+        }
+      );
     }
   } catch (e) {
     console.warn('Error stopping stream: ', e);

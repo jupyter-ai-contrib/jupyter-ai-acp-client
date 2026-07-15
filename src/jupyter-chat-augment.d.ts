@@ -86,13 +86,19 @@ declare module '@jupyter/chat' {
      */
     to_persona?: string | null;
     /**
-     * ID of the selected model for the addressed persona.
+     * The user's model selection for the addressed persona. `id` is the chosen
+     * model ID (null = use the persona's current model); `settings` maps model
+     * setting IDs to a chosen option ID (null = use the current value).
+     * Mirrors the persona-manager `ModelSpec`.
      */
-    model?: string;
+    model?: {
+      id: string | null;
+      settings: { [id: string]: string | null };
+    };
     /**
-     * The selected session settings (mode and config options), keyed by
-     * control ID.
+     * The user's general (non-model) setting selections, keyed by setting ID.
+     * A null value means "use the persona's current value".
      */
-    settings?: { [id: string]: string | boolean };
+    settings?: { [id: string]: string | null };
   }
 }
