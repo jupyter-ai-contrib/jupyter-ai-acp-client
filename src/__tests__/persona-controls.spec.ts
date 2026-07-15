@@ -4,9 +4,15 @@
  * per-message selection.
  */
 
-import { buildControls } from '../persona-controls';
+import { PersonaOption } from '@jupyter-ai/persona-manager';
+
+import { buildControls, reconcileSelection } from '../persona-controls';
 import { emptyPersonaSettings, PersonaSettings } from '../metadata';
 import { personaAwareness } from './awareness-fixture';
+
+function personaOption(id: string): PersonaOption {
+  return { id, name: id, avatar_url: null, yjs_client_id: 1 };
+}
 
 const withControls = personaAwareness({
   model: {
@@ -99,5 +105,49 @@ describe('buildControls', () => {
       { id: 'opus-48', name: 'Opus 4.8', description: null },
       { id: 'fable-5', name: 'Fable 5', description: null }
     ]);
+  });
+});
+
+describe('reconcileSelection', () => {
+  it('keeps a valid selection', () => {
+    expect(
+      reconcileSelection([personaOption('a'), personaOption('b')], 'a', true)
+    ).toBeUndefined();
+  });
+
+  it('selects the sole persona before any explicit choice', () => {
+    expect(reconcileSelection([personaOption('a')], null, false)).toBe('a');
+  });
+
+  it('keeps "No one" once the user picked it, even with a sole persona', () => {
+    expect(
+      reconcileSelection([personaOption('a')], null, true)
+    ).toBeUndefined();
+  });
+
+  it('replaces an invalid selection with the sole persona before any choice', () => {
+    expect(reconcileSelection([personaOption('a')], 'missing', false)).toBe(
+      'a'
+    );
+  });
+
+  it('clears an invalid selection once the user has picked', () => {
+    expect(
+      reconcileSelection([personaOption('a')], 'missing', true)
+    ).toBeNull();
+  });
+
+  it('clears an invalid selection among several personas', () => {
+    expect(
+      reconcileSelection(
+        [personaOption('a'), personaOption('b')],
+        'missing',
+        false
+      )
+    ).toBeNull();
+  });
+
+  it('makes no decision before personas load', () => {
+    expect(reconcileSelection([], 'a', false)).toBeUndefined();
   });
 });

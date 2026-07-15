@@ -149,6 +149,11 @@ export class TestHelpers {
     return this._chat;
   }
 
+  /** The persona picker button in the toolbar. */
+  get personaPicker(): Locator {
+    return this.chat.locator(PICKER);
+  }
+
   /** Select a fixture persona from the picker and wait for it to take. */
   async selectPersona(persona: FixturePersona): Promise<void> {
     const { name } = FIXTURE_PERSONAS[persona];
@@ -157,6 +162,14 @@ export class TestHelpers {
     await picker.click();
     await this.page.getByRole('menuitem', { name }).click();
     await expect(picker).toContainText(name);
+  }
+
+  /** Pick "No one" in the persona picker, so messages go to no persona. */
+  async selectNoOne(): Promise<void> {
+    await expect(this.personaPicker).toBeVisible({ timeout: TIMEOUT });
+    await this.personaPicker.click();
+    await this.page.getByRole('menuitem', { name: 'No one' }).click();
+    await expect(this.personaPicker).toContainText('No one');
   }
 
   /** Wait for the selected persona's session controls to render. */
@@ -231,6 +244,24 @@ export class TestHelpers {
       })
       .toBeGreaterThanOrEqual(before + 2);
     return (await this.chat.locator(MESSAGE).last().textContent()) ?? '';
+  }
+
+  /**
+   * Send a message expecting no reply (e.g. with "No one" selected): waits
+   * only for the human message to render.
+   */
+  async sendWithoutReply(text: string): Promise<void> {
+    const before = await this.chat.locator(MESSAGE).count();
+    await this.chat
+      .locator(INPUT)
+      .getByRole('combobox')
+      .pressSequentially(text);
+    await this.chat.locator(`${INPUT} .jp-chat-send-button`).click();
+    await expect
+      .poll(async () => this.chat.locator(MESSAGE).count(), {
+        timeout: TIMEOUT
+      })
+      .toBeGreaterThanOrEqual(before + 1);
   }
 
   /**

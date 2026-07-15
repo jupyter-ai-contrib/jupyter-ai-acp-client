@@ -153,6 +153,34 @@ export function buildControls(
 }
 
 /**
+ * Decide how to reconcile the current selection with a freshly read persona
+ * list: the new selection to apply, or `undefined` to keep the current one.
+ *
+ * A selection pointing at a persona the chat doesn't have resolves to the sole
+ * persona (as a convenience) or to no one. The sole-persona convenience also
+ * seeds an empty initial selection, but only until the user has made an
+ * explicit choice: after that their choice, including "No one" (`null`),
+ * sticks.
+ */
+export function reconcileSelection(
+  personas: PersonaOption[],
+  selectedId: string | null,
+  userPicked: boolean
+): string | null | undefined {
+  if (!personas.length) {
+    return undefined;
+  }
+  if (selectedId && personas.some(p => p.id === selectedId)) {
+    return undefined;
+  }
+  if (personas.length === 1 && !userPicked) {
+    return personas[0].id;
+  }
+  // An invalid selection clears to "No one"; an already-empty one stands.
+  return selectedId ? null : undefined;
+}
+
+/**
  * Fold a changed control value into the user's `PersonaSettings`, keyed by the
  * control's kind. A null value resets that control to the persona's default.
  */
@@ -790,6 +818,9 @@ export function AcpPersonaControls(
     Record<string, PersonaSettings>
   >({});
   const [personaAnchor, setPersonaAnchor] = useState<HTMLElement | null>(null);
+  // Whether the user has explicitly picked a persona (or "No one") in this
+  // chat. Guards the sole-persona convenience in reconcileSelection.
+  const userPicked = useRef(false);
 
   // The selected persona's settings: its cache entry, or empty (all defaults)
   // when it has none yet.
@@ -818,9 +849,8 @@ export function AcpPersonaControls(
     };
   }, [awareness]);
 
-  // Re-read the persona list from the manager view and reconcile the selection:
-  // if the current selection isn't present in this chat, fall back to the sole
-  // persona (if there's exactly one) or to no one. This is the reactive
+  // Re-read the persona list from the manager view and reconcile the selection
+  // (see reconcileSelection for the decision rules). This is the reactive
   // plumbing that replaces polling: a persona publishing or updating its state
   // fires an awareness `change` event.
   const readManager = useCallback(() => {
@@ -830,10 +860,8 @@ export function AcpPersonaControls(
     const list = manager.personas;
     setPersonas(list);
     setSelectedId(current => {
-      if (current && list.some(p => p.id === current)) {
-        return current;
-      }
-      return list.length === 1 ? list[0].id : null;
+      const next = reconcileSelection(list, current, userPicked.current);
+      return next === undefined ? current : next;
     });
   }, [manager]);
 
@@ -897,6 +925,7 @@ export function AcpPersonaControls(
 
   const handlePersona = (personaId: string | null) => {
     setPersonaAnchor(null);
+    userPicked.current = true;
     setSelectedId(personaId);
   };
 
