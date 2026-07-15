@@ -388,6 +388,21 @@ class TestUpdateModel:
 
         persona.set_acp_config_option.assert_awaited_once_with("model", "claude")
 
+    async def test_uses_first_model_option_when_multiple(self):
+        # Several category="model" options: apply through the FIRST (the one the
+        # tie-break surfaced as the prominent model picker), never a later one.
+        persona = _awareness_persona(
+            config_options=[
+                _select_option("model_a", "a1", ["a1", "a2"], category="model"),
+                _select_option("model_b", "b1", ["b1", "b2"], category="model"),
+            ]
+        )
+        persona.set_acp_config_option = AsyncMock()
+
+        await BaseAcpPersona.update_model(persona, "a2")
+
+        persona.set_acp_config_option.assert_awaited_once_with("model_a", "a2")
+
 
 class TestUpdateModelSettings:
     """update_model_settings applies each given setting as a config option."""
@@ -410,8 +425,13 @@ class TestUpdateModelSettings:
 class TestUpdateSettings:
     """update_settings routes mode and config options to the right setters."""
 
-    async def test_mode_pseudo_setting_calls_set_acp_mode(self):
-        # Mode advertised via the dedicated set_mode state -> session/set_mode.
+    # The mode pseudo-setting has three routing branches, exercised below in the
+    # order of increasing ambiguity. The rule: prefer a `category="mode"` config
+    # option (the FIRST one) over the dedicated `session/set_mode` state.
+
+    async def test_mode_only_set_mode_state_calls_set_acp_mode(self):
+        # Branch 1 — mode advertised only via the dedicated set_mode state:
+        # route to session/set_mode.
         persona = _awareness_persona(
             modes=[SessionMode(id="plan", name="Plan")], current_mode="plan"
         )
@@ -423,9 +443,9 @@ class TestUpdateSettings:
         persona.set_acp_mode.assert_awaited_once_with("code")
         persona.set_acp_config_option.assert_not_awaited()
 
-    async def test_mode_config_option_calls_set_acp_config_option(self):
-        # Mode advertised as a config option -> session/set_config_option on that
-        # option's id, not session/set_mode.
+    async def test_mode_config_option_only_calls_set_config_option(self):
+        # Mode advertised only as a config option -> session/set_config_option on
+        # that option's id, not session/set_mode.
         persona = _awareness_persona(
             config_options=[
                 _select_option("mode", "ask", ["ask", "code"], category="mode")
@@ -437,6 +457,43 @@ class TestUpdateSettings:
         await BaseAcpPersona.update_settings(persona, {MODE_CONTROL_ID: "code"})
 
         persona.set_acp_config_option.assert_awaited_once_with("mode", "code")
+        persona.set_acp_mode.assert_not_awaited()
+
+    async def test_mode_both_channels_prefers_config_option(self):
+        # Branch 2 — set_mode state AND a config option: prefer the config option,
+        # routing to session/set_config_option (never session/set_mode).
+        persona = _awareness_persona(
+            modes=[SessionMode(id="plan", name="Plan")],
+            current_mode="plan",
+            config_options=[
+                _select_option("mode_cfg", "ask", ["ask", "code"], category="mode")
+            ],
+        )
+        persona.set_acp_mode = AsyncMock()
+        persona.set_acp_config_option = AsyncMock()
+
+        await BaseAcpPersona.update_settings(persona, {MODE_CONTROL_ID: "code"})
+
+        persona.set_acp_config_option.assert_awaited_once_with("mode_cfg", "code")
+        persona.set_acp_mode.assert_not_awaited()
+
+    async def test_mode_both_channels_multiple_options_uses_first(self):
+        # Branch 3 (worst case) — set_mode state AND several category="mode"
+        # config options: prefer the FIRST config option and route there.
+        persona = _awareness_persona(
+            modes=[SessionMode(id="plan", name="Plan")],
+            current_mode="plan",
+            config_options=[
+                _select_option("mode_a", "ask", ["ask", "code"], category="mode"),
+                _select_option("mode_b", "fast", ["fast", "slow"], category="mode"),
+            ],
+        )
+        persona.set_acp_mode = AsyncMock()
+        persona.set_acp_config_option = AsyncMock()
+
+        await BaseAcpPersona.update_settings(persona, {MODE_CONTROL_ID: "code"})
+
+        persona.set_acp_config_option.assert_awaited_once_with("mode_a", "code")
         persona.set_acp_mode.assert_not_awaited()
 
     async def test_config_option_calls_set_acp_config_option(self):
