@@ -44,8 +44,8 @@ export function AcpStopButton(
 
     setInFlight(true);
     try {
-      // Call stop with no persona name, backend stops all personas
-      await stopStreaming(chatModel.name, null);
+      // Cancels every persona's in-progress response in this chat.
+      await stopStreaming(chatModel.name);
     } finally {
       setInFlight(false);
     }

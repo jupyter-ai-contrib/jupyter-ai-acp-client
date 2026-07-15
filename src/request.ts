@@ -64,27 +64,19 @@ export async function submitPermissionDecision(
 }
 
 /**
- * Interrupt/stop an in-progress agent response. With no persona name, the
- * backend stops all personas in the chat.
+ * Interrupt/stop the in-progress agent response(s) in a chat.
+ *
+ * Calls the persona-manager cancel endpoint, which asks every persona in the
+ * chat to cancel its response (`BasePersona.cancel_response()`). This is
+ * backend-agnostic: ACP personas cancel their agent turn, others no-op.
  */
-export async function stopStreaming(
-  chatPath: string,
-  personaMentionName: string | null = null
-): Promise<void> {
+export async function stopStreaming(chatPath: string): Promise<void> {
   try {
-    if (personaMentionName === null) {
-      await requestAPI('ai/acp', `stop?chat_path=${chatPath}`, {
-        method: 'POST'
-      });
-    } else {
-      await requestAPI(
-        'ai/acp',
-        `stop/${personaMentionName}?chat_path=${chatPath}`,
-        {
-          method: 'POST'
-        }
-      );
-    }
+    await requestAPI(
+      'api/ai',
+      `personas/cancel?chat_path=${encodeURIComponent(chatPath)}`,
+      { method: 'POST' }
+    );
   } catch (e) {
     console.warn('Error stopping stream: ', e);
   }

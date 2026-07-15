@@ -527,6 +527,24 @@ class BaseAcpPersona(BasePersona):
             root_dir=self.parent.root_dir,
         )
 
+    async def cancel_response(self) -> None:
+        """
+        Interrupt this persona's in-progress ACP turn.
+
+        Overrides the `BasePersona` no-op: cancels the agent's current prompt
+        (via the ACP `session/cancel` notification), finalizes any messages
+        streamed so far, rejects pending permissions, and clears the writing
+        state. Safe to call when nothing is in flight — a not-yet-initialized
+        session is simply ignored.
+        """
+        try:
+            session_id = await self.get_session_id()
+        except (AssertionError, KeyError):
+            # No ACP session yet -> nothing to cancel.
+            return
+        client = await self.get_client()
+        await client.stop_streaming(session_id)
+
     @property
     def acp_slash_commands(self) -> list[AvailableCommand]:
         """
