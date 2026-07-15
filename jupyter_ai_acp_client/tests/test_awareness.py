@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 from acp.schema import (
     Cost,
-    ModelInfo,
     SessionConfigOptionBoolean,
     SessionConfigOptionSelect,
     SessionConfigSelectGroup,
@@ -73,8 +72,6 @@ def _bool_option(
 
 def _awareness_persona(
     *,
-    models=None,
-    current_model=None,
     modes=None,
     current_mode=None,
     config_options=None,
@@ -83,7 +80,13 @@ def _awareness_persona(
 ):
     """A real `BaseAcpPersona` built without `__init__`, carrying the raw ACP
     state the awareness mapping reads plus a real awareness state to broadcast
-    into. Collaborators are mocked."""
+    into. Collaborators are mocked.
+
+    Models are ordinary config options now (`session/set_model` was removed from
+    ACP), so there is no dedicated model state to seed — pass a `category="model"`
+    select in `config_options`. `modes`/`current_mode` seed the dedicated
+    `session/set_mode` state; a `category="mode"` config option is the other
+    (preferred) way to advertise a mode."""
 
     class _Concrete(BaseAcpPersona):
         @property
@@ -94,8 +97,6 @@ def _awareness_persona(
     persona.log = logging.getLogger("test")
     persona.awareness = _awareness()
     persona.ychat = MagicMock()
-    persona._acp_models = models or []
-    persona._acp_current_model_id = current_model
     persona._acp_modes = modes or []
     persona._acp_current_mode_id = current_mode
     persona._acp_config_options = config_options or []
@@ -107,29 +108,39 @@ def _awareness_persona(
 class TestBuildAwarenessConfig:
     """ACP model/mode/config options -> ModelConfiguration + settings list."""
 
-    def test_dedicated_model_becomes_model_configuration(self):
+    def test_model_category_option_becomes_model_configuration(self):
         persona = _awareness_persona(
-            models=[
-                ModelInfo(modelId="opus", name="Opus", description="big"),
-                ModelInfo(modelId="haiku", name="Haiku"),
-            ],
-            current_model="opus",
+            config_options=[
+                _select_option(
+                    "model", "opus", ["opus", "haiku"], category="model"
+                ),
+            ]
         )
 
         model, settings = persona._build_awareness_config()
 
         assert model.current == "opus"
-        assert [(o.id, o.name, o.description) for o in model.options] == [
-            ("opus", "Opus", "big"),
-            ("haiku", "Haiku", None),
-        ]
+        assert [o.id for o in model.options] == ["opus", "haiku"]
+        # The model option is consumed by the model picker, not general settings.
+        assert settings == []
+
+    def test_model_sourced_by_id_when_uncategorized(self):
+        # An option literally named "model" backs the picker even without the
+        # category, for agents that predate the category convention.
+        persona = _awareness_persona(
+            config_options=[_select_option("model", "gpt", ["gpt", "claude"])]
+        )
+
+        model, settings = persona._build_awareness_config()
+
+        assert model.current == "gpt"
+        assert [o.id for o in model.options] == ["gpt", "claude"]
         assert settings == []
 
     def test_model_config_category_becomes_model_settings(self):
         persona = _awareness_persona(
-            models=[ModelInfo(modelId="opus", name="Opus")],
-            current_model="opus",
             config_options=[
+                _select_option("model", "opus", ["opus"], category="model"),
                 _select_option(
                     "context_size", "large", ["small", "large"], category="model_config"
                 ),
@@ -185,39 +196,67 @@ class TestBuildAwarenessConfig:
 
         assert next(s for s in settings if s.id == "allow_all").current == "true"
 
-    def test_config_model_and_mode_dropped_when_dedicated_fields_present(self):
+    def test_mode_config_option_becomes_mode_setting(self):
+        # A mode advertised as a config option (category="mode") backs the mode
+        # setting — no dedicated set_mode state needed.
         persona = _awareness_persona(
-            models=[ModelInfo(modelId="opus", name="Opus")],
-            current_model="opus",
+            config_options=[
+                _select_option("mode", "ask", ["ask", "code"], category="mode"),
+            ]
+        )
+
+        _, settings = persona._build_awareness_config()
+
+        by_id = {s.id: s for s in settings}
+        assert MODE_CONTROL_ID in by_id
+        assert by_id[MODE_CONTROL_ID].current == "ask"
+        assert [o.id for o in by_id[MODE_CONTROL_ID].options] == ["ask", "code"]
+        # The mode option is consumed by the mode setting, not shown twice.
+        assert "mode" not in by_id
+
+    def test_mode_via_both_channels_not_duplicated(self):
+        # An agent may advertise a mode through both the dedicated set_mode state
+        # and a config option. The config option is preferred and the mode
+        # appears exactly once.
+        persona = _awareness_persona(
             modes=[SessionMode(id="plan", name="Plan")],
             current_mode="plan",
             config_options=[
-                _select_option("model", "opus", ["opus"]),
-                _select_option("mode", "plan", ["plan"]),
-                _select_option("effort", "high", ["low", "high"]),
+                _select_option("mode", "code", ["ask", "code"], category="mode"),
             ],
         )
 
-        model, settings = persona._build_awareness_config()
+        _, settings = persona._build_awareness_config()
 
-        # dedicated model wins; config "model"/"mode" duplicates dropped.
-        assert [o.id for o in model.options] == ["opus"]
-        assert {s.id for s in settings} == {MODE_CONTROL_ID, "effort"}
+        mode_settings = [s for s in settings if s.id == MODE_CONTROL_ID]
+        assert len(mode_settings) == 1
+        # The config option wins over the dedicated state.
+        assert mode_settings[0].current == "code"
+        assert [o.id for o in mode_settings[0].options] == ["ask", "code"]
 
-    def test_config_model_fallback_when_no_dedicated_models(self):
+    def test_category_ties_resolved_by_array_order(self):
+        # When several options share a category, the earliest wins the prominent
+        # slot; later same-category options fall through to general settings.
         persona = _awareness_persona(
             config_options=[
-                _select_option("model", "gpt", ["gpt", "claude"]),
+                _select_option("model_a", "a1", ["a1", "a2"], category="model"),
+                _select_option("model_b", "b1", ["b1", "b2"], category="model"),
+                _select_option("mode_a", "ask", ["ask", "code"], category="mode"),
+                _select_option("mode_b", "fast", ["fast", "slow"], category="mode"),
             ]
         )
 
         model, settings = persona._build_awareness_config()
 
-        # Falls back to the "model" config option for the model configuration.
-        assert model.current == "gpt"
-        assert [o.id for o in model.options] == ["gpt", "claude"]
-        # And it is not also duplicated into general settings.
-        assert settings == []
+        # First model-category option backs the picker.
+        assert model.current == "a1"
+        assert [o.id for o in model.options] == ["a1", "a2"]
+        by_id = {s.id: s for s in settings}
+        # First mode-category option backs the mode setting.
+        assert by_id[MODE_CONTROL_ID].current == "ask"
+        # The runners-up remain visible as ordinary general settings.
+        assert "model_b" in by_id and by_id["model_b"].current == "b1"
+        assert "mode_b" in by_id and by_id["mode_b"].current == "fast"
 
     def test_grouped_select_options_flattened(self):
         opt = SessionConfigOptionSelect(
@@ -255,8 +294,9 @@ class TestBuildAwarenessConfig:
 
     def test_sync_broadcasts_model_and_settings(self):
         persona = _awareness_persona(
-            models=[ModelInfo(modelId="opus", name="Opus")],
-            current_model="opus",
+            config_options=[
+                _select_option("model", "opus", ["opus"], category="model"),
+            ],
             modes=[SessionMode(id="plan", name="Plan")],
             current_mode="plan",
         )
@@ -324,34 +364,29 @@ class TestSyncAwarenessUsage:
 # sync awareness, or swallow errors.
 
 class TestUpdateModel:
-    """update_model routes symmetrically with how the model was sourced."""
+    """update_model applies the choice through the backing model config option
+    (models are config options now; session/set_model was removed)."""
 
-    async def test_dedicated_model_calls_set_acp_model(self):
-        # Agent advertises models via the dedicated field -> session/set_model.
+    async def test_applies_model_category_option(self):
         persona = _awareness_persona(
-            models=[ModelInfo(modelId="opus", name="Opus")], current_model="opus"
+            config_options=[
+                _select_option("chosen_model", "gpt", ["gpt", "claude"], category="model")
+            ]
         )
-        persona.set_acp_model = AsyncMock()
         persona.set_acp_config_option = AsyncMock()
 
-        await BaseAcpPersona.update_model(persona, "opus")
+        await BaseAcpPersona.update_model(persona, "claude")
 
-        persona.set_acp_model.assert_awaited_once_with("opus")
-        persona.set_acp_config_option.assert_not_awaited()
+        # Routes to the model option by its actual id, not a hardcoded "model".
+        persona.set_acp_config_option.assert_awaited_once_with("chosen_model", "claude")
 
-    async def test_config_model_fallback_calls_set_acp_config_option(self):
-        # No dedicated models; the model is a "model" config option. Such an
-        # agent implements no session/set_model, so apply it as a config option.
-        persona = _awareness_persona(
-            config_options=[_select_option("model", "gpt", ["gpt", "claude"])]
-        )
-        persona.set_acp_model = AsyncMock()
+    async def test_falls_back_to_model_id_when_none_advertised(self):
+        persona = _awareness_persona(config_options=[])
         persona.set_acp_config_option = AsyncMock()
 
         await BaseAcpPersona.update_model(persona, "claude")
 
         persona.set_acp_config_option.assert_awaited_once_with("model", "claude")
-        persona.set_acp_model.assert_not_awaited()
 
 
 class TestUpdateModelSettings:
@@ -376,6 +411,7 @@ class TestUpdateSettings:
     """update_settings routes mode and config options to the right setters."""
 
     async def test_mode_pseudo_setting_calls_set_acp_mode(self):
+        # Mode advertised via the dedicated set_mode state -> session/set_mode.
         persona = _awareness_persona(
             modes=[SessionMode(id="plan", name="Plan")], current_mode="plan"
         )
@@ -386,6 +422,22 @@ class TestUpdateSettings:
 
         persona.set_acp_mode.assert_awaited_once_with("code")
         persona.set_acp_config_option.assert_not_awaited()
+
+    async def test_mode_config_option_calls_set_acp_config_option(self):
+        # Mode advertised as a config option -> session/set_config_option on that
+        # option's id, not session/set_mode.
+        persona = _awareness_persona(
+            config_options=[
+                _select_option("mode", "ask", ["ask", "code"], category="mode")
+            ]
+        )
+        persona.set_acp_mode = AsyncMock()
+        persona.set_acp_config_option = AsyncMock()
+
+        await BaseAcpPersona.update_settings(persona, {MODE_CONTROL_ID: "code"})
+
+        persona.set_acp_config_option.assert_awaited_once_with("mode", "code")
+        persona.set_acp_mode.assert_not_awaited()
 
     async def test_config_option_calls_set_acp_config_option(self):
         persona = _awareness_persona(

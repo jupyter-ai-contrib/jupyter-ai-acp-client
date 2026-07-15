@@ -177,14 +177,6 @@ class JaiAcpClient(Client):
         self._personas_by_session[session.session_id] = persona
         return session
 
-    async def set_session_model(self, model_id: str, session_id: str) -> None:
-        """
-        Set the model for an ACP session. Sends a `session/set_model` request to
-        the ACP agent.
-        """
-        conn = await self.get_connection()
-        await conn.set_session_model(model_id=model_id, session_id=session_id)
-
     async def set_session_mode(self, mode_id: str, session_id: str) -> None:
         """
         Set the mode for an ACP session. Sends a `session/set_mode` request to
