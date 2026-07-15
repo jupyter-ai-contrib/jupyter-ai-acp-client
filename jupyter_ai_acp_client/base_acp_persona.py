@@ -534,9 +534,15 @@ class BaseAcpPersona(BasePersona):
         Overrides the `BasePersona` no-op: cancels the agent's current prompt
         (via the ACP `session/cancel` notification), finalizes any messages
         streamed so far, rejects pending permissions, and clears the writing
-        state. Safe to call when nothing is in flight — a not-yet-initialized
-        session is simply ignored.
+        state.
+
+        No-op when nothing is in flight. ACP defines `session/cancel` only for an
+        ongoing prompt turn, so we skip unless the persona is actually
+        processing — the cancel handler already gates on this, but guard here too
+        for direct callers. A not-yet-initialized session is likewise ignored.
         """
+        if not self.processing:
+            return
         try:
             session_id = await self.get_session_id()
         except (AssertionError, KeyError):
