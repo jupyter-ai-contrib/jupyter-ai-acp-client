@@ -536,13 +536,11 @@ class BaseAcpPersona(BasePersona):
         streamed so far, rejects pending permissions, and clears the writing
         state.
 
-        No-op when nothing is in flight. ACP defines `session/cancel` only for an
-        ongoing prompt turn, so we skip unless the persona is actually
-        processing — the cancel handler already gates on this, but guard here too
-        for direct callers. A not-yet-initialized session is likewise ignored.
+        Only called for a persona that's actually processing (the cancel handler
+        gates on `processing`), so ACP's `session/cancel` — defined only for an
+        ongoing prompt turn — always has a turn to cancel. A not-yet-initialized
+        session is still ignored defensively.
         """
-        if not self.processing:
-            return
         try:
             session_id = await self.get_session_id()
         except (AssertionError, KeyError):
