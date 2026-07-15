@@ -2,6 +2,31 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## 0.2.0b1
+
+([Full Changelog](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/compare/v0.2.0b0...73bd7aa758fa2408f2839c125679b5c5d06d76c5))
+
+### Enhancements made
+
+- Implement the persona-manager awareness API in the ACP adapter [#138](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/138) ([@dlqqq](https://github.com/dlqqq), [@andrii-i](https://github.com/andrii-i))
+- Stamp persona/model/settings into message metadata; drop the active-persona REST [#135](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/135) ([@dlqqq](https://github.com/dlqqq), [@andrii-i](https://github.com/andrii-i))
+- Show context, token, and cost usage for the active persona in the chat input [#133](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/133) ([@andrii-i](https://github.com/andrii-i), [@dlqqq](https://github.com/dlqqq))
+
+### Maintenance and upkeep improvements
+
+- Add E2E test harness with fake ACP agents [#137](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/137) ([@dlqqq](https://github.com/dlqqq), [@andrii-i](https://github.com/andrii-i))
+
+### Contributors to this release
+
+The following people contributed discussions, new ideas, code and documentation contributions, and review.
+See [our definition of contributors](https://github-activity.readthedocs.io/en/latest/use/#how-does-this-tool-define-contributions-in-the-reports).
+
+([GitHub contributors page for this release](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/graphs/contributors?from=2026-07-01&to=2026-07-15&type=c))
+
+@andrii-i ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Aandrii-i+updated%3A2026-07-01..2026-07-15&type=Issues)) | @dlqqq ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Adlqqq+updated%3A2026-07-01..2026-07-15&type=Issues))
+
+<!-- <END NEW CHANGELOG ENTRY> -->
+
 ## 0.2.0b0
 
 ([Full Changelog](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/compare/v0.1.5...d6c67eea942dd7af350308f6271c4b36b2645ae2))
@@ -27,8 +52,6 @@ See [our definition of contributors](https://github-activity.readthedocs.io/en/l
 ([GitHub contributors page for this release](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/graphs/contributors?from=2026-05-20&to=2026-07-01&type=c))
 
 @andrii-i ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Aandrii-i+updated%3A2026-05-20..2026-07-01&type=Issues)) | @dlqqq ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Adlqqq+updated%3A2026-05-20..2026-07-01&type=Issues)) | @dominikbayerl ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Adominikbayerl+updated%3A2026-05-20..2026-07-01&type=Issues)) | @srdas ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Asrdas+updated%3A2026-05-20..2026-07-01&type=Issues))
-
-<!-- <END NEW CHANGELOG ENTRY> -->
 
 ## 0.1.5
 
