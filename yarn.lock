@@ -2293,7 +2293,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jupyter-ai/acp-client@workspace:."
   dependencies:
-    "@jupyter/chat": 0.23.0-alpha.3
+    "@jupyter/chat": ^0.23.0-alpha.4
     "@jupyter/ydoc": "*"
     "@jupyterlab/application": ^4.0.0
     "@jupyterlab/builder": ^4.0.0
@@ -2330,13 +2330,14 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@jupyter/chat@npm:0.23.0-alpha.3":
-  version: 0.23.0-alpha.3
-  resolution: "@jupyter/chat@npm:0.23.0-alpha.3"
+"@jupyter/chat@npm:^0.23.0-alpha.4":
+  version: 0.23.0-alpha.4
+  resolution: "@jupyter/chat@npm:0.23.0-alpha.4"
   dependencies:
     "@emotion/react": ^11.10.5
     "@emotion/styled": ^11.10.5
     "@jupyter/react-components": ^0.15.2
+    "@jupyter/ydoc": ^3.0.0 || ^4.0.0
     "@jupyterlab/application": ^4.6.0
     "@jupyterlab/apputils": ^4.7.0
     "@jupyterlab/codeeditor": ^4.6.0
@@ -2362,7 +2363,7 @@ __metadata:
     clsx: ^2.1.0
     react: ^18.2.0
     react-dom: ^18.2.0
-  checksum: 684436c09ca23af0ad4553ba74dea10baf914339d273f83c2b2546bc9950ac54a36939b963aad2047eca1d0d39b9754f53d94d900c10200e72e76b641057a94e
+  checksum: c6ccb131257d3b98a02f5b3124832985ac4992115cbea35a0363d4cd432866e2d5082ba2a0312905465e1c141162832dc70f960a46a96bb6b954172e4264b1e5
   languageName: node
   linkType: hard
 
@@ -2411,7 +2412,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jupyter/ydoc@npm:*, @jupyter/ydoc@npm:^4.0.0":
+"@jupyter/ydoc@npm:*, @jupyter/ydoc@npm:^3.0.0 || ^4.0.0, @jupyter/ydoc@npm:^4.0.0":
   version: 4.1.1
   resolution: "@jupyter/ydoc@npm:4.1.1"
   dependencies:
