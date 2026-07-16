@@ -2,7 +2,7 @@
 Tests for the Kiro-scoped ACP client and persona.
 
 kiro-cli's ACP surface is non-standard, so all of its handling lives in
-`KiroAcpClient` (`acp_personas/kiro_client.py`) and `KiroAcpPersona`
+`KiroAcpClient` (`kiro_client.py`) and `KiroAcpPersona`
 (`acp_personas/kiro.py`) rather than the generic `JaiAcpClient` /
 `BaseAcpPersona`. These tests cover:
 
@@ -38,12 +38,24 @@ with patch("shutil.which", return_value="/usr/bin/kiro-cli"), patch(
     return_value=MagicMock(returncode=0, stdout="kiro-cli 2.12.3", stderr=""),
 ):
     from jupyter_ai_acp_client.acp_personas.kiro import KiroAcpPersona
-from jupyter_ai_acp_client.acp_personas.kiro_client import (
+from jupyter_ai_acp_client.kiro_client import (
     KiroAcpClient,
+    KiroCommand,
     KiroCommands,
+    KiroMeteringUsage,
     KiroMetadata,
+    KiroModelOption,
     KiroModels,
 )
+
+_ALL_KIRO_MODELS = [
+    KiroModels,
+    KiroModelOption,
+    KiroMetadata,
+    KiroMeteringUsage,
+    KiroCommands,
+    KiroCommand,
+]
 
 
 SESSION_ID = "sess-1"
@@ -111,6 +123,44 @@ def _kiro_client(send_request_return=None):
 
 
 class TestKiroModels:
+    @pytest.mark.parametrize("model", _ALL_KIRO_MODELS)
+    def test_missing_fields_never_raise(self, model):
+        # Every field is optional: an empty payload validates to all-None/defaults.
+        model.model_validate({})
+
+    @pytest.mark.parametrize("model", _ALL_KIRO_MODELS)
+    def test_added_unknown_fields_never_raise(self, model):
+        # Fields Kiro might add in the future are ignored, never rejected.
+        model.model_validate(
+            {"brandNewFieldKiroAdded": {"nested": [1, 2, 3]}, "another": 5}
+        )
+
+    def test_wrong_typed_fields_never_raise(self):
+        # Every known field present but the wrong type: each degrades to
+        # None/empty rather than raising, so a shape change can't crash parsing.
+        assert KiroModels.model_validate(
+            {"currentModelId": 123, "availableModels": "not-a-list"}
+        ).available_models is None
+        meta = KiroMetadata.model_validate(
+            {
+                "sessionId": [1],
+                "contextUsagePercentage": {},
+                "meteringUsage": 7,
+                "turnDurationMs": "not-a-number",
+            }
+        )
+        assert meta.session_id is None
+        assert meta.context_usage_percentage is None
+        assert meta.metering_usage is None
+        assert meta.turn_duration_ms is None
+        cmds = KiroCommands.model_validate({"sessionId": 5, "commands": "not-a-list"})
+        assert cmds.session_id is None
+        assert cmds.commands is None
+        cmd = KiroCommand.model_validate(
+            {"name": 5, "description": ["x"], "meta": "not-a-dict"}
+        )
+        assert cmd.name is None and cmd.description is None and cmd.meta is None
+
     def test_metadata_percentage_coercion(self):
         # A genuine number is kept; anything else is dropped rather than coerced.
         assert KiroMetadata.model_validate(
@@ -433,6 +483,17 @@ class TestKiroUsage:
         )
 
         assert persona.get_usage().cost_amount == pytest.approx(0.04)
+
+    async def test_metadata_wholesale_bad_shape_does_not_raise(self):
+        # A wholesale surprise (non-object params) is backstopped by _safe_parse:
+        # no persona resolves and nothing raises.
+        client, _ = _kiro_client()
+        persona = _kiro_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        await client.ext_notification("kiro.dev/metadata", ["not", "an", "object"])
+
+        assert persona.get_usage().context_percent is None
 
     async def test_two_sessions_usage_isolation(self):
         """A usage notification for one Kiro session updates only that session's

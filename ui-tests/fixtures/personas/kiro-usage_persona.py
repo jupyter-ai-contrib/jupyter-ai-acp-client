@@ -16,7 +16,7 @@ import sys
 
 import jupyter_ai_acp_client
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
-from jupyter_ai_acp_client.acp_personas.kiro_client import KiroAcpClient
+from jupyter_ai_acp_client.kiro_client import KiroAcpClient
 from jupyter_ai_persona_manager import PersonaDefaults
 from jupyterlab_chat.models import Message
 

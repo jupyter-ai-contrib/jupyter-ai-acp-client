@@ -14,7 +14,7 @@ from jupyter_ai_persona_manager import (
 from jupyterlab_chat.models import Message
 from ..base_acp_persona import BaseAcpPersona
 from ..default_acp_client import JaiAcpClient
-from .kiro_client import KiroAcpClient, KiroModels
+from ..kiro_client import KiroAcpClient, KiroModels
 
 # Raise `PersonaRequirementsUnmet` if `kiro-cli` not installed
 if shutil.which("kiro-cli") is None:

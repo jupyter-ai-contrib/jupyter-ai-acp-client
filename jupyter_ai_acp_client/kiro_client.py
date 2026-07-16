@@ -28,7 +28,7 @@ misread.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar
 
 from acp.meta import AGENT_METHODS
 from acp.schema import (
@@ -40,15 +40,49 @@ from acp.schema import (
 from acp.utils import serialize_params, validate_model, validate_model_from_dict
 from jupyter_ai_persona_manager import CommandOption
 from jupyter_ai_persona_manager import Usage as AwarenessUsage
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from ..default_acp_client import JaiAcpClient
+from .default_acp_client import JaiAcpClient
+
+import logging
+
+log = logging.getLogger(__name__)
 
 
 def _str_or_none(value: Any) -> Any:
     """Keep a value only if it's a string; otherwise drop it to ``None`` so a
     mistyped field never raises during validation."""
     return value if isinstance(value, str) else None
+
+
+def _float_or_none(value: Any) -> Any:
+    """Keep a value only if it's a genuine int/float (not a ``bool``), returned
+    as a float; otherwise drop it to ``None``. Prevents both a raise on a
+    mistyped field (e.g. ``"x"``) and Pydantic silently coercing a numeric
+    string like ``"1.25"`` or a ``bool`` into a number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+_TModel = TypeVar("_TModel", bound=BaseModel)
+
+
+def _safe_parse(model: type[_TModel], data: Any) -> _TModel:
+    """
+    Validate ``data`` into ``model``, never raising. Each field is already
+    tolerant of missing / added / wrong-typed values, so this only backstops a
+    wholesale surprise (e.g. Kiro sends a non-object where an object is
+    expected). On any validation error it logs and returns an empty model, so a
+    payload shape change can never crash session setup or notification handling.
+    """
+    try:
+        return model.model_validate(data)
+    except ValidationError:
+        log.warning(
+            "Ignoring unexpected Kiro %s payload shape: %r", model.__name__, data
+        )
+        return model()
 
 
 class KiroModelOption(BaseModel):
@@ -102,17 +136,10 @@ class KiroMeteringUsage(BaseModel):
     unit: Optional[str] = None
     unit_plural: Optional[str] = Field(default=None, alias="unitPlural")
 
+    _coerce_value = field_validator("value", mode="before")(_float_or_none)
     _coerce_strings = field_validator("unit", "unit_plural", mode="before")(
         _str_or_none
     )
-
-    @field_validator("value", mode="before")
-    @classmethod
-    def _real_number_only(cls, value: Any) -> Any:
-        """Accept only a genuine int/float (not bool/str); else ignore it."""
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return None
-        return float(value)
 
 
 class KiroMetadata(BaseModel):
@@ -133,18 +160,9 @@ class KiroMetadata(BaseModel):
     turn_duration_ms: Optional[float] = Field(default=None, alias="turnDurationMs")
 
     _coerce_session_id = field_validator("session_id", mode="before")(_str_or_none)
-
-    @field_validator("context_usage_percentage", mode="before")
-    @classmethod
-    def _real_number_only(cls, value: Any) -> Any:
-        """
-        Accept only a genuine int/float. Guards against Pydantic coercing a
-        string like ``"1.25"`` or a ``bool`` into a float, so a malformed
-        percentage is ignored rather than misread.
-        """
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return None
-        return float(value)
+    _coerce_numbers = field_validator(
+        "context_usage_percentage", "turn_duration_ms", mode="before"
+    )(_float_or_none)
 
     @field_validator("metering_usage", mode="before")
     @classmethod
@@ -166,6 +184,11 @@ class KiroCommand(BaseModel):
     _coerce_strings = field_validator("name", "description", mode="before")(
         _str_or_none
     )
+
+    @field_validator("meta", mode="before")
+    @classmethod
+    def _dict_or_none(cls, value: Any) -> Any:
+        return value if isinstance(value, dict) else None
 
 
 class KiroCommands(BaseModel):
@@ -254,7 +277,7 @@ class KiroAcpClient(JaiAcpClient):
     def _parse_models(raw: Any) -> Optional[KiroModels]:
         """Parse the legacy ``models`` block off a raw session response, if any."""
         if isinstance(raw, dict) and isinstance(raw.get("models"), dict):
-            return KiroModels.model_validate(raw["models"])
+            return _safe_parse(KiroModels, raw["models"])
         return None
 
     async def set_session_model(self, model_id: str, session_id: str) -> None:
@@ -274,7 +297,7 @@ class KiroAcpClient(JaiAcpClient):
         and delegate everything else to the generic handler.
         """
         if method == "kiro.dev/metadata":
-            meta = KiroMetadata.model_validate(params)
+            meta = _safe_parse(KiroMetadata, params)
             persona = self._personas_by_session.get(meta.session_id)
             if persona is None:
                 return
@@ -295,7 +318,7 @@ class KiroAcpClient(JaiAcpClient):
                 persona.report_usage(usage)
             return
         if method == "kiro.dev/commands/available":
-            cmds = KiroCommands.model_validate(params)
+            cmds = _safe_parse(KiroCommands, params)
             persona = self._personas_by_session.get(cmds.session_id)
             if persona is None:
                 return
