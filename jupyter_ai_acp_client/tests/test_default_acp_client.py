@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -27,6 +26,7 @@ from jupyter_ai_persona_manager import PersonaAwareness
 
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
 from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
+from jupyter_ai_acp_client.jai_connection import JaiClientSideConnection
 
 
 SESSION_ID = "sess-1"
@@ -367,7 +367,7 @@ class TestUsageStorage:
 
 
 class TestLegacyModels:
-    """Kiro-style legacy models: captured off the raw session/new response,
+    """Kiro-style legacy models: captured off the raw session responses,
     handed over per session, applied via the legacy `session/set_model`."""
 
     MODELS = {
@@ -378,34 +378,52 @@ class TestLegacyModels:
         ],
     }
 
-    def _event(self, message):
-        return SimpleNamespace(message=message)
+    def _connection(self, response):
+        """A `JaiClientSideConnection` over a mocked inner Connection returning
+        `response` for any request, plus the (session_id, models) captures."""
+        conn = object.__new__(JaiClientSideConnection)
+        conn._conn = AsyncMock()
+        conn._conn.send_request = AsyncMock(return_value=response)
+        captured = []
+        conn.set_legacy_models_listener(
+            lambda session_id, models: captured.append((session_id, models))
+        )
+        return conn, captured
 
-    def test_session_new_result_models_are_captured(self):
+    async def test_new_session_captures_legacy_models(self):
+        conn, captured = self._connection(
+            {"sessionId": "sess-9", "models": self.MODELS}
+        )
+
+        response = await conn.new_session(cwd="/tmp", mcp_servers=[])
+
+        # The typed response still validates; the legacy field is captured.
+        assert response.session_id == "sess-9"
+        assert captured == [("sess-9", self.MODELS)]
+
+    async def test_load_session_captures_models_under_requested_id(self):
+        # A session/load response has no sessionId of its own; the capture is
+        # keyed by the requested session ID.
+        conn, captured = self._connection({"models": self.MODELS})
+
+        await conn.load_session(cwd="/tmp", session_id="sess-9", mcp_servers=[])
+
+        assert captured == [("sess-9", self.MODELS)]
+
+    async def test_response_without_models_is_not_captured(self):
+        conn, captured = self._connection({"sessionId": "sess-9", "modes": None})
+
+        await conn.new_session(cwd="/tmp", mcp_servers=[])
+
+        assert captured == []
+
+    def test_store_and_pop_round_trip(self):
         client, _, _ = _make_client_and_persona()
 
-        client._capture_legacy_models(
-            self._event(
-                {"id": 1, "result": {"sessionId": "sess-9", "models": self.MODELS}}
-            )
-        )
+        client._store_legacy_models("sess-9", self.MODELS)
 
         assert client.pop_legacy_models("sess-9") == self.MODELS
         # pop is one-shot: the captured payload is handed over once.
-        assert client.pop_legacy_models("sess-9") is None
-
-    def test_non_matching_messages_are_ignored(self):
-        client, _, _ = _make_client_and_persona()
-
-        for message in (
-            {"method": "session/update", "params": {"sessionId": "sess-9"}},
-            {"id": 2, "result": {"sessionId": "sess-9"}},
-            {"id": 3, "result": {"sessionId": "sess-9", "models": ["not-a-dict"]}},
-            {"id": 4, "result": "ok"},
-            None,
-        ):
-            client._capture_legacy_models(self._event(message))
-
         assert client.pop_legacy_models("sess-9") is None
 
     async def test_set_session_model_sends_legacy_request(self):

@@ -292,6 +292,9 @@ class BaseAcpPersona(BasePersona):
         # recreation (e.g. a server restart that creates a fresh ACP session).
         # A model selection needs no special handling here: models are ordinary
         # config options now, so they ride the config-option reapply loop below.
+        # The exception is a legacy-channel model choice (kiro-cli), which is
+        # kept agent-side on the session: a resumed session keeps it, a fresh
+        # session resets to the agent's default.
         stored_mode_id = self._get_stored_mode_choice()
         advertised_mode_ids = {m.id for m in self._acp_modes}
         if (

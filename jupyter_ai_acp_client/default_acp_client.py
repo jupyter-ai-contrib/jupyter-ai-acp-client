@@ -119,7 +119,7 @@ class JaiAcpClient(Client):
     async def _init_connection(self) -> tuple[JaiClientSideConnection, InitializeResponse]:
         proc = self.agent_subprocess
         conn = JaiClientSideConnection(self, proc.stdin, proc.stdout)
-        conn.add_raw_observer(self._capture_legacy_models)
+        conn.set_legacy_models_listener(self._store_legacy_models)
         init_response = await conn.initialize(
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=ClientCapabilities(
@@ -134,24 +134,13 @@ class JaiAcpClient(Client):
         conn, _ = await self._connection_future
         return conn
 
-    def _capture_legacy_models(self, event: Any) -> None:
+    def _store_legacy_models(self, session_id: str, models: dict) -> None:
         """
-        Record the legacy `models` field some agents (e.g. kiro-cli) attach to
-        their `session/new` response. The field predates ACP v1, so the typed
-        SDK response models discard it; this reads it off the raw JSON-RPC
-        message instead. Keyed by session ID so the session create/load path
-        can hand it to the right persona.
+        Record the legacy `models` payload the connection captured off a
+        session response (see `JaiClientSideConnection`), keyed by session ID
+        until the session create/load path hands it to the right persona.
         """
-        message = getattr(event, "message", None)
-        if not isinstance(message, dict):
-            return
-        result = message.get("result")
-        if (
-            isinstance(result, dict)
-            and isinstance(result.get("sessionId"), str)
-            and isinstance(result.get("models"), dict)
-        ):
-            self._legacy_models_by_session[result["sessionId"]] = result["models"]
+        self._legacy_models_by_session[session_id] = models
 
     def pop_legacy_models(self, session_id: str) -> dict | None:
         """
