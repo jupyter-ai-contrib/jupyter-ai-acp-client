@@ -797,6 +797,33 @@ class JaiAcpClient(Client):
                 persona.update_acp_context_percent(float(percent))
                 self._sync_awareness_usage(persona)
             return
+        # Kiro advertises its slash commands as a vendor extension notification
+        # (`_kiro.dev/commands/available`) instead of the standard
+        # `available_commands_update`. Normalize and publish them over the
+        # awareness channel the same way (see `session_update`).
+        if method == "kiro.dev/commands/available":
+            persona = self._personas_by_session.get(params.get("sessionId"))
+            commands = params.get("commands")
+            if persona is not None and isinstance(commands, list):
+                options = []
+                for cmd in commands:
+                    if not isinstance(cmd, dict):
+                        continue
+                    name = cmd.get("name")
+                    if not isinstance(name, str) or not name:
+                        continue
+                    description = cmd.get("description")
+                    options.append(
+                        CommandOption(
+                            name=name if name.startswith("/") else "/" + name,
+                            description=description
+                            if isinstance(description, str)
+                            else None,
+                        )
+                    )
+                if options:
+                    persona.report_slash_commands(options)
+            return
         raise RequestError.method_not_found(method)
 
     async def stop_streaming(self, session_id: str) -> None:

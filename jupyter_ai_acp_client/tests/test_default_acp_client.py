@@ -418,6 +418,76 @@ class TestLegacyModels:
         )
 
 
+class TestKiroCommands:
+    """Kiro's vendor commands notification is published as slash commands."""
+
+    async def test_commands_notification_publishes_slash_commands(self):
+        client, _, persona = _make_client_and_persona()
+        persona.report_slash_commands = MagicMock()
+
+        await client.ext_notification(
+            "kiro.dev/commands/available",
+            {
+                "sessionId": SESSION_ID,
+                "commands": [
+                    {"name": "/model", "description": "Select a model"},
+                    {
+                        "name": "compact",
+                        "description": "Compact context",
+                        "meta": {"local": True},
+                    },
+                    {"name": "/clear"},
+                ],
+                "tools": [],
+            },
+        )
+
+        commands = persona.report_slash_commands.call_args[0][0]
+        # Names are leading-slash normalized, like the standard update path.
+        assert [(c.name, c.description) for c in commands] == [
+            ("/model", "Select a model"),
+            ("/compact", "Compact context"),
+            ("/clear", None),
+        ]
+
+    async def test_commands_for_unknown_session_are_ignored(self):
+        client, _, persona = _make_client_and_persona()
+        persona.report_slash_commands = MagicMock()
+
+        await client.ext_notification(
+            "kiro.dev/commands/available",
+            {"sessionId": "nope", "commands": [{"name": "/model"}]},
+        )
+
+        persona.report_slash_commands.assert_not_called()
+
+    async def test_malformed_command_entries_are_skipped(self):
+        client, _, persona = _make_client_and_persona()
+        persona.report_slash_commands = MagicMock()
+
+        await client.ext_notification(
+            "kiro.dev/commands/available",
+            {
+                "sessionId": SESSION_ID,
+                "commands": ["not-a-dict", {}, {"name": 5}, {"name": "/ok"}],
+            },
+        )
+
+        commands = persona.report_slash_commands.call_args[0][0]
+        assert [(c.name, c.description) for c in commands] == [("/ok", None)]
+
+    async def test_empty_commands_keep_previous_advertisement(self):
+        client, _, persona = _make_client_and_persona()
+        persona.report_slash_commands = MagicMock()
+
+        await client.ext_notification(
+            "kiro.dev/commands/available",
+            {"sessionId": SESSION_ID, "commands": []},
+        )
+
+        persona.report_slash_commands.assert_not_called()
+
+
 class TestAwarenessPush:
     """The client pushes ACP updates onto the persona's awareness API too."""
 
