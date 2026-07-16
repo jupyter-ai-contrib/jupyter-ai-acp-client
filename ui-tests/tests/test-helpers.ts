@@ -38,7 +38,8 @@ export enum FixturePersona {
   BothMode = 'both-mode',
   DuplicateGroups = 'duplicate-groups',
   SlashCommands = 'slash-commands',
-  SlowStream = 'slow-stream'
+  SlowStream = 'slow-stream',
+  KiroUsage = 'kiro-usage'
 }
 
 interface FixturePersonaInfo {
@@ -60,7 +61,8 @@ export const FIXTURE_PERSONAS: Record<FixturePersona, FixturePersonaInfo> = {
   [FixturePersona.BothMode]: { name: 'Both Mode Agent' },
   [FixturePersona.DuplicateGroups]: { name: 'Duplicate Groups Agent' },
   [FixturePersona.SlashCommands]: { name: 'Slash Commands Agent' },
-  [FixturePersona.SlowStream]: { name: 'Slow Stream Agent' }
+  [FixturePersona.SlowStream]: { name: 'Slow Stream Agent' },
+  [FixturePersona.KiroUsage]: { name: 'Kiro Usage Agent' }
 };
 
 const PICKER = '.jp-jai-personaControls-persona-btn';
