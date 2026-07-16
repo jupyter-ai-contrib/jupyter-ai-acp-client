@@ -293,6 +293,23 @@ class TestKiroClientSession:
 
         persona.set_kiro_models.assert_called_once_with(None)
 
+    async def test_create_session_persona_without_set_kiro_models(self):
+        # The client backs any BaseAcpPersona, not just KiroAcpPersona. A persona
+        # that doesn't surface a model picker (e.g. the usage-only E2E fixture)
+        # has no `set_kiro_models`; the client must not require it.
+        client, conn = _kiro_client({"sessionId": "sess-9", "models": MODELS})
+
+        class _NoModelSetter:
+            def get_chat_dir(self):
+                return "/tmp"
+
+        persona = _NoModelSetter()
+
+        response = await client.create_session(persona)
+
+        assert response.session_id == "sess-9"
+        assert client._personas_by_session["sess-9"] is persona
+
     async def test_set_session_model_sends_raw_request(self):
         client, conn = _kiro_client()
 

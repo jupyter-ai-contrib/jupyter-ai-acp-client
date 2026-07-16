@@ -243,7 +243,7 @@ class KiroAcpClient(JaiAcpClient):
                 )
             ),
         )
-        persona.set_kiro_models(self._parse_models(raw))
+        self._push_models(persona, self._parse_models(raw))
         response = validate_model(raw, NewSessionResponse)
         self._personas_by_session[response.session_id] = persona
         return response
@@ -268,10 +268,22 @@ class KiroAcpClient(JaiAcpClient):
                 )
             ),
         )
-        persona.set_kiro_models(self._parse_models(raw))
+        self._push_models(persona, self._parse_models(raw))
         response = validate_model_from_dict(raw, LoadSessionResponse)
         self._personas_by_session[session_id] = persona
         return response
+
+    @staticmethod
+    def _push_models(persona, models: Optional[KiroModels]) -> None:
+        """
+        Hand the captured models to the persona if it accepts them. Only
+        `KiroAcpPersona` surfaces a model picker (via `set_kiro_models`); other
+        personas backed by this client (e.g. a usage-only test fixture) don't,
+        so this is a no-op for them.
+        """
+        setter = getattr(persona, "set_kiro_models", None)
+        if callable(setter):
+            setter(models)
 
     @staticmethod
     def _parse_models(raw: Any) -> Optional[KiroModels]:
