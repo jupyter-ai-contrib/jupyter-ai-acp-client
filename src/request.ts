@@ -62,22 +62,3 @@ export async function submitPermissionDecision(
     })
   });
 }
-
-/**
- * Interrupt/stop the in-progress agent response(s) in a chat.
- *
- * Calls the persona-manager cancel endpoint, which asks every persona in the
- * chat to cancel its response (`BasePersona.cancel_response()`). This is
- * backend-agnostic: ACP personas cancel their agent turn, others no-op.
- */
-export async function stopStreaming(chatPath: string): Promise<void> {
-  try {
-    await requestAPI(
-      'api/ai',
-      `personas/cancel?chat_path=${encodeURIComponent(chatPath)}`,
-      { method: 'POST' }
-    );
-  } catch (e) {
-    console.warn('Error stopping stream: ', e);
-  }
-}

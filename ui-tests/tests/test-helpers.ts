@@ -63,13 +63,13 @@ export const FIXTURE_PERSONAS: Record<FixturePersona, FixturePersonaInfo> = {
   [FixturePersona.SlowStream]: { name: 'Slow Stream Agent' }
 };
 
-const PICKER = '.jp-jupyter-ai-acp-client-personaControls-persona-btn';
+const PICKER = '.jp-jai-personaControls-persona-btn';
 // The controls row renders each control twice: a real visible copy and an
 // aria-hidden, `inert` measurement copy (used only to size the row). The
 // direct-child combinator targets the visible buttons — the duplicates in the
 // measurement copy are nested one level deeper and compute as `hidden`.
 const VISIBLE_CONTROL_BTN =
-  '.jp-jupyter-ai-acp-client-personaControls-controls > .jp-jupyter-ai-acp-client-personaControls-control-btn';
+  '.jp-jai-personaControls-controls > .jp-jai-personaControls-control-btn';
 const INPUT = '.jp-chat-input-container';
 const MESSAGE = '.jp-chat-rendered-message';
 // Each slash-command completion in the input's autocomplete popup renders its
@@ -82,10 +82,10 @@ const STOP_BUTTON = '.jp-jupyter-ai-acp-client-stopButton';
 // The usage chip and the parts that distinguish which usage channel an agent
 // reported: a context ring + percent (session/usage) and/or a session-token
 // breakdown in the popover card (response.usage). See persona-controls.tsx.
-const USAGE_CHIP = '.jp-jupyter-ai-acp-client-usage-chip';
-const USAGE_RING = '.jp-jupyter-ai-acp-client-usage-ring';
-const USAGE_PCT = '.jp-jupyter-ai-acp-client-usage-pct';
-const USAGE_CARD = '.jp-jupyter-ai-acp-client-usage-card';
+const USAGE_CHIP = '.jp-jai-usage-chip';
+const USAGE_RING = '.jp-jai-usage-ring';
+const USAGE_PCT = '.jp-jai-usage-pct';
+const USAGE_CARD = '.jp-jai-usage-card';
 
 const TIMEOUT = 30000;
 

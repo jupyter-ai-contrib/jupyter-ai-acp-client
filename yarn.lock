@@ -2293,7 +2293,6 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jupyter-ai/acp-client@workspace:."
   dependencies:
-    "@jupyter-ai/persona-manager": ^0.1.0-b1
     "@jupyter/chat": 0.23.0-alpha.3
     "@jupyter/ydoc": "*"
     "@jupyterlab/application": ^4.0.0
@@ -2330,18 +2329,6 @@ __metadata:
     yjs: ^13.5.0
   languageName: unknown
   linkType: soft
-
-"@jupyter-ai/persona-manager@npm:^0.1.0-b1":
-  version: 0.1.0-b1
-  resolution: "@jupyter-ai/persona-manager@npm:0.1.0-b1"
-  dependencies:
-    "@jupyter/ydoc": "*"
-    "@jupyterlab/application": ^4.0.0
-    "@jupyterlab/coreutils": ^6.0.0
-    "@jupyterlab/services": ^7.0.0
-  checksum: 6f8db8bfe3850d2f864d4f5564bbd83ea1c1058dbd65db4f0e062790e412c8775778dad03c99e5f4a4e03c369a95c00cac8a5607e3f0c3b72fb818350a0cf1c4
-  languageName: node
-  linkType: hard
 
 "@jupyter/chat@npm:0.23.0-alpha.3":
   version: 0.23.0-alpha.3

@@ -56,7 +56,6 @@
         "watch:labextension": "jupyter labextension watch ."
     },
     "dependencies": {
-        "@jupyter-ai/persona-manager": "^0.1.0-b1",
         "@jupyter/chat": "0.23.0-alpha.3",
         "@jupyter/ydoc": "*",
         "@jupyterlab/application": "^4.0.0",
@@ -118,15 +117,8 @@
         },
         "extension": true,
         "outputDir": "jupyter_ai_acp_client/labextension",
-        "disabledExtensions": [
-            "jupyterlab-chat-extension:inputToolbarFactory"
-        ],
         "sharedPackages": {
             "@jupyter/chat": {
-                "bundled": false,
-                "singleton": true
-            },
-            "@jupyter-ai/persona-manager": {
                 "bundled": false,
                 "singleton": true
             }
