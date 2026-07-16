@@ -770,20 +770,53 @@ class JaiAcpClient(Client):
         raise RequestError.method_not_found(method)
 
     async def ext_notification(self, method: str, params: dict) -> None:
-        # Kiro streams context usage as a vendor extension notification
+        # Kiro reports usage as a vendor extension notification
         # (`_kiro.dev/metadata`; the SDK strips the underscore) instead of the
-        # standard `usage_update`. Record the percentage it reports and
-        # rebroadcast so the toolbar can show how full the agent's context
-        # window is.
+        # standard channels: a context percentage streamed during the turn, and
+        # per-turn `meteringUsage` credits attached at turn end. Record both and
+        # rebroadcast so the toolbar can show context fill and session cost.
         if method == "kiro.dev/metadata":
             persona = self._personas_by_session.get(params.get("sessionId"))
+            if persona is None:
+                return
+            recorded = False
             percent = params.get("contextUsagePercentage")
-            if (
-                persona is not None
-                and isinstance(percent, (int, float))
-                and not isinstance(percent, bool)
-            ):
+            if isinstance(percent, (int, float)) and not isinstance(percent, bool):
                 persona.update_acp_context_percent(float(percent))
+                recorded = True
+            metering = params.get("meteringUsage")
+            if isinstance(metering, list):
+                total = 0.0
+                unit = None
+                valid = False
+                for entry in metering:
+                    if not isinstance(entry, dict):
+                        continue
+                    value = entry.get("value")
+                    if not isinstance(value, (int, float)) or isinstance(
+                        value, bool
+                    ):
+                        continue
+                    unit_plural = entry.get("unitPlural")
+                    entry_unit = (
+                        unit_plural
+                        if isinstance(unit_plural, str) and unit_plural
+                        else None
+                    )
+                    # One unit per total: adopt the first named unit and skip
+                    # entries metered in a different one, so amounts in
+                    # different units are never summed together.
+                    if entry_unit is not None:
+                        if unit is None:
+                            unit = entry_unit
+                        elif entry_unit != unit:
+                            continue
+                    total += float(value)
+                    valid = True
+                if valid:
+                    persona.add_acp_metering(total, unit)
+                    recorded = True
+            if recorded:
                 self._sync_awareness_usage(persona)
             return
         # Kiro advertises its slash commands as a vendor extension notification

@@ -1,7 +1,8 @@
 """
-Fixture persona: an ACP persona whose agent reports context usage only as a
-bare percentage in a `_kiro.dev/metadata` extension notification, the way
-kiro-cli's v2 engine does, with nothing on the standard usage channels. See
+Fixture persona: an ACP persona whose agent reports usage the way kiro-cli's
+v2 engine does: a bare context percentage in `_kiro.dev/metadata` extension
+notifications plus per-turn metering credits, with nothing on the standard
+usage channels. See
 ../agents/usage_agent.py.
 
 Not part of the shipped package. `installPersonas` copies it into a suite's

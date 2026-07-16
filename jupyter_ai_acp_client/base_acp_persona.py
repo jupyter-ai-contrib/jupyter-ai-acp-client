@@ -150,6 +150,21 @@ class BaseAcpPersona(BasePersona):
     default ACP client.
     """
 
+    _acp_metering_total: Optional[float]
+    """
+    Session cost accumulated from per-turn metering reports, for agents that
+    meter usage over a vendor extension (e.g. Kiro's `meteringUsage` credits)
+    instead of a standard cost. Summed client-side per turn, so it resets when
+    the server restarts even though the agent session itself is resumed.
+    `None` until the agent reports metering. Set by the default ACP client.
+    """
+
+    _acp_metering_unit: Optional[str]
+    """
+    The unit of `_acp_metering_total` as the agent names it (e.g. "credits").
+    `None` until the agent reports metering with a unit.
+    """
+
     _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
     """
     Maximum number of recent messages to include in the history context injected
@@ -198,6 +213,8 @@ class BaseAcpPersona(BasePersona):
         self._acp_context_usage = None
         self._acp_session_usage = None
         self._acp_context_percent = None
+        self._acp_metering_total = None
+        self._acp_metering_unit = None
         self._acp_legacy_models = None
 
     async def before_agent_subprocess(self) -> None:
@@ -905,6 +922,11 @@ class BaseAcpPersona(BasePersona):
                 usage.cost_currency = context.cost.currency
         if self._acp_context_percent is not None:
             usage.context_percent = self._acp_context_percent
+        # Metered cost (e.g. kiro credits) fills the cost slots only when the
+        # standard channel didn't provide a cost.
+        if usage.cost_amount is None and self._acp_metering_total is not None:
+            usage.cost_amount = self._acp_metering_total
+            usage.cost_currency = self._acp_metering_unit or "credits"
         tokens = self._acp_session_usage
         if tokens is not None:
             usage.input_tokens = tokens.input_tokens
@@ -1025,6 +1047,24 @@ class BaseAcpPersona(BasePersona):
     def update_acp_context_percent(self, percent: float) -> None:
         """Record a percentage-only context fill report from the ACP agent."""
         self._acp_context_percent = percent
+
+    @property
+    def acp_metering_total(self) -> Optional[float]:
+        """
+        Session cost accumulated from the agent's per-turn metering reports
+        (see `_acp_metering_total`). `None` when the agent has not metered.
+        """
+        return self._acp_metering_total
+
+    def add_acp_metering(self, amount: float, unit: Optional[str] = None) -> None:
+        """
+        Add one turn's metered cost to the session total. The first unit the
+        agent names sticks for the whole session, so a later report that omits
+        the unit (or names another) never relabels the accumulated total.
+        """
+        self._acp_metering_total = (self._acp_metering_total or 0.0) + amount
+        if unit and self._acp_metering_unit is None:
+            self._acp_metering_unit = unit
 
     async def handle_uncaught_exception(self, exc: Exception) -> None:
         """Show structured error info for ACP RequestError inside the standard dropdown."""

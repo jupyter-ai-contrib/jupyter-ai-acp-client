@@ -78,6 +78,8 @@ def _awareness_persona(
     context=None,
     session_usage=None,
     context_percent=None,
+    metering_total=None,
+    metering_unit=None,
     legacy_models=None,
 ):
     """A real `BaseAcpPersona` built without `__init__`, carrying the raw ACP
@@ -106,6 +108,8 @@ def _awareness_persona(
     persona._acp_context_usage = context
     persona._acp_session_usage = session_usage
     persona._acp_context_percent = context_percent
+    persona._acp_metering_total = metering_total
+    persona._acp_metering_unit = metering_unit
     persona._acp_legacy_models = legacy_models
     return persona
 
@@ -426,6 +430,35 @@ class TestSyncAwarenessUsage:
         assert usage.total_tokens == 1_240
         assert usage.cached_read_tokens == 100
         assert usage.thought_tokens == 50
+
+    def test_metered_cost_fills_cost_slots(self):
+        # kiro-style metering: a client-accumulated total in the agent's own
+        # unit rides the cost slots when no standard cost was reported.
+        persona = _awareness_persona(metering_total=0.09, metering_unit="credits")
+
+        persona._sync_awareness_usage()
+
+        usage = persona.get_usage()
+        assert usage.cost_amount == 0.09
+        assert usage.cost_currency == "credits"
+
+    def test_standard_cost_wins_over_metering(self):
+        persona = _awareness_persona(
+            context=UsageUpdate(
+                sessionUpdate="usage_update",
+                used=1,
+                size=2,
+                cost=Cost(amount=0.41, currency="USD"),
+            ),
+            metering_total=0.09,
+            metering_unit="credits",
+        )
+
+        persona._sync_awareness_usage()
+
+        usage = persona.get_usage()
+        assert usage.cost_amount == 0.41
+        assert usage.cost_currency == "USD"
 
     def test_nothing_reported_leaves_usage_empty(self):
         persona = _awareness_persona()

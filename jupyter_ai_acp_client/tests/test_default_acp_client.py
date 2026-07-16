@@ -264,6 +264,8 @@ def _real_usage_persona():
     persona._acp_context_usage = None
     persona._acp_session_usage = None
     persona._acp_context_percent = None
+    persona._acp_metering_total = None
+    persona._acp_metering_unit = None
     persona.log = logging.getLogger("test")
     # A real awareness slot so `_sync_awareness_usage` -> `report_usage`
     # round-trips through the real typed properties.
@@ -335,7 +337,33 @@ class TestUsageStorage:
 
         assert persona.acp_context_percent is None
 
-    async def test_kiro_metadata_without_percentage_records_nothing(self):
+    async def test_kiro_turn_end_metering_accumulates_cost(self):
+        client, _, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        # Two real turn-end payloads: the percentage rides along and the
+        # per-turn credits sum client-side into a session total.
+        for percent, credits in ((1.77, 0.05038), (1.78, 0.04129)):
+            await client.ext_notification(
+                "kiro.dev/metadata",
+                {
+                    "sessionId": SESSION_ID,
+                    "contextUsagePercentage": percent,
+                    "meteringUsage": [
+                        {"value": credits, "unit": "credit", "unitPlural": "credits"}
+                    ],
+                    "turnDurationMs": 1758,
+                },
+            )
+
+        assert persona.acp_context_percent == pytest.approx(1.78)
+        assert persona.acp_metering_total == pytest.approx(0.09167)
+        usage = persona.get_usage()
+        assert usage.cost_amount == pytest.approx(0.09167)
+        assert usage.cost_currency == "credits"
+
+    async def test_kiro_metering_without_percentage_records_cost_only(self):
         client, _, _ = _make_client_and_persona()
         persona = _real_usage_persona()
         client._personas_by_session[SESSION_ID] = persona
@@ -352,6 +380,66 @@ class TestUsageStorage:
         )
 
         assert persona.acp_context_percent is None
+        assert persona.acp_metering_total == pytest.approx(0.031)
+
+    async def test_kiro_malformed_metering_entries_are_skipped(self):
+        client, _, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        await client.ext_notification(
+            "kiro.dev/metadata",
+            {
+                "sessionId": SESSION_ID,
+                "meteringUsage": [
+                    "not-a-dict",
+                    {"value": "0.5"},
+                    {"value": True},
+                    {"value": 0.03, "unitPlural": "credits"},
+                ],
+            },
+        )
+
+        assert persona.acp_metering_total == pytest.approx(0.03)
+        assert persona.get_usage().cost_currency == "credits"
+
+    async def test_kiro_metering_unit_persists_when_later_report_omits_it(self):
+        client, _, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        for payload in (
+            [{"value": 0.05, "unitPlural": "credits"}],
+            [{"value": 0.03}],
+        ):
+            await client.ext_notification(
+                "kiro.dev/metadata",
+                {"sessionId": SESSION_ID, "meteringUsage": payload},
+            )
+
+        assert persona.acp_metering_total == pytest.approx(0.08)
+        # The first named unit sticks; a unit-less later report never resets it.
+        assert persona.get_usage().cost_currency == "credits"
+
+    async def test_kiro_mixed_units_in_one_payload_keep_the_first(self):
+        client, _, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        await client.ext_notification(
+            "kiro.dev/metadata",
+            {
+                "sessionId": SESSION_ID,
+                "meteringUsage": [
+                    {"value": 0.05, "unitPlural": "credits"},
+                    {"value": 99.0, "unitPlural": "tokens"},
+                ],
+            },
+        )
+
+        # Amounts in a different unit are skipped, never summed together.
+        assert persona.acp_metering_total == pytest.approx(0.05)
+        assert persona.get_usage().cost_currency == "credits"
 
     async def test_kiro_metadata_with_malformed_percentage_records_nothing(self):
         client, _, _ = _make_client_and_persona()

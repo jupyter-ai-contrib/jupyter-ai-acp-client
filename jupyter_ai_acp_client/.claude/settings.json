@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run:*)",
+      "Bash(just sync:*)",
+      "Bash(python3 -c \"import sys,json; reviews=json.load\\(sys.stdin\\); [print\\(r.get\\('path',''\\), r.get\\('line',''\\), r.get\\('body',''\\)[:500]\\) for r in reviews]\")",
+      "Bash(python3 -c \" import sys, json comments = json.load\\(sys.stdin\\) for c in comments: print\\(f'--- {c[\\\\\"user\\\\\"][\\\\\"login\\\\\"]} on {c[\\\\\"path\\\\\"]}:{c.get\\(\\\\\"line\\\\\",\\\\\"\\\\\"\\)} ---'\\) print\\(c['body'][:600]\\) print\\(\\) \")",
+      "Bash(kiro-cli acp:*)",
+      "Bash(kiro-cli --version)",
+      "Bash(python3 -c \"import jupyter_server; import inspect; src = inspect.getsource\\(jupyter_server.serverapp.ServerApp\\); lines = [l for l in src.split\\('\\\\n'\\) if 'stop_extension' in l or 'stop_app' in l or 'SIGINT' in l or 'signal' in l.lower\\(\\)]; print\\('\\\\n'.join\\(lines[:30]\\)\\)\")",
+      "Read(//Users/aieroshe/Documents/jupyter-ai-feedstocks/**)"
+    ]
+  }
+}

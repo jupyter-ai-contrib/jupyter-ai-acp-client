@@ -10,9 +10,10 @@ ACP v1 exposes usage through two distinct channels:
   cumulative session token counts (input/output/total, …). This is currently
   **experimental**: https://agentclientprotocol.com/rfds/end-turn-token-usage
 
-Some agents use neither: kiro-cli (v2 engine, 2.12.1) streams a bare context
-percentage in a `_kiro.dev/metadata` extension notification, which the client
-records through its `ext_notification` hook.
+Some agents use neither: kiro-cli (v2 engine) streams a bare context
+percentage in `_kiro.dev/metadata` extension notifications and attaches
+per-turn metering credits to the turn-end one; the client records both
+through its `ext_notification` hook.
 
 The client surfaces these differently in the toolbar's usage chip (context fill
 renders a ring + percent; session tokens render a token count and a breakdown
@@ -25,7 +26,7 @@ reports on each turn:
     usage_agent.py --mode session    # session/usage only (context [+ cost])
     usage_agent.py --mode response   # response.usage only (session tokens)
     usage_agent.py --mode both       # both channels
-    usage_agent.py --mode kiro       # _kiro.dev/metadata percentage only
+    usage_agent.py --mode kiro       # _kiro.dev/metadata percentage + credits
 
 A fixture persona wraps each mode (see ../personas/*-usage_persona.py). Method
 signatures match the installed agent-client-protocol (see the pin in
@@ -51,7 +52,7 @@ from acp.schema import Cost, Usage, UsageUpdate
 # Fixed numbers per mode, chosen so each renders a distinct, easily-asserted UI:
 #   session  -> 1200 / 4000 = 30% context fill, plus a cost
 #   both     -> 2000 / 8000 = 25% context fill, plus a cost
-#   kiro     -> a bare 42% context fill, no token counts, no cost
+#   kiro     -> a bare 42% context fill plus 0.05 credits, no token counts
 # Token totals are cumulative session counts, reported on the prompt response.
 CONTEXT = {
     "session": UsageUpdate(
@@ -69,6 +70,7 @@ CONTEXT = {
 }
 TOKENS = Usage(input_tokens=1000, output_tokens=500, total_tokens=1500)
 KIRO_PERCENT = 42.0
+KIRO_CREDITS = 0.05
 
 REPLY = "usage reported"
 
@@ -111,12 +113,28 @@ class UsageAgent(Agent):
                 update=CONTEXT[self._mode],
             )
 
-        # vendor extension channel: kiro-cli streams a bare percentage in a
-        # `_kiro.dev/metadata` notification (the SDK adds the `_` prefix).
+        # vendor extension channel: kiro-cli streams a bare percentage in
+        # `_kiro.dev/metadata` notifications (the SDK adds the `_` prefix) and
+        # attaches per-turn metering credits to the turn-end one.
         if self._mode == "kiro":
             await self._conn.ext_notification(
                 "kiro.dev/metadata",
                 {"sessionId": session_id, "contextUsagePercentage": KIRO_PERCENT},
+            )
+            await self._conn.ext_notification(
+                "kiro.dev/metadata",
+                {
+                    "sessionId": session_id,
+                    "contextUsagePercentage": KIRO_PERCENT,
+                    "meteringUsage": [
+                        {
+                            "value": KIRO_CREDITS,
+                            "unit": "credit",
+                            "unitPlural": "credits",
+                        }
+                    ],
+                    "turnDurationMs": 1500,
+                },
             )
 
         # end-turn token usage channel: cumulative session tokens on the response.
