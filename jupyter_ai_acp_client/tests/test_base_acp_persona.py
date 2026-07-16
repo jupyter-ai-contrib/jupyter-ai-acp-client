@@ -60,7 +60,7 @@ def _make_message(body: str, attachment_ids: list[str] | None = None):
     return msg
 
 
-def _make_session_init_persona(
+def _make_real_session_persona(
     *,
     error: Exception | None = None,
     existing_session_id: str | None = "old-session",
@@ -219,7 +219,7 @@ class TestLoadSessionRecovery:
 
     async def test_any_load_session_error_creates_new_session(self):
         """Any load_session failure falls back to a new session."""
-        persona, client = _make_session_init_persona(error=Exception("load failed"))
+        persona, client = _make_real_session_persona(error=Exception("load failed"))
 
         await BaseAcpPersona._init_client_session(persona)
 
@@ -229,7 +229,7 @@ class TestLoadSessionRecovery:
 
     async def test_no_existing_session_creates_new_session(self):
         """When no session ID is in metadata, _create_session is called directly."""
-        persona, client = _make_session_init_persona(existing_session_id=None)
+        persona, client = _make_real_session_persona(existing_session_id=None)
 
         await BaseAcpPersona._init_client_session(persona)
 
@@ -239,7 +239,7 @@ class TestLoadSessionRecovery:
 
     async def test_agent_without_load_session_creates_new_session(self):
         """When the agent doesn't support load_session, _create_session is called directly."""
-        persona, client = _make_session_init_persona(supports_session_load=False)
+        persona, client = _make_real_session_persona(supports_session_load=False)
 
         await BaseAcpPersona._init_client_session(persona)
 
@@ -249,7 +249,7 @@ class TestLoadSessionRecovery:
 
     async def test_create_session_error_propagates(self):
         """create_session() errors are not swallowed after load_session fails."""
-        persona, _ = _make_session_init_persona(error=Exception("load failed"))
+        persona, _ = _make_real_session_persona(error=Exception("load failed"))
         create_error = Exception("create failed")
         persona._create_session.side_effect = create_error
 
@@ -427,7 +427,7 @@ class TestResumeAfterAuth:
         Agents with auth-gated sessions automatically resume via
         _init_client_session after session creation.
         """
-        persona, client = _make_session_init_persona(existing_session_id=None)
+        persona, client = _make_real_session_persona(existing_session_id=None)
         persona._was_initially_unauthenticated = True
         persona._resume_after_auth = AsyncMock()
 
@@ -438,7 +438,7 @@ class TestResumeAfterAuth:
 
     async def test_no_resume_when_not_initially_unauthenticated(self):
         """No resume prompt when the user was authenticated from the start."""
-        persona, client = _make_session_init_persona(existing_session_id=None)
+        persona, client = _make_real_session_persona(existing_session_id=None)
         persona._was_initially_unauthenticated = False
         persona._resume_after_auth = AsyncMock()
 
@@ -507,7 +507,7 @@ class TestHandleUncaughtException:
             assert "**Error code:**" not in body
 
 
-def _session_init_persona():
+def _real_session_persona():
     """A real `BaseAcpPersona` built without `__init__`, wired just enough for
     the session create/load paths: real state stores and update methods, chat
     metadata as plain dicts, and the awareness broadcast stubbed out."""
@@ -541,7 +541,7 @@ class TestSessionLegacyModelsHandoff:
     MODELS = {"currentModelId": "auto", "availableModels": [{"modelId": "auto"}]}
 
     async def test_create_session_stores_popped_models(self):
-        persona = _session_init_persona()
+        persona = _real_session_persona()
         client = MagicMock()
         client.create_session = AsyncMock(
             return_value=SimpleNamespace(
@@ -555,8 +555,10 @@ class TestSessionLegacyModelsHandoff:
         client.pop_legacy_models.assert_called_once_with("sess-9")
         assert persona.acp_legacy_models == self.MODELS
 
-    async def test_load_session_stores_popped_models(self):
-        persona = _session_init_persona()
+    async def test_load_session_clears_stale_models_on_empty_pop(self):
+        persona = _real_session_persona()
+        # A stale payload from an earlier session must not leak across loads.
+        persona._acp_legacy_models = {"currentModelId": "old"}
         client = MagicMock()
         client.load_session = AsyncMock(
             return_value=SimpleNamespace(modes=None, config_options=None)

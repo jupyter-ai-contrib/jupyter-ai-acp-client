@@ -508,10 +508,13 @@ class TestKiroCommands:
     async def test_unknown_ext_notification_raises_method_not_found(self):
         client, _, _ = _make_client_and_persona()
 
-        with pytest.raises(RequestError):
+        with pytest.raises(RequestError) as exc_info:
             await client.ext_notification(
                 "other.vendor/thing", {"sessionId": SESSION_ID}
             )
+
+        # Specifically JSON-RPC method-not-found, not another error variant.
+        assert exc_info.value.code == -32601
 
 
 class TestAwarenessPush:
