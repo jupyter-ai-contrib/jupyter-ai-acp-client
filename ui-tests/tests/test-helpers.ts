@@ -83,7 +83,8 @@ const STOP_BUTTON = '.jp-jupyter-ai-acp-client-stopButton';
 
 // The usage chip and the parts that distinguish which usage channel an agent
 // reported: a context ring + percent (session/usage) and/or a session-token
-// breakdown in the popover card (response.usage). See persona-controls.tsx.
+// breakdown in the popover card (response.usage). The chip is rendered by
+// jupyter-ai-persona-manager's persona-controls.tsx.
 const USAGE_CHIP = '.jp-jai-usage-chip';
 const USAGE_RING = '.jp-jai-usage-ring';
 const USAGE_PCT = '.jp-jai-usage-pct';
