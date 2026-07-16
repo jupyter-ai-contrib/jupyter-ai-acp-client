@@ -141,7 +141,8 @@ browser window per run.
 toolbar controls and asserting the effect. Load-bearing selectors:
 
 - **Persona picker:** the toolbar button is
-  `.jp-jupyter-ai-acp-client-personaControls-persona-btn`. It appears once the
+  `.jp-jai-personaControls-persona-btn` (the toolbar is rendered by
+  jupyter-ai-persona-manager, hence its `jp-jai-` prefix). It appears once the
   PersonaManager registers personas, so wait for it with a generous timeout
   (personas + ACP session init take seconds). Click it and pick by name via
   `getByRole('menuitem', { name })`.
@@ -156,10 +157,10 @@ toolbar controls and asserting the effect. Load-bearing selectors:
 - **Assert the reply:** rendered messages are `.jp-chat-rendered-message`. The
   first is the human's; the agent's reply follows.
 
-## Testing usage (the two ACP usage channels)
+## Testing usage (the ACP usage channels)
 
 ACP v1 reports usage through two distinct channels, which the toolbar's usage
-chip renders differently:
+chip renders differently; kiro-cli uses a vendor extension instead:
 
 - **`session/usage`** ([standard](https://agentclientprotocol.com/rfds/session-usage))
   — a `usage_update` session update carrying the context window fill
@@ -169,12 +170,16 @@ chip renders differently:
   — a `usage` object on the `PromptResponse` carrying cumulative session token
   counts (input/output/total, …). The chip shows a **token total with no ring**;
   the popover lists the token breakdown.
+- **`_kiro.dev/metadata`** (kiro vendor extension) — a notification carrying a
+  bare `contextUsagePercentage`. The chip shows a **ring gauge + percent** with
+  no token counts; the popover shows a percent-only Context section.
 
-An agent may report one, the other, or both. `usage_agent.py` does all three via
-a `--mode {session,response,both}` flag, and three fixture personas
-(`session-usage`, `response-usage`, `both-usage`) wrap it with the respective
-flag. `session-usage.spec.ts` loads all three and asserts each rendering — ring
-presence, the chip's percent/token text, and the popover's sections. `TestHelpers`
+An agent may report any combination. `usage_agent.py` does all four via a
+`--mode {session,response,both,kiro}` flag, and four fixture personas
+(`session-usage`, `response-usage`, `both-usage`, `kiro-usage`) wrap it with the
+respective flag. `session-usage.spec.ts` loads all four and asserts each
+rendering — ring presence, the chip's percent/token text, and the popover's
+sections. `TestHelpers`
 exposes `waitForUsage`, `hasUsageRing`, `usageChipText`, and `openUsageCard` for
 this. The usage popover is a MUI portal at the page root, so `openUsageCard`
 returns a **page-scoped** locator, not a chat-scoped one.
