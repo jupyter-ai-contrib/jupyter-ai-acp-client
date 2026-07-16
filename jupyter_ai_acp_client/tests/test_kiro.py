@@ -19,7 +19,7 @@ kiro-cli's ACP surface is non-standard, so all of its handling lives in
 """
 
 import logging
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from acp.exceptions import RequestError
@@ -30,7 +30,14 @@ from pycrdt import Awareness
 
 from jupyter_ai_persona_manager import PersonaAwareness
 
-from jupyter_ai_acp_client.acp_personas.kiro import KiroAcpPersona
+# `kiro.py` runs a `kiro-cli` install/version guard at import time, which raises
+# where kiro-cli isn't installed (e.g. CI). Satisfy the guard with mocks so the
+# persona can be imported and unit-tested without the binary present.
+with patch("shutil.which", return_value="/usr/bin/kiro-cli"), patch(
+    "subprocess.run",
+    return_value=MagicMock(returncode=0, stdout="kiro-cli 2.12.3", stderr=""),
+):
+    from jupyter_ai_acp_client.acp_personas.kiro import KiroAcpPersona
 from jupyter_ai_acp_client.acp_personas.kiro_client import (
     KiroAcpClient,
     KiroCommands,
