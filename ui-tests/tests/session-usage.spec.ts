@@ -131,5 +131,11 @@ test.describe('session-usage', () => {
     await expect(card).not.toContainText(' of ');
     await expect(card).not.toContainText('$');
     await expect(card).not.toContainText('Session tokens');
+    await page.keyboard.press('Escape');
+
+    // A second turn's credits accumulate into the session total client-side.
+    await helpers.sendMessage('report usage again');
+    const cardAfter = await helpers.openUsageCard();
+    await expect(cardAfter).toContainText('0.10 credits');
   });
 });
