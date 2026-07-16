@@ -38,7 +38,8 @@ export enum FixturePersona {
   BothMode = 'both-mode',
   DuplicateGroups = 'duplicate-groups',
   SlashCommands = 'slash-commands',
-  SlowStream = 'slow-stream'
+  SlowStream = 'slow-stream',
+  KiroUsage = 'kiro-usage'
 }
 
 interface FixturePersonaInfo {
@@ -60,16 +61,17 @@ export const FIXTURE_PERSONAS: Record<FixturePersona, FixturePersonaInfo> = {
   [FixturePersona.BothMode]: { name: 'Both Mode Agent' },
   [FixturePersona.DuplicateGroups]: { name: 'Duplicate Groups Agent' },
   [FixturePersona.SlashCommands]: { name: 'Slash Commands Agent' },
-  [FixturePersona.SlowStream]: { name: 'Slow Stream Agent' }
+  [FixturePersona.SlowStream]: { name: 'Slow Stream Agent' },
+  [FixturePersona.KiroUsage]: { name: 'Kiro Usage Agent' }
 };
 
-const PICKER = '.jp-jupyter-ai-acp-client-personaControls-persona-btn';
+const PICKER = '.jp-jai-personaControls-persona-btn';
 // The controls row renders each control twice: a real visible copy and an
 // aria-hidden, `inert` measurement copy (used only to size the row). The
 // direct-child combinator targets the visible buttons — the duplicates in the
 // measurement copy are nested one level deeper and compute as `hidden`.
 const VISIBLE_CONTROL_BTN =
-  '.jp-jupyter-ai-acp-client-personaControls-controls > .jp-jupyter-ai-acp-client-personaControls-control-btn';
+  '.jp-jai-personaControls-controls > .jp-jai-personaControls-control-btn';
 const INPUT = '.jp-chat-input-container';
 const MESSAGE = '.jp-chat-rendered-message';
 // Each slash-command completion in the input's autocomplete popup renders its
@@ -77,15 +79,16 @@ const MESSAGE = '.jp-chat-rendered-message';
 const COMMAND_NAME = '.jp-chat-command-name';
 // The toolbar's stop button: enabled only while an AI persona is writing, so its
 // disabled state doubles as a "is the persona still streaming?" signal.
-const STOP_BUTTON = '.jp-jupyter-ai-acp-client-stopButton';
+const STOP_BUTTON = '.jp-jai-stopButton';
 
 // The usage chip and the parts that distinguish which usage channel an agent
 // reported: a context ring + percent (session/usage) and/or a session-token
-// breakdown in the popover card (response.usage). See persona-controls.tsx.
-const USAGE_CHIP = '.jp-jupyter-ai-acp-client-usage-chip';
-const USAGE_RING = '.jp-jupyter-ai-acp-client-usage-ring';
-const USAGE_PCT = '.jp-jupyter-ai-acp-client-usage-pct';
-const USAGE_CARD = '.jp-jupyter-ai-acp-client-usage-card';
+// breakdown in the popover card (response.usage). The chip is rendered by
+// jupyter-ai-persona-manager's persona-controls.tsx.
+const USAGE_CHIP = '.jp-jai-usage-chip';
+const USAGE_RING = '.jp-jai-usage-ring';
+const USAGE_PCT = '.jp-jai-usage-pct';
+const USAGE_CARD = '.jp-jai-usage-card';
 
 const TIMEOUT = 30000;
 
@@ -149,6 +152,11 @@ export class TestHelpers {
     return this._chat;
   }
 
+  /** The persona picker button in the toolbar. */
+  get personaPicker(): Locator {
+    return this.chat.locator(PICKER);
+  }
+
   /** Select a fixture persona from the picker and wait for it to take. */
   async selectPersona(persona: FixturePersona): Promise<void> {
     const { name } = FIXTURE_PERSONAS[persona];
@@ -157,6 +165,14 @@ export class TestHelpers {
     await picker.click();
     await this.page.getByRole('menuitem', { name }).click();
     await expect(picker).toContainText(name);
+  }
+
+  /** Pick "No one" in the persona picker, so messages go to no persona. */
+  async selectNoOne(): Promise<void> {
+    await expect(this.personaPicker).toBeVisible({ timeout: TIMEOUT });
+    await this.personaPicker.click();
+    await this.page.getByRole('menuitem', { name: 'No one' }).click();
+    await expect(this.personaPicker).toContainText('No one');
   }
 
   /** Wait for the selected persona's session controls to render. */
@@ -231,6 +247,24 @@ export class TestHelpers {
       })
       .toBeGreaterThanOrEqual(before + 2);
     return (await this.chat.locator(MESSAGE).last().textContent()) ?? '';
+  }
+
+  /**
+   * Send a message expecting no reply (e.g. with "No one" selected): waits
+   * only for the human message to render.
+   */
+  async sendWithoutReply(text: string): Promise<void> {
+    const before = await this.chat.locator(MESSAGE).count();
+    await this.chat
+      .locator(INPUT)
+      .getByRole('combobox')
+      .pressSequentially(text);
+    await this.chat.locator(`${INPUT} .jp-chat-send-button`).click();
+    await expect
+      .poll(async () => this.chat.locator(MESSAGE).count(), {
+        timeout: TIMEOUT
+      })
+      .toBeGreaterThanOrEqual(before + 1);
   }
 
   /**

@@ -28,8 +28,8 @@ classifiers = [
 ]
 dependencies = [
     "jupyter_server>=2.4.0,<3",
-    "jupyter_ai_persona_manager>=0.1.0b2",
-    "jupyterlab_chat>=0.23.0a3",
+    "jupyter_ai_persona_manager>=0.1.0rc0",
+    "jupyterlab_chat>=0.23.0a4",
     "agent_client_protocol>=0.11.0,<0.12.0",
     "pydantic>=2,<3",
 ]

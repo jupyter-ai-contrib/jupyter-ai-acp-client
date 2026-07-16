@@ -77,6 +77,8 @@ def _awareness_persona(
     config_options=None,
     context=None,
     session_usage=None,
+    context_percent=None,
+    legacy_models=None,
 ):
     """A real `BaseAcpPersona` built without `__init__`, carrying the raw ACP
     state the awareness mapping reads plus a real awareness state to broadcast
@@ -84,9 +86,10 @@ def _awareness_persona(
 
     Models are ordinary config options now (`session/set_model` was removed from
     ACP), so there is no dedicated model state to seed — pass a `category="model"`
-    select in `config_options`. `modes`/`current_mode` seed the dedicated
-    `session/set_mode` state; a `category="mode"` config option is the other
-    (preferred) way to advertise a mode."""
+    select in `config_options`. Agents on the legacy channel (kiro-cli) pass the
+    captured payload as `legacy_models` instead. `modes`/`current_mode` seed the
+    dedicated `session/set_mode` state; a `category="mode"` config option is the
+    other (preferred) way to advertise a mode."""
 
     class _Concrete(BaseAcpPersona):
         @property
@@ -102,6 +105,8 @@ def _awareness_persona(
     persona._acp_config_options = config_options or []
     persona._acp_context_usage = context
     persona._acp_session_usage = session_usage
+    persona._acp_context_percent = context_percent
+    persona._acp_legacy_models = legacy_models
     return persona
 
 
@@ -306,6 +311,80 @@ class TestBuildAwarenessConfig:
         assert persona.get_model() == "opus"
         assert MODE_CONTROL_ID in {s.id for s in persona.get_setting_configurations()}
 
+    def test_legacy_models_fill_model_configuration(self):
+        # kiro-cli advertises models on the raw session/new response instead of
+        # a config option; the captured payload backs the model picker.
+        persona = _awareness_persona(
+            legacy_models={
+                "currentModelId": "claude-sonnet-5",
+                "availableModels": [
+                    {"modelId": "auto", "name": "auto", "description": "Chosen by task"},
+                    {"modelId": "claude-sonnet-5", "name": "claude-sonnet-5"},
+                ],
+            }
+        )
+
+        model, settings = persona._build_awareness_config()
+
+        assert model.current == "claude-sonnet-5"
+        assert [(o.id, o.name, o.description) for o in model.options] == [
+            ("auto", "auto", "Chosen by task"),
+            ("claude-sonnet-5", "claude-sonnet-5", None),
+        ]
+        assert settings == []
+
+    def test_config_option_model_wins_over_legacy_models(self):
+        persona = _awareness_persona(
+            config_options=[
+                _select_option("model", "opus", ["opus", "haiku"], category="model")
+            ],
+            legacy_models={
+                "currentModelId": "auto",
+                "availableModels": [{"modelId": "auto", "name": "auto"}],
+            },
+        )
+
+        model, _ = persona._build_awareness_config()
+
+        assert model.current == "opus"
+        assert [o.id for o in model.options] == ["opus", "haiku"]
+
+    def test_malformed_legacy_model_entries_are_skipped(self):
+        persona = _awareness_persona(
+            legacy_models={
+                "currentModelId": "m1",
+                "availableModels": ["not-a-dict", {"name": "no-id"}, {"modelId": "m1"}],
+            }
+        )
+
+        model, _ = persona._build_awareness_config()
+
+        assert [(o.id, o.name) for o in model.options] == [("m1", "m1")]
+
+    def test_null_and_mistyped_legacy_model_fields_tolerated(self):
+        # The agent owns this payload, so explicit nulls and wrong-typed fields
+        # must degrade to an empty or partial list, not break session init.
+        persona = _awareness_persona(
+            legacy_models={"currentModelId": "m1", "availableModels": None}
+        )
+
+        model, _ = persona._build_awareness_config()
+
+        assert model.current == "m1"
+        assert model.options == []
+
+        persona = _awareness_persona(
+            legacy_models={
+                "availableModels": [{"modelId": "m1", "name": 7, "description": ["x"]}]
+            }
+        )
+
+        model, _ = persona._build_awareness_config()
+
+        assert [(o.id, o.name, o.description) for o in model.options] == [
+            ("m1", "m1", None)
+        ]
+
 
 class TestSyncAwarenessUsage:
     """ACP usage state -> awareness Usage model."""
@@ -357,6 +436,16 @@ class TestSyncAwarenessUsage:
         assert usage.context_tokens is None
         assert usage.total_tokens is None
 
+    def test_percent_only_context_mapped(self):
+        persona = _awareness_persona(context_percent=1.48)
+
+        persona._sync_awareness_usage()
+
+        usage = persona.get_usage()
+        assert usage.context_percent == 1.48
+        assert usage.context_tokens is None
+        assert usage.context_size is None
+
 
 # These `update_*` methods are thin: they tell the ACP session to switch and
 # nothing more. `BasePersona` decides what changed (passing only changed keys),
@@ -402,6 +491,45 @@ class TestUpdateModel:
         await BaseAcpPersona.update_model(persona, "a2")
 
         persona.set_acp_config_option.assert_awaited_once_with("model_a", "a2")
+
+    async def test_legacy_models_use_set_session_model(self):
+        persona = _awareness_persona(
+            legacy_models={
+                "currentModelId": "claude-sonnet-5",
+                "availableModels": [{"modelId": "auto", "name": "auto"}],
+            }
+        )
+        client = MagicMock()
+        client.set_session_model = AsyncMock()
+        persona.get_client = AsyncMock(return_value=client)
+        persona.get_session_id = AsyncMock(return_value="sess-9")
+        persona.set_acp_config_option = AsyncMock()
+
+        await BaseAcpPersona.update_model(persona, "auto")
+
+        client.set_session_model.assert_awaited_once_with("auto", "sess-9")
+        # The choice goes through the legacy request, not a config option.
+        persona.set_acp_config_option.assert_not_awaited()
+        # The stored payload tracks the new current model for future rebuilds.
+        assert persona._acp_legacy_models["currentModelId"] == "auto"
+
+    async def test_model_config_option_wins_over_legacy_models(self):
+        persona = _awareness_persona(
+            config_options=[
+                _select_option("model", "opus", ["opus", "haiku"], category="model")
+            ],
+            legacy_models={
+                "currentModelId": "auto",
+                "availableModels": [{"modelId": "auto", "name": "auto"}],
+            },
+        )
+        persona.set_acp_config_option = AsyncMock()
+        persona.get_client = AsyncMock()
+
+        await BaseAcpPersona.update_model(persona, "haiku")
+
+        persona.set_acp_config_option.assert_awaited_once_with("model", "haiku")
+        persona.get_client.assert_not_awaited()
 
 
 class TestUpdateModelSettings:

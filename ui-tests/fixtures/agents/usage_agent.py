@@ -1,5 +1,5 @@
 """
-A fake ACP agent for exercising the two ways an agent can report usage.
+A fake ACP agent for exercising the ways an agent can report usage.
 
 ACP v1 exposes usage through two distinct channels:
 
@@ -10,20 +10,26 @@ ACP v1 exposes usage through two distinct channels:
   cumulative session token counts (input/output/total, …). This is currently
   **experimental**: https://agentclientprotocol.com/rfds/end-turn-token-usage
 
+Some agents use neither: kiro-cli (v2 engine, 2.12.1) streams a bare context
+percentage in a `_kiro.dev/metadata` extension notification, which the client
+records through its `ext_notification` hook.
+
 The client surfaces these differently in the toolbar's usage chip (context fill
 renders a ring + percent; session tokens render a token count and a breakdown
-popover), so we need agents that report one, the other, or both.
+popover), so we need agents that report one, the other, both, or the vendor
+extension.
 
-Rather than three near-identical agents, this one takes a `--mode` selecting
-what it reports on each turn:
+Rather than near-identical agents, this one takes a `--mode` selecting what it
+reports on each turn:
 
     usage_agent.py --mode session    # session/usage only (context [+ cost])
     usage_agent.py --mode response   # response.usage only (session tokens)
     usage_agent.py --mode both       # both channels
+    usage_agent.py --mode kiro       # _kiro.dev/metadata percentage only
 
-A fixture persona wraps each mode (see ../personas/{session,response,both}-usage
-_persona.py). Method signatures match the installed agent-client-protocol (see
-the pin in jupyter-ai-acp-client's pyproject), not the SDK's `main` examples.
+A fixture persona wraps each mode (see ../personas/*-usage_persona.py). Method
+signatures match the installed agent-client-protocol (see the pin in
+jupyter-ai-acp-client's pyproject), not the SDK's `main` examples.
 """
 
 import argparse
@@ -45,6 +51,7 @@ from acp.schema import Cost, Usage, UsageUpdate
 # Fixed numbers per mode, chosen so each renders a distinct, easily-asserted UI:
 #   session  -> 1200 / 4000 = 30% context fill, plus a cost
 #   both     -> 2000 / 8000 = 25% context fill, plus a cost
+#   kiro     -> a bare 42% context fill, no token counts, no cost
 # Token totals are cumulative session counts, reported on the prompt response.
 CONTEXT = {
     "session": UsageUpdate(
@@ -61,12 +68,14 @@ CONTEXT = {
     ),
 }
 TOKENS = Usage(input_tokens=1000, output_tokens=500, total_tokens=1500)
+KIRO_PERCENT = 42.0
 
 REPLY = "usage reported"
 
 
 class UsageAgent(Agent):
-    """Reports usage via session/usage, response.usage, or both, per `mode`."""
+    """Reports usage via session/usage, response.usage, both, or the kiro
+    vendor extension, per `mode`."""
 
     _conn: Client
 
@@ -102,6 +111,14 @@ class UsageAgent(Agent):
                 update=CONTEXT[self._mode],
             )
 
+        # vendor extension channel: kiro-cli streams a bare percentage in a
+        # `_kiro.dev/metadata` notification (the SDK adds the `_` prefix).
+        if self._mode == "kiro":
+            await self._conn.ext_notification(
+                "kiro.dev/metadata",
+                {"sessionId": session_id, "contextUsagePercentage": KIRO_PERCENT},
+            )
+
         # end-turn token usage channel: cumulative session tokens on the response.
         usage = TOKENS if self._mode in ("response", "both") else None
         return PromptResponse(stop_reason="end_turn", usage=usage)
@@ -111,7 +128,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Fake ACP usage-reporting agent.")
     parser.add_argument(
         "--mode",
-        choices=["session", "response", "both"],
+        choices=["session", "response", "both", "kiro"],
         required=True,
         help="Which usage channel(s) to report on each turn.",
     )
