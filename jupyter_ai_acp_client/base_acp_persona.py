@@ -142,6 +142,14 @@ class BaseAcpPersona(BasePersona):
     usage. Set by the default ACP client.
     """
 
+    _acp_context_percent: Optional[float]
+    """
+    Context-window fill as a bare percentage (0-100), for agents that report
+    only a percentage over a vendor extension (e.g. Kiro) instead of a
+    token-based `usage_update`. `None` until the agent sends one. Set by the
+    default ACP client.
+    """
+
     _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
     """
     Maximum number of recent messages to include in the history context injected
@@ -189,6 +197,7 @@ class BaseAcpPersona(BasePersona):
         self._acp_config_options = []
         self._acp_context_usage = None
         self._acp_session_usage = None
+        self._acp_context_percent = None
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -856,6 +865,8 @@ class BaseAcpPersona(BasePersona):
             if context.cost is not None:
                 usage.cost_amount = context.cost.amount
                 usage.cost_currency = context.cost.currency
+        if self._acp_context_percent is not None:
+            usage.context_percent = self._acp_context_percent
         tokens = self._acp_session_usage
         if tokens is not None:
             usage.input_tokens = tokens.input_tokens
@@ -952,6 +963,19 @@ class BaseAcpPersona(BasePersona):
     def update_acp_session_usage(self, usage: Usage) -> None:
         """Record the token usage carried on a completed prompt response."""
         self._acp_session_usage = usage
+
+    @property
+    def acp_context_percent(self) -> Optional[float]:
+        """
+        Context-window fill as a bare percentage (0-100), for agents that
+        report only a percentage instead of a token-based `usage_update`.
+        `None` when the agent has not reported any.
+        """
+        return self._acp_context_percent
+
+    def update_acp_context_percent(self, percent: float) -> None:
+        """Record a percentage-only context fill report from the ACP agent."""
+        self._acp_context_percent = percent
 
     async def handle_uncaught_exception(self, exc: Exception) -> None:
         """Show structured error info for ACP RequestError inside the standard dropdown."""

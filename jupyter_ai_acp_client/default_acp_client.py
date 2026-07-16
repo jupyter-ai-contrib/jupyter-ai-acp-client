@@ -741,6 +741,22 @@ class JaiAcpClient(Client):
         raise RequestError.method_not_found(method)
 
     async def ext_notification(self, method: str, params: dict) -> None:
+        # Kiro streams context usage as a vendor extension notification
+        # (`_kiro.dev/metadata`; the SDK strips the underscore) instead of the
+        # standard `usage_update`. Record the percentage it reports and
+        # rebroadcast so the toolbar can show how full the agent's context
+        # window is.
+        if method == "kiro.dev/metadata":
+            persona = self._personas_by_session.get(params.get("sessionId"))
+            percent = params.get("contextUsagePercentage")
+            if (
+                persona is not None
+                and isinstance(percent, (int, float))
+                and not isinstance(percent, bool)
+            ):
+                persona.update_acp_context_percent(float(percent))
+                self._sync_awareness_usage(persona)
+            return
         raise RequestError.method_not_found(method)
 
     async def stop_streaming(self, session_id: str) -> None:

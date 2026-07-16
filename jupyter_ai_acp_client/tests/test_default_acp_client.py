@@ -261,6 +261,7 @@ def _real_usage_persona():
     persona = _ConcreteAcpPersona.__new__(_ConcreteAcpPersona)
     persona._acp_context_usage = None
     persona._acp_session_usage = None
+    persona._acp_context_percent = None
     persona.log = logging.getLogger("test")
     # A real awareness slot so `_sync_awareness_usage` -> `report_usage`
     # round-trips through the real typed properties.
@@ -303,6 +304,64 @@ class TestUsageStorage:
         await client.prompt_and_reply(session_id=SESSION_ID, prompt="hello")
 
         assert persona.acp_session_usage is None
+
+    async def test_kiro_metadata_notification_records_context_percent(self):
+        client, _, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        await client.ext_notification(
+            "kiro.dev/metadata",
+            {"sessionId": SESSION_ID, "contextUsagePercentage": 1.252000093460083},
+        )
+
+        assert persona.acp_context_percent == pytest.approx(1.252000093460083)
+        # The percent is also published over awareness for the toolbar.
+        assert persona.get_usage().context_percent == pytest.approx(
+            1.252000093460083
+        )
+
+    async def test_kiro_metadata_for_unknown_session_is_ignored(self):
+        client, _, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        await client.ext_notification(
+            "kiro.dev/metadata",
+            {"sessionId": "nope", "contextUsagePercentage": 1.48},
+        )
+
+        assert persona.acp_context_percent is None
+
+    async def test_kiro_metadata_without_percentage_records_nothing(self):
+        client, _, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        await client.ext_notification(
+            "kiro.dev/metadata",
+            {
+                "sessionId": SESSION_ID,
+                "meteringUsage": [
+                    {"value": 0.031, "unit": "credit", "unitPlural": "credits"}
+                ],
+                "turnDurationMs": 2178,
+            },
+        )
+
+        assert persona.acp_context_percent is None
+
+    async def test_kiro_metadata_with_malformed_percentage_records_nothing(self):
+        client, _, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        for malformed in ("1.25", True, None, [1.25]):
+            await client.ext_notification(
+                "kiro.dev/metadata",
+                {"sessionId": SESSION_ID, "contextUsagePercentage": malformed},
+            )
+            assert persona.acp_context_percent is None, repr(malformed)
 
 
 class TestAwarenessPush:

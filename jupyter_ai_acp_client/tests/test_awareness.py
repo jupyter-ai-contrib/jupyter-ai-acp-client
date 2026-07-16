@@ -77,6 +77,7 @@ def _awareness_persona(
     config_options=None,
     context=None,
     session_usage=None,
+    context_percent=None,
 ):
     """A real `BaseAcpPersona` built without `__init__`, carrying the raw ACP
     state the awareness mapping reads plus a real awareness state to broadcast
@@ -102,6 +103,7 @@ def _awareness_persona(
     persona._acp_config_options = config_options or []
     persona._acp_context_usage = context
     persona._acp_session_usage = session_usage
+    persona._acp_context_percent = context_percent
     return persona
 
 
@@ -356,6 +358,16 @@ class TestSyncAwarenessUsage:
         usage = persona.get_usage()
         assert usage.context_tokens is None
         assert usage.total_tokens is None
+
+    def test_percent_only_context_mapped(self):
+        persona = _awareness_persona(context_percent=1.48)
+
+        persona._sync_awareness_usage()
+
+        usage = persona.get_usage()
+        assert usage.context_percent == 1.48
+        assert usage.context_tokens is None
+        assert usage.context_size is None
 
 
 # These `update_*` methods are thin: they tell the ACP session to switch and
