@@ -823,10 +823,12 @@ class BaseAcpPersona(BasePersona):
             model.options = [
                 ModelOption(
                     id=m["modelId"],
-                    name=m.get("name") or m["modelId"],
-                    description=m.get("description"),
+                    name=m["name"] if isinstance(m.get("name"), str) else m["modelId"],
+                    description=m["description"]
+                    if isinstance(m.get("description"), str)
+                    else None,
                 )
-                for m in self._acp_legacy_models.get("availableModels", [])
+                for m in (self._acp_legacy_models.get("availableModels") or [])
                 if isinstance(m, dict) and isinstance(m.get("modelId"), str)
             ]
 

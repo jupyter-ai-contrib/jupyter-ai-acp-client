@@ -361,6 +361,30 @@ class TestBuildAwarenessConfig:
 
         assert [(o.id, o.name) for o in model.options] == [("m1", "m1")]
 
+    def test_null_and_mistyped_legacy_model_fields_tolerated(self):
+        # The agent owns this payload, so explicit nulls and wrong-typed fields
+        # must degrade to an empty or partial list, not break session init.
+        persona = _awareness_persona(
+            legacy_models={"currentModelId": "m1", "availableModels": None}
+        )
+
+        model, _ = persona._build_awareness_config()
+
+        assert model.current == "m1"
+        assert model.options == []
+
+        persona = _awareness_persona(
+            legacy_models={
+                "availableModels": [{"modelId": "m1", "name": 7, "description": ["x"]}]
+            }
+        )
+
+        model, _ = persona._build_awareness_config()
+
+        assert [(o.id, o.name, o.description) for o in model.options] == [
+            ("m1", "m1", None)
+        ]
+
 
 class TestSyncAwarenessUsage:
     """ACP usage state -> awareness Usage model."""
