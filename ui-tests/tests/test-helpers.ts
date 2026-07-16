@@ -37,7 +37,8 @@ export enum FixturePersona {
   ConfigMode = 'config-mode',
   BothMode = 'both-mode',
   DuplicateGroups = 'duplicate-groups',
-  SlashCommands = 'slash-commands'
+  SlashCommands = 'slash-commands',
+  SlowStream = 'slow-stream'
 }
 
 interface FixturePersonaInfo {
@@ -58,7 +59,8 @@ export const FIXTURE_PERSONAS: Record<FixturePersona, FixturePersonaInfo> = {
   [FixturePersona.ConfigMode]: { name: 'Config Mode Agent' },
   [FixturePersona.BothMode]: { name: 'Both Mode Agent' },
   [FixturePersona.DuplicateGroups]: { name: 'Duplicate Groups Agent' },
-  [FixturePersona.SlashCommands]: { name: 'Slash Commands Agent' }
+  [FixturePersona.SlashCommands]: { name: 'Slash Commands Agent' },
+  [FixturePersona.SlowStream]: { name: 'Slow Stream Agent' }
 };
 
 const PICKER = '.jp-jupyter-ai-acp-client-personaControls-persona-btn';
@@ -73,6 +75,9 @@ const MESSAGE = '.jp-chat-rendered-message';
 // Each slash-command completion in the input's autocomplete popup renders its
 // name in a `.jp-chat-command-name` span (MUI list options, page-scoped portal).
 const COMMAND_NAME = '.jp-chat-command-name';
+// The toolbar's stop button: enabled only while an AI persona is writing, so its
+// disabled state doubles as a "is the persona still streaming?" signal.
+const STOP_BUTTON = '.jp-jupyter-ai-acp-client-stopButton';
 
 // The usage chip and the parts that distinguish which usage channel an agent
 // reported: a context ring + percent (session/usage) and/or a session-token
@@ -264,5 +269,49 @@ export class TestHelpers {
       )
       .toBe(true);
     return last;
+  }
+
+  /**
+   * Type a message and click send, without waiting for the reply to finish.
+   * Use when the reply is long-running (e.g. a slow stream) and the test drives
+   * what happens mid-stream.
+   */
+  async send(text: string): Promise<void> {
+    await this.chat
+      .locator(INPUT)
+      .getByRole('combobox')
+      .pressSequentially(text);
+    await this.chat.locator(`${INPUT} .jp-chat-send-button`).click();
+  }
+
+  /** The toolbar's stop button (a single toolbar item, rendered once). */
+  get stopButton(): Locator {
+    return this.chat.locator(STOP_BUTTON);
+  }
+
+  /**
+   * Wait until an AI persona is actively writing — the stop button becomes
+   * enabled. Returns once the persona is streaming.
+   */
+  async waitForWriting(): Promise<void> {
+    await expect(this.stopButton).toBeEnabled({ timeout: TIMEOUT });
+  }
+
+  /** Click the stop button to interrupt the in-progress response. */
+  async clickStop(): Promise<void> {
+    await this.stopButton.click();
+  }
+
+  /**
+   * Wait until no AI persona is writing — the stop button is disabled again.
+   * This is the awareness-driven signal that the persona stopped streaming.
+   */
+  async waitForNotWriting(): Promise<void> {
+    await expect(this.stopButton).toBeDisabled({ timeout: TIMEOUT });
+  }
+
+  /** The text of the latest rendered message (the agent's streaming reply). */
+  async lastMessageText(): Promise<string> {
+    return (await this.chat.locator(MESSAGE).last().textContent()) ?? '';
   }
 }
