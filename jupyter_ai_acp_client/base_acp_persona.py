@@ -569,7 +569,9 @@ class BaseAcpPersona(BasePersona):
 
         This initializes to an empty list, and should be updated **only** by the
         ACP client upon receiving a `session/update` request containing an
-        `AvailableCommandsUpdate` payload from the ACP agent.
+        `AvailableCommandsUpdate` payload from the ACP agent. Commands arriving
+        through the kiro vendor notification are published over awareness only
+        and are not stored here.
         """
         return self._acp_slash_commands
 
