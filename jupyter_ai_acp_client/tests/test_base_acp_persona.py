@@ -1,5 +1,7 @@
 """Tests for attachment resolution and load-session recovery in BaseAcpPersona."""
 
+import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -503,3 +505,65 @@ class TestHandleUncaughtException:
         if persona.send_message.called:
             body = persona.send_message.call_args[0][0]
             assert "**Error code:**" not in body
+
+
+def _session_init_persona():
+    """A real `BaseAcpPersona` built without `__init__`, wired just enough for
+    the session create/load paths: real state stores and update methods, chat
+    metadata as plain dicts, and the awareness broadcast stubbed out."""
+
+    class _Concrete(BaseAcpPersona):
+        @property
+        def defaults(self):  # pragma: no cover - never called
+            return None
+
+        @property
+        def event_logger(self):
+            # The real property resolves through `parent`; None makes the
+            # telemetry emit a no-op.
+            return None
+
+    persona = _Concrete.__new__(_Concrete)
+    persona.log = logging.getLogger("test")
+    persona.ychat = MagicMock()
+    persona.ychat.get_metadata.return_value = {}
+    persona._acp_modes = []
+    persona._acp_current_mode_id = None
+    persona._acp_config_options = []
+    persona._acp_legacy_models = None
+    persona._sync_awareness_config = MagicMock()
+    return persona
+
+
+class TestSessionLegacyModelsHandoff:
+    """Session create/load hand the client-captured legacy models over."""
+
+    MODELS = {"currentModelId": "auto", "availableModels": [{"modelId": "auto"}]}
+
+    async def test_create_session_stores_popped_models(self):
+        persona = _session_init_persona()
+        client = MagicMock()
+        client.create_session = AsyncMock(
+            return_value=SimpleNamespace(
+                session_id="sess-9", modes=None, config_options=None
+            )
+        )
+        client.pop_legacy_models = MagicMock(return_value=self.MODELS)
+
+        await BaseAcpPersona._create_session(persona, client)
+
+        client.pop_legacy_models.assert_called_once_with("sess-9")
+        assert persona.acp_legacy_models == self.MODELS
+
+    async def test_load_session_stores_popped_models(self):
+        persona = _session_init_persona()
+        client = MagicMock()
+        client.load_session = AsyncMock(
+            return_value=SimpleNamespace(modes=None, config_options=None)
+        )
+        client.pop_legacy_models = MagicMock(return_value=None)
+
+        await BaseAcpPersona._load_session(persona, client, "sess-old")
+
+        client.pop_legacy_models.assert_called_once_with("sess-old")
+        assert persona.acp_legacy_models is None
