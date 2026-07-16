@@ -16,6 +16,7 @@ import sys
 
 import jupyter_ai_acp_client
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
+from jupyter_ai_acp_client.acp_personas.kiro_client import KiroAcpClient
 from jupyter_ai_persona_manager import PersonaDefaults
 from jupyterlab_chat.models import Message
 
@@ -27,7 +28,13 @@ _AVATAR_PATH = os.path.join(
 
 
 class KiroUsageTestPersona(BaseAcpPersona):
-    """Test-only ACP persona reporting a kiro-style context percentage only."""
+    """Test-only ACP persona reporting a kiro-style context percentage only.
+
+    Uses `KiroAcpClient` so the `_kiro.dev/metadata` vendor notification is
+    mapped onto awareness the same way the real Kiro persona does (the generic
+    client no longer handles it)."""
+
+    acp_client_class = KiroAcpClient
 
     def __init__(self, *args, **kwargs):
         super().__init__(

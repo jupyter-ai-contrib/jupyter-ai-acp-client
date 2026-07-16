@@ -91,6 +91,13 @@ class BaseAcpPersona(BasePersona):
     Developers should always use `self.get_client()`.
     """
 
+    acp_client_class: ClassVar[type[JaiAcpClient]] = JaiAcpClient
+    """
+    The ACP client class this persona constructs in `_init_client`. Subclasses
+    override this to inject a custom client (e.g. `KiroAcpClient`) that handles
+    agent-specific behavior, keeping the base client agent-agnostic.
+    """
+
     _client_session_future: Task[NewSessionResponse | LoadSessionResponse]
     """
     The future that yields the ACP client session info. Each instance of an ACP
@@ -142,14 +149,6 @@ class BaseAcpPersona(BasePersona):
     usage. Set by the default ACP client.
     """
 
-    _acp_context_percent: Optional[float]
-    """
-    Context-window fill as a bare percentage (0-100), for agents that report
-    only a percentage over a vendor extension (e.g. Kiro) instead of a
-    token-based `usage_update`. `None` until the agent sends one. Set by the
-    default ACP client.
-    """
-
     _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
     """
     Maximum number of recent messages to include in the history context injected
@@ -197,8 +196,6 @@ class BaseAcpPersona(BasePersona):
         self._acp_config_options = []
         self._acp_context_usage = None
         self._acp_session_usage = None
-        self._acp_context_percent = None
-        self._acp_legacy_models = None
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -234,7 +231,7 @@ class BaseAcpPersona(BasePersona):
     @auto_emit_event("acp_server_init")
     async def _init_client(self) -> JaiAcpClient:
         agent_subprocess = await self.get_agent_subprocess()
-        client = JaiAcpClient(
+        client = self.acp_client_class(
             agent_subprocess=agent_subprocess, event_loop=self.event_loop
         )
         self.log.info("Initialized ACP client for '%s'.", self.__class__.__name__)
@@ -271,7 +268,6 @@ class BaseAcpPersona(BasePersona):
         )
         self._set_acp_mode_state(response.modes)
         self.update_acp_config_options(response.config_options)
-        self.update_acp_legacy_models(client.pop_legacy_models(existing_session_id))
         self._sync_awareness_config()
         return response
 
@@ -286,15 +282,11 @@ class BaseAcpPersona(BasePersona):
         self._record_new_session(response.session_id)
         self._set_acp_mode_state(response.modes)
         self.update_acp_config_options(response.config_options)
-        self.update_acp_legacy_models(client.pop_legacy_models(response.session_id))
 
         # Reapply a previously selected mode so the choice survives session
         # recreation (e.g. a server restart that creates a fresh ACP session).
         # A model selection needs no special handling here: models are ordinary
         # config options now, so they ride the config-option reapply loop below.
-        # The exception is a legacy-channel model choice (kiro-cli), which is
-        # kept agent-side on the session: a resumed session keeps it, a fresh
-        # session resets to the agent's default.
         stored_mode_id = self._get_stored_mode_choice()
         advertised_mode_ids = {m.id for m in self._acp_modes}
         if (
@@ -572,9 +564,7 @@ class BaseAcpPersona(BasePersona):
 
         This initializes to an empty list, and should be updated **only** by the
         ACP client upon receiving a `session/update` request containing an
-        `AvailableCommandsUpdate` payload from the ACP agent. Commands arriving
-        through the kiro vendor notification are published over awareness only
-        and are not stored here.
+        `AvailableCommandsUpdate` payload from the ACP agent.
         """
         return self._acp_slash_commands
 
@@ -682,21 +672,6 @@ class BaseAcpPersona(BasePersona):
         """Return config option values previously selected for this persona here."""
         return self.ychat.get_metadata().get("acp_config_options", {}).get(self.id, {})
 
-    @property
-    def acp_legacy_models(self) -> Optional[dict]:
-        """
-        The legacy `models` payload (`currentModelId` plus `availableModels`)
-        for agents that advertise models the pre-v1 way, outside config options
-        (e.g. kiro-cli). `None` when the agent advertises no such payload. Set
-        by the persona on session create/load from what the client captured off
-        the raw session response.
-        """
-        return self._acp_legacy_models
-
-    def update_acp_legacy_models(self, models: Optional[dict]) -> None:
-        """Store the legacy models payload captured for this persona's session."""
-        self._acp_legacy_models = models
-
     ################################################
     # persona-manager awareness API
     #
@@ -792,9 +767,7 @@ class BaseAcpPersona(BasePersona):
 
         Bucketing by ACP config-option category:
 
-        - Model: the `"model"`-category config option (`_model_config_option`);
-          when no config option advertises a model, the legacy `models` payload
-          for agents on the pre-v1 channel (e.g. kiro-cli).
+        - Model: the `"model"`-category config option (`_model_config_option`).
         - Mode: the `"mode"`-category config option if present, else the
           dedicated `session/set_mode` state — surfaced as a general setting
           keyed by `MODE_CONTROL_ID`. A mode config option is preferred, so a
@@ -817,19 +790,6 @@ class BaseAcpPersona(BasePersona):
             model.options = [
                 ModelOption(id=c.value, name=c.name, description=c.description)
                 for c in _flatten_select_options(model_opt.options)
-            ]
-        elif self._acp_legacy_models:
-            model.current = self._acp_legacy_models.get("currentModelId")
-            model.options = [
-                ModelOption(
-                    id=m["modelId"],
-                    name=m["name"] if isinstance(m.get("name"), str) else m["modelId"],
-                    description=m["description"]
-                    if isinstance(m.get("description"), str)
-                    else None,
-                )
-                for m in (self._acp_legacy_models.get("availableModels") or [])
-                if isinstance(m, dict) and isinstance(m.get("modelId"), str)
             ]
 
         model_settings: list[SettingConfiguration] = []
@@ -903,8 +863,6 @@ class BaseAcpPersona(BasePersona):
             if context.cost is not None:
                 usage.cost_amount = context.cost.amount
                 usage.cost_currency = context.cost.currency
-        if self._acp_context_percent is not None:
-            usage.context_percent = self._acp_context_percent
         tokens = self._acp_session_usage
         if tokens is not None:
             usage.input_tokens = tokens.input_tokens
@@ -930,22 +888,11 @@ class BaseAcpPersona(BasePersona):
         """
         Switch the ACP session's model. `BasePersona` rebroadcasts.
 
-        Models are config options in ACP v1 (`session/set_model` was removed
-        from the protocol), so the choice is applied through the backing model
-        config option, matching how `_build_awareness_config` sourced it.
-        Agents on the legacy channel (e.g. kiro-cli) advertise no model config
-        option but still serve `session/set_model`, so when legacy models are
-        stored the choice goes through that request instead. The legacy choice
-        is not persisted with the chat: the agent keeps it on the session,
-        which is resumed by ID.
+        Models are config options now (`session/set_model` was removed from the
+        protocol), so this applies the choice through the backing model config
+        option, matching how `_build_awareness_config` sourced it.
         """
         model_opt = self._model_config_option()
-        if model_opt is None and self._acp_legacy_models:
-            client = await self.get_client()
-            session_id = await self.get_session_id()
-            await client.set_session_model(model_id, session_id)
-            self._acp_legacy_models["currentModelId"] = model_id
-            return
         config_id = model_opt.id if model_opt is not None else "model"
         await self.set_acp_config_option(
             config_id, self._coerce_config_value(config_id, model_id)
@@ -1012,19 +959,6 @@ class BaseAcpPersona(BasePersona):
     def update_acp_session_usage(self, usage: Usage) -> None:
         """Record the token usage carried on a completed prompt response."""
         self._acp_session_usage = usage
-
-    @property
-    def acp_context_percent(self) -> Optional[float]:
-        """
-        Context-window fill as a bare percentage (0-100), for agents that
-        report only a percentage instead of a token-based `usage_update`.
-        `None` when the agent has not reported any.
-        """
-        return self._acp_context_percent
-
-    def update_acp_context_percent(self, percent: float) -> None:
-        """Record a percentage-only context fill report from the ACP agent."""
-        self._acp_context_percent = percent
 
     async def handle_uncaught_exception(self, exc: Exception) -> None:
         """Show structured error info for ACP RequestError inside the standard dropdown."""
