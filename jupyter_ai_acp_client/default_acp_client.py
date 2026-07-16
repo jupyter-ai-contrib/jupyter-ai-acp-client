@@ -10,9 +10,7 @@ from acp import (
     PROTOCOL_VERSION,
     Client,
     RequestError,
-    connect_to_agent,
 )
-from acp.core import ClientSideConnection
 from acp.schema import (
     AgentCapabilities,
     AgentMessageChunk,
@@ -58,6 +56,7 @@ from jupyterlab_chat.models import Message
 from jupyterlab_chat.utils import find_mentions
 from asyncio.subprocess import Process
 
+from .jai_connection import JaiClientSideConnection
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
 from .tool_call_renderer import ensure_serializable, extract_diffs, extract_diffs_from_raw_input
@@ -73,7 +72,7 @@ class JaiAcpClient(Client):
     """
 
     agent_subprocess: Process
-    _connection_future: Awaitable[tuple[ClientSideConnection, InitializeResponse]]
+    _connection_future: Awaitable[tuple[JaiClientSideConnection, InitializeResponse]]
     event_loop: asyncio.AbstractEventLoop
     _personas_by_session: dict[str, BasePersona]
     _terminal_manager: TerminalManager
@@ -112,13 +111,15 @@ class JaiAcpClient(Client):
         self._tool_call_manager = ToolCallManager()
         self._permission_manager = PermissionManager(event_loop)
         self._loading_sessions: dict[str, asyncio.Task[LoadSessionResponse]] = {}
+        self._legacy_models_by_session: dict[str, dict] = {}
         super().__init__(*args, **kwargs)
         self._cancel_requested: dict[str, bool] = {}
 
 
-    async def _init_connection(self) -> tuple[ClientSideConnection, InitializeResponse]:
+    async def _init_connection(self) -> tuple[JaiClientSideConnection, InitializeResponse]:
         proc = self.agent_subprocess
-        conn = connect_to_agent(self, proc.stdin, proc.stdout)
+        conn = JaiClientSideConnection(self, proc.stdin, proc.stdout)
+        conn.add_raw_observer(self._capture_legacy_models)
         init_response = await conn.initialize(
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=ClientCapabilities(
@@ -129,9 +130,35 @@ class JaiAcpClient(Client):
         )
         return conn, init_response
 
-    async def get_connection(self) -> ClientSideConnection:
+    async def get_connection(self) -> JaiClientSideConnection:
         conn, _ = await self._connection_future
         return conn
+
+    def _capture_legacy_models(self, event: Any) -> None:
+        """
+        Record the legacy `models` field some agents (e.g. kiro-cli) attach to
+        their `session/new` response. The field predates ACP v1, so the typed
+        SDK response models discard it; this reads it off the raw JSON-RPC
+        message instead. Keyed by session ID so the session create/load path
+        can hand it to the right persona.
+        """
+        message = getattr(event, "message", None)
+        if not isinstance(message, dict):
+            return
+        result = message.get("result")
+        if (
+            isinstance(result, dict)
+            and isinstance(result.get("sessionId"), str)
+            and isinstance(result.get("models"), dict)
+        ):
+            self._legacy_models_by_session[result["sessionId"]] = result["models"]
+
+    def pop_legacy_models(self, session_id: str) -> dict | None:
+        """
+        Return and clear the legacy models captured for a session, or `None`
+        when the agent advertised none.
+        """
+        return self._legacy_models_by_session.pop(session_id, None)
 
     async def get_agent_capabilities(self) -> AgentCapabilities:
         _, init_response = await self._connection_future
@@ -195,6 +222,18 @@ class JaiAcpClient(Client):
         conn = await self.get_connection()
         await conn.set_config_option(
             config_id=config_id, value=value, session_id=session_id
+        )
+
+    async def set_session_model(self, model_id: str, session_id: str) -> None:
+        """
+        Set the model for an ACP session via the legacy `session/set_model`
+        request. The request was removed from ACP v1 but agents that advertise
+        legacy models (e.g. kiro-cli) still serve it; only call this for a
+        session that advertised them.
+        """
+        conn = await self.get_connection()
+        await conn.send_raw_request(
+            "session/set_model", {"sessionId": session_id, "modelId": model_id}
         )
 
     def _is_session_loading(self, session_id: str) -> bool:
@@ -736,6 +775,7 @@ class JaiAcpClient(Client):
         self._personas_by_session.pop(session_id, None)
         self._prompt_locks_by_session.pop(session_id, None)
         self._loading_sessions.pop(session_id, None)
+        self._legacy_models_by_session.pop(session_id, None)
 
     async def ext_method(self, method: str, params: dict) -> dict:
         raise RequestError.method_not_found(method)

@@ -198,6 +198,7 @@ class BaseAcpPersona(BasePersona):
         self._acp_context_usage = None
         self._acp_session_usage = None
         self._acp_context_percent = None
+        self._acp_legacy_models = None
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -270,6 +271,7 @@ class BaseAcpPersona(BasePersona):
         )
         self._set_acp_mode_state(response.modes)
         self.update_acp_config_options(response.config_options)
+        self.update_acp_legacy_models(client.pop_legacy_models(existing_session_id))
         self._sync_awareness_config()
         return response
 
@@ -284,6 +286,7 @@ class BaseAcpPersona(BasePersona):
         self._record_new_session(response.session_id)
         self._set_acp_mode_state(response.modes)
         self.update_acp_config_options(response.config_options)
+        self.update_acp_legacy_models(client.pop_legacy_models(response.session_id))
 
         # Reapply a previously selected mode so the choice survives session
         # recreation (e.g. a server restart that creates a fresh ACP session).
@@ -674,6 +677,21 @@ class BaseAcpPersona(BasePersona):
         """Return config option values previously selected for this persona here."""
         return self.ychat.get_metadata().get("acp_config_options", {}).get(self.id, {})
 
+    @property
+    def acp_legacy_models(self) -> Optional[dict]:
+        """
+        The legacy `models` payload (`currentModelId` plus `availableModels`)
+        for agents that advertise models the pre-v1 way, outside config options
+        (e.g. kiro-cli). `None` when the agent advertises no such payload. Set
+        by the persona on session create/load from what the client captured off
+        the raw session response.
+        """
+        return self._acp_legacy_models
+
+    def update_acp_legacy_models(self, models: Optional[dict]) -> None:
+        """Store the legacy models payload captured for this persona's session."""
+        self._acp_legacy_models = models
+
     ################################################
     # persona-manager awareness API
     #
@@ -769,7 +787,9 @@ class BaseAcpPersona(BasePersona):
 
         Bucketing by ACP config-option category:
 
-        - Model: the `"model"`-category config option (`_model_config_option`).
+        - Model: the `"model"`-category config option (`_model_config_option`);
+          when no config option advertises a model, the legacy `models` payload
+          for agents on the pre-v1 channel (e.g. kiro-cli).
         - Mode: the `"mode"`-category config option if present, else the
           dedicated `session/set_mode` state — surfaced as a general setting
           keyed by `MODE_CONTROL_ID`. A mode config option is preferred, so a
@@ -792,6 +812,17 @@ class BaseAcpPersona(BasePersona):
             model.options = [
                 ModelOption(id=c.value, name=c.name, description=c.description)
                 for c in _flatten_select_options(model_opt.options)
+            ]
+        elif self._acp_legacy_models:
+            model.current = self._acp_legacy_models.get("currentModelId")
+            model.options = [
+                ModelOption(
+                    id=m["modelId"],
+                    name=m.get("name") or m["modelId"],
+                    description=m.get("description"),
+                )
+                for m in self._acp_legacy_models.get("availableModels", [])
+                if isinstance(m, dict) and isinstance(m.get("modelId"), str)
             ]
 
         model_settings: list[SettingConfiguration] = []
@@ -892,11 +923,22 @@ class BaseAcpPersona(BasePersona):
         """
         Switch the ACP session's model. `BasePersona` rebroadcasts.
 
-        Models are config options now (`session/set_model` was removed from the
-        protocol), so this applies the choice through the backing model config
-        option, matching how `_build_awareness_config` sourced it.
+        Models are config options in ACP v1 (`session/set_model` was removed
+        from the protocol), so the choice is applied through the backing model
+        config option, matching how `_build_awareness_config` sourced it.
+        Agents on the legacy channel (e.g. kiro-cli) advertise no model config
+        option but still serve `session/set_model`, so when legacy models are
+        stored the choice goes through that request instead. The legacy choice
+        is not persisted with the chat: the agent keeps it on the session,
+        which is resumed by ID.
         """
         model_opt = self._model_config_option()
+        if model_opt is None and self._acp_legacy_models:
+            client = await self.get_client()
+            session_id = await self.get_session_id()
+            await client.set_session_model(model_id, session_id)
+            self._acp_legacy_models["currentModelId"] = model_id
+            return
         config_id = model_opt.id if model_opt is not None else "model"
         await self.set_acp_config_option(
             config_id, self._coerce_config_value(config_id, model_id)

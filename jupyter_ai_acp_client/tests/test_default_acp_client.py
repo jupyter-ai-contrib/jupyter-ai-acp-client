@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -47,6 +48,7 @@ def _make_client_and_persona():
     client = object.__new__(JaiAcpClient)
     client._prompt_locks_by_session = {}
     client._cancel_requested = {}
+    client._legacy_models_by_session = {}
     client._permission_manager = MagicMock()
 
     # Mock connection
@@ -362,6 +364,58 @@ class TestUsageStorage:
                 {"sessionId": SESSION_ID, "contextUsagePercentage": malformed},
             )
             assert persona.acp_context_percent is None, repr(malformed)
+
+
+class TestLegacyModels:
+    """Kiro-style legacy models: captured off the raw session/new response,
+    handed over per session, applied via the legacy `session/set_model`."""
+
+    MODELS = {
+        "currentModelId": "claude-sonnet-5",
+        "availableModels": [
+            {"modelId": "auto", "name": "auto", "description": "Chosen by task"},
+            {"modelId": "claude-sonnet-5", "name": "claude-sonnet-5"},
+        ],
+    }
+
+    def _event(self, message):
+        return SimpleNamespace(message=message)
+
+    def test_session_new_result_models_are_captured(self):
+        client, _, _ = _make_client_and_persona()
+
+        client._capture_legacy_models(
+            self._event(
+                {"id": 1, "result": {"sessionId": "sess-9", "models": self.MODELS}}
+            )
+        )
+
+        assert client.pop_legacy_models("sess-9") == self.MODELS
+        # pop is one-shot: the captured payload is handed over once.
+        assert client.pop_legacy_models("sess-9") is None
+
+    def test_non_matching_messages_are_ignored(self):
+        client, _, _ = _make_client_and_persona()
+
+        for message in (
+            {"method": "session/update", "params": {"sessionId": "sess-9"}},
+            {"id": 2, "result": {"sessionId": "sess-9"}},
+            {"id": 3, "result": {"sessionId": "sess-9", "models": ["not-a-dict"]}},
+            {"id": 4, "result": "ok"},
+            None,
+        ):
+            client._capture_legacy_models(self._event(message))
+
+        assert client.pop_legacy_models("sess-9") is None
+
+    async def test_set_session_model_sends_legacy_request(self):
+        client, conn, _ = _make_client_and_persona()
+
+        await client.set_session_model("auto", SESSION_ID)
+
+        conn.send_raw_request.assert_awaited_once_with(
+            "session/set_model", {"sessionId": SESSION_ID, "modelId": "auto"}
+        )
 
 
 class TestAwarenessPush:
