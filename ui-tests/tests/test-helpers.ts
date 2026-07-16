@@ -79,7 +79,7 @@ const MESSAGE = '.jp-chat-rendered-message';
 const COMMAND_NAME = '.jp-chat-command-name';
 // The toolbar's stop button: enabled only while an AI persona is writing, so its
 // disabled state doubles as a "is the persona still streaming?" signal.
-const STOP_BUTTON = '.jp-jupyter-ai-acp-client-stopButton';
+const STOP_BUTTON = '.jp-jai-stopButton';
 
 // The usage chip and the parts that distinguish which usage channel an agent
 // reported: a context ring + percent (session/usage) and/or a session-token
