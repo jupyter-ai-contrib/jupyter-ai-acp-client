@@ -16,7 +16,9 @@ import {
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CheckIcon from '@mui/icons-material/Check';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { PageConfig } from '@jupyterlab/coreutils';
+import { CommandRegistry } from '@lumino/commands';
 import { InputToolbarRegistry } from '@jupyter/chat';
 import { IAwareness } from '@jupyter/ydoc';
 import {
@@ -40,6 +42,30 @@ const NO_ONE_LABEL = 'No one';
 
 // Stable control ID for the model selector (setting IDs are used verbatim).
 const MODEL_CONTROL_ID = '__model__';
+
+// ---------------------------------------------------------------------------
+// Jupyternaut settings button (temporary, persona-specific hard-coding)
+//
+// TODO(persona-input-toolbar): This is a deliberate hard-coding of Jupyternaut's
+// "settings button" into the shared persona controls. The persona controls are
+// select-only, which is a regression for Jupyternaut's precise per-field model
+// configuration, so Jupyternaut surfaces a button that opens its own settings
+// view (where custom models are defined) instead.
+//
+// This should become a real Lumino extension point on the PersonaInputToolbar:
+// a persona (or its frontend plugin) would contribute a toolbar item declaring
+// which persona it belongs to, and this component would render contributed
+// items for the selected persona generically — no persona IDs or command names
+// hard-coded here. Until that extension point exists, this stays gated to the
+// Jupyternaut persona ID below.
+// ---------------------------------------------------------------------------
+
+/** The Jupyternaut persona's ID (from `BasePersona.id`). */
+const JUPYTERNAUT_PERSONA_ID =
+  'jupyter-ai-personas::jupyter_ai_jupyternaut::JupyternautPersona';
+
+/** The command ID that opens the Jupyternaut settings view. */
+const JUPYTERNAUT_SETTINGS_COMMAND = '@jupyter-ai/jupyternaut:open-settings';
 
 // Context-fill fractions at which the chip starts demanding attention: the
 // ring and percent turn warn, then error, colored.
@@ -766,9 +792,17 @@ function getAwareness(chatModel: unknown): IAwareness | null {
  * polling). It's seeded from the default persona advertised over PageConfig.
  */
 export function AcpPersonaControls(
-  props: InputToolbarRegistry.IToolbarItemProps
+  props: InputToolbarRegistry.IToolbarItemProps & {
+    /**
+     * The application command registry, injected by the toolbar factory (the
+     * generic toolbar-item props don't carry it). Used to open the Jupyternaut
+     * settings view from the hard-coded settings button. Optional so the
+     * component still renders if a caller omits it.
+     */
+    commands?: CommandRegistry;
+  }
 ): JSX.Element | null {
-  const { chatModel, model } = props;
+  const { chatModel, model, commands } = props;
   const awareness = getAwareness(chatModel);
 
   // The manager's awareness view, resolved once its slot appears. Null until
@@ -968,6 +1002,25 @@ export function AcpPersonaControls(
       </Menu>
 
       <UsageChip usage={usage} />
+
+      {/* TODO(persona-input-toolbar): replace this hard-coded, Jupyternaut-only
+          button with a generic PersonaInputToolbar extension point. See the
+          note near JUPYTERNAUT_PERSONA_ID above. */}
+      {commands && selectedId === JUPYTERNAUT_PERSONA_ID ? (
+        <Button
+          className={`${SELECTOR_CLASS} ${SELECTOR_CLASS}-settings-btn`}
+          size="small"
+          variant="text"
+          disableRipple
+          onClick={() => {
+            void commands.execute(JUPYTERNAUT_SETTINGS_COMMAND);
+          }}
+          title="Open Jupyternaut settings"
+          aria-label="Open Jupyternaut settings"
+        >
+          <SettingsIcon fontSize="small" />
+        </Button>
+      ) : null}
 
       {controls.length ? (
         <>

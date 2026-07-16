@@ -172,14 +172,19 @@ export const toolbarPlugin: JupyterFrontEndPlugin<IInputToolbarRegistryFactory> 
       'Provides a chat input toolbar with ACP stop streaming button.',
     autoStart: true,
     provides: IInputToolbarRegistryFactory,
-    activate: (): IInputToolbarRegistryFactory => {
+    activate: (app: JupyterFrontEnd): IInputToolbarRegistryFactory => {
+      // Wrap the persona controls to inject the app command registry, which the
+      // generic toolbar-item props don't carry. The controls use it to open the
+      // Jupyternaut settings view from the (hard-coded) settings button.
+      const PersonaControls = (props: InputToolbarRegistry.IToolbarItemProps) =>
+        AcpPersonaControls({ ...props, commands: app.commands });
       return {
         create: () => {
           // Start with the default toolbar (Send, Attach, Cancel, SaveEdit)
           const registry = InputToolbarRegistry.defaultToolbarRegistry();
           // Add the active-persona controls (persona + model), leftmost.
           registry.addItem('persona', {
-            element: AcpPersonaControls,
+            element: PersonaControls,
             position: 5
           });
           // Add our stop button (position 90 = just before Send at 100)

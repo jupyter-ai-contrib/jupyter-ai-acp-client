@@ -256,6 +256,15 @@ details[open].jp-jupyter-ai-acp-client-tool-call summary::after,
   flex-shrink: 0;
 }
 
+/* Jupyternaut settings button: a borderless icon button matching the persona
+   picker. Hard-coded next to the controls for now (see persona-controls.tsx). */
+.jp-jupyter-ai-acp-client-personaControls-settings-btn {
+  flex-shrink: 0;
+  min-width: 0;
+  padding: 2px 4px;
+  color: var(--jp-ui-font-color2);
+}
+
 /* Width-aware controls row: fills the space after the persona and clips, so the
    overflow logic decides what shows. */
 .jp-jupyter-ai-acp-client-personaControls-controls {
