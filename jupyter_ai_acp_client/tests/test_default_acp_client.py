@@ -487,6 +487,14 @@ class TestKiroCommands:
 
         persona.report_slash_commands.assert_not_called()
 
+    async def test_unknown_ext_notification_raises_method_not_found(self):
+        client, _, _ = _make_client_and_persona()
+
+        with pytest.raises(RequestError):
+            await client.ext_notification(
+                "other.vendor/thing", {"sessionId": SESSION_ID}
+            )
+
 
 class TestAwarenessPush:
     """The client pushes ACP updates onto the persona's awareness API too."""
