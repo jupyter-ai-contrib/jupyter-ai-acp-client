@@ -108,6 +108,8 @@ def _kiro_client(send_request_return=None):
     client = object.__new__(KiroAcpClient)
     client._personas_by_session = {}
     client._loading_sessions = {}
+    client._metering_totals = {}
+    client._metering_units = {}
 
     conn = MagicMock()
     conn._conn = MagicMock()
@@ -479,8 +481,8 @@ class TestKiroUsage:
 
         usage = persona.get_usage()
         assert usage.cost_amount == pytest.approx(0.031)
-        # Deliberate ISO-4217 stretch: the unit token, not a currency code.
-        assert usage.cost_currency == "credit"
+        # Deliberate ISO-4217 stretch: the unit's plural name, not a currency code.
+        assert usage.cost_currency == "credits"
         assert usage.context_percent is None
 
     async def test_metadata_sums_multiple_metering_entries(self):
@@ -500,6 +502,70 @@ class TestKiroUsage:
         )
 
         assert persona.get_usage().cost_amount == pytest.approx(0.04)
+
+    async def test_metadata_cost_accumulates_across_turns(self):
+        # Kiro meters per turn (deltas), unlike the standard channel's
+        # cumulative cost, so the session total must accumulate client-side.
+        client, _ = _kiro_client()
+        persona = _kiro_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        for credits in (0.05, 0.041):
+            await client.ext_notification(
+                "kiro.dev/metadata",
+                {
+                    "sessionId": SESSION_ID,
+                    "contextUsagePercentage": 1.7,
+                    "meteringUsage": [
+                        {"value": credits, "unit": "credit", "unitPlural": "credits"}
+                    ],
+                    "turnDurationMs": 1500,
+                },
+            )
+
+        usage = persona.get_usage()
+        assert usage.cost_amount == pytest.approx(0.091)
+        assert usage.cost_currency == "credits"
+
+    async def test_metadata_unit_persists_when_later_report_omits_it(self):
+        client, _ = _kiro_client()
+        persona = _kiro_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        for payload in (
+            [{"value": 0.05, "unitPlural": "credits"}],
+            [{"value": 0.03}],
+        ):
+            await client.ext_notification(
+                "kiro.dev/metadata",
+                {"sessionId": SESSION_ID, "meteringUsage": payload},
+            )
+
+        usage = persona.get_usage()
+        assert usage.cost_amount == pytest.approx(0.08)
+        # The first named unit sticks; a unit-less later report never resets it.
+        assert usage.cost_currency == "credits"
+
+    async def test_metadata_mixed_units_in_one_payload_keep_the_first(self):
+        client, _ = _kiro_client()
+        persona = _kiro_persona()
+        client._personas_by_session[SESSION_ID] = persona
+
+        await client.ext_notification(
+            "kiro.dev/metadata",
+            {
+                "sessionId": SESSION_ID,
+                "meteringUsage": [
+                    {"value": 0.05, "unitPlural": "credits"},
+                    {"value": 99.0, "unitPlural": "tokens"},
+                ],
+            },
+        )
+
+        usage = persona.get_usage()
+        # Amounts in a different unit are skipped, never summed together.
+        assert usage.cost_amount == pytest.approx(0.05)
+        assert usage.cost_currency == "credits"
 
     async def test_metadata_wholesale_bad_shape_does_not_raise(self):
         # A wholesale surprise (non-object params) is backstopped by _safe_parse:

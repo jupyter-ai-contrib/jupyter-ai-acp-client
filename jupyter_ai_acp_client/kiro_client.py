@@ -224,6 +224,20 @@ class KiroAcpClient(JaiAcpClient):
     agent-agnostic.
     """
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Per-session running totals of Kiro's metering: Kiro reports each
+        # turn's cost as a delta (unlike the standard channel's cumulative
+        # cost), so the session total accumulates client-side. It resets on a
+        # server restart even though the Kiro session itself is resumed.
+        self._metering_totals: dict[str, float] = {}
+        self._metering_units: dict[str, str] = {}
+
+    async def end_session(self, session_id: str) -> None:
+        await super().end_session(session_id)
+        self._metering_totals.pop(session_id, None)
+        self._metering_units.pop(session_id, None)
+
     async def create_session(self, persona) -> NewSessionResponse:
         """
         Create a session and capture Kiro's legacy ``models`` payload.
@@ -317,14 +331,35 @@ class KiroAcpClient(JaiAcpClient):
             if meta.context_usage_percentage is not None:
                 usage.context_percent = meta.context_usage_percentage
             if meta.metering_usage:
-                # Kiro reports cost in credits, so `cost_currency` carries the
-                # unit token ("credit") rather than an ISO-4217 code — a
-                # deliberate stretch of the awareness `Usage` field so the
-                # metered cost can surface. Sum values in case several arrive.
-                amounts = [m.value for m in meta.metering_usage if m.value is not None]
-                if amounts:
-                    usage.cost_amount = sum(amounts)
-                    usage.cost_currency = meta.metering_usage[0].unit
+                # Kiro meters each turn as a delta, so the session total
+                # accumulates here across notifications. `cost_currency`
+                # carries the unit's plural name ("credits") rather than an
+                # ISO-4217 code — a deliberate stretch of the awareness
+                # `Usage` field so the metered cost can surface. The first
+                # named unit sticks for the session, and entries metered in a
+                # different unit are skipped so amounts in different units are
+                # never summed together.
+                unit = self._metering_units.get(meta.session_id)
+                delta = 0.0
+                metered = False
+                for entry in meta.metering_usage:
+                    if entry.value is None:
+                        continue
+                    entry_unit = entry.unit_plural or entry.unit
+                    if entry_unit is not None:
+                        if unit is None:
+                            unit = entry_unit
+                        elif entry_unit != unit:
+                            continue
+                    delta += entry.value
+                    metered = True
+                if metered:
+                    total = self._metering_totals.get(meta.session_id, 0.0) + delta
+                    self._metering_totals[meta.session_id] = total
+                    if unit is not None:
+                        self._metering_units[meta.session_id] = unit
+                    usage.cost_amount = total
+                    usage.cost_currency = unit or "credits"
             usage_provided = usage.model_dump(exclude_none=True)
             if usage_provided:
                 persona.report_usage(usage)
