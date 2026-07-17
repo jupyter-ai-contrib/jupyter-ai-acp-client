@@ -24,9 +24,10 @@ const PERSONAS = [
  *   - `response.usage` (experimental) — cumulative session token counts. The
  *     chip shows a token total with no ring; the popover lists the breakdown.
  *   - both.
- *   - a vendor extension: kiro-cli streams a bare context percentage in a
- *     `_kiro.dev/metadata` notification. The chip shows a ring and percent
- *     with no token counts.
+ *   - a vendor extension: kiro-cli streams a bare context percentage in
+ *     `_kiro.dev/metadata` notifications, with per-turn metering credits on
+ *     the turn-end one. The chip shows a ring and percent with no token
+ *     counts; the popover adds the accumulated session cost in credits.
  *
  * Each fixture persona wraps the same fake agent in a different `--mode`, so a
  * single suite can assert all four renderings. See fixtures/agents/usage_agent.py.
@@ -105,7 +106,7 @@ test.describe('session-usage', () => {
     await expect(card).toContainText('Output');
   });
 
-  test('vendor percent-only usage renders a ring without token counts', async ({
+  test('vendor percent and credits render without token counts', async ({
     page
   }) => {
     const helpers = new TestHelpers({ dir: TEST_DIR, page });
@@ -115,17 +116,26 @@ test.describe('session-usage', () => {
     await helpers.sendMessage('report usage');
     await helpers.waitForUsage();
 
-    // The agent reports only `contextUsagePercentage: 42` -> ring + "42%".
+    // `contextUsagePercentage: 42` -> ring + "42%".
     expect(await helpers.hasUsageRing()).toBe(true);
     expect(await helpers.usageChipText()).toBe('42%');
 
-    // The popover shows the context percent alone: no "X of Y" token counts,
-    // no cost, no session-token breakdown.
+    // The popover shows the context percent and the metered session cost in
+    // the agent's own unit: no "X of Y" token counts, no dollar amounts, no
+    // session-token breakdown.
     const card = await helpers.openUsageCard();
     await expect(card).toContainText('Context');
     await expect(card).toContainText('42%');
+    await expect(card).toContainText('Session cost');
+    await expect(card).toContainText('0.05 credits');
     await expect(card).not.toContainText(' of ');
     await expect(card).not.toContainText('$');
     await expect(card).not.toContainText('Session tokens');
+    await page.keyboard.press('Escape');
+
+    // A second turn's credits accumulate into the session total client-side.
+    await helpers.sendMessage('report usage again');
+    const cardAfter = await helpers.openUsageCard();
+    await expect(cardAfter).toContainText('0.10 credits');
   });
 });

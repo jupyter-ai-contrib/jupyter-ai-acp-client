@@ -26,7 +26,6 @@ from jupyter_ai_persona_manager import PersonaAwareness
 
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
 from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
-from jupyter_ai_acp_client.jai_connection import JaiClientSideConnection
 
 
 SESSION_ID = "sess-1"
@@ -48,7 +47,6 @@ def _make_client_and_persona():
     client = object.__new__(JaiAcpClient)
     client._prompt_locks_by_session = {}
     client._cancel_requested = {}
-    client._legacy_models_by_session = {}
     client._permission_manager = MagicMock()
 
     # Mock connection
@@ -263,7 +261,6 @@ def _real_usage_persona():
     persona = _ConcreteAcpPersona.__new__(_ConcreteAcpPersona)
     persona._acp_context_usage = None
     persona._acp_session_usage = None
-    persona._acp_context_percent = None
     persona.log = logging.getLogger("test")
     # A real awareness slot so `_sync_awareness_usage` -> `report_usage`
     # round-trips through the real typed properties.
@@ -307,213 +304,25 @@ class TestUsageStorage:
 
         assert persona.acp_session_usage is None
 
-    async def test_kiro_metadata_notification_records_context_percent(self):
-        client, _, _ = _make_client_and_persona()
-        persona = _real_usage_persona()
-        client._personas_by_session[SESSION_ID] = persona
 
-        await client.ext_notification(
-            "kiro.dev/metadata",
-            {"sessionId": SESSION_ID, "contextUsagePercentage": 1.252000093460083},
-        )
+class TestExtNotification:
+    """The generic client is agent-agnostic: every ext notification (including
+    vendor `kiro.dev/*` methods, now handled only by KiroAcpClient) is unknown
+    to it and rejected as JSON-RPC method-not-found."""
 
-        assert persona.acp_context_percent == pytest.approx(1.252000093460083)
-        # The percent is also published over awareness for the toolbar.
-        assert persona.get_usage().context_percent == pytest.approx(
-            1.252000093460083
-        )
-
-    async def test_kiro_metadata_for_unknown_session_is_ignored(self):
-        client, _, _ = _make_client_and_persona()
-        persona = _real_usage_persona()
-        client._personas_by_session[SESSION_ID] = persona
-
-        await client.ext_notification(
-            "kiro.dev/metadata",
-            {"sessionId": "nope", "contextUsagePercentage": 1.48},
-        )
-
-        assert persona.acp_context_percent is None
-
-    async def test_kiro_metadata_without_percentage_records_nothing(self):
-        client, _, _ = _make_client_and_persona()
-        persona = _real_usage_persona()
-        client._personas_by_session[SESSION_ID] = persona
-
-        await client.ext_notification(
-            "kiro.dev/metadata",
-            {
-                "sessionId": SESSION_ID,
-                "meteringUsage": [
-                    {"value": 0.031, "unit": "credit", "unitPlural": "credits"}
-                ],
-                "turnDurationMs": 2178,
-            },
-        )
-
-        assert persona.acp_context_percent is None
-
-    async def test_kiro_metadata_with_malformed_percentage_records_nothing(self):
-        client, _, _ = _make_client_and_persona()
-        persona = _real_usage_persona()
-        client._personas_by_session[SESSION_ID] = persona
-
-        for malformed in ("1.25", True, None, [1.25]):
-            await client.ext_notification(
-                "kiro.dev/metadata",
-                {"sessionId": SESSION_ID, "contextUsagePercentage": malformed},
-            )
-            assert persona.acp_context_percent is None, repr(malformed)
-
-
-class TestLegacyModels:
-    """Kiro-style legacy models: captured off the raw session responses,
-    handed over per session, applied via the legacy `session/set_model`."""
-
-    MODELS = {
-        "currentModelId": "claude-sonnet-5",
-        "availableModels": [
-            {"modelId": "auto", "name": "auto", "description": "Chosen by task"},
-            {"modelId": "claude-sonnet-5", "name": "claude-sonnet-5"},
-        ],
-    }
-
-    def _connection(self, response):
-        """A `JaiClientSideConnection` over a mocked inner Connection returning
-        `response` for any request, plus the (session_id, models) captures."""
-        conn = object.__new__(JaiClientSideConnection)
-        conn._conn = AsyncMock()
-        conn._conn.send_request = AsyncMock(return_value=response)
-        captured = []
-        conn.set_legacy_models_listener(
-            lambda session_id, models: captured.append((session_id, models))
-        )
-        return conn, captured
-
-    async def test_new_session_captures_legacy_models(self):
-        conn, captured = self._connection(
-            {"sessionId": "sess-9", "models": self.MODELS}
-        )
-
-        response = await conn.new_session(cwd="/tmp", mcp_servers=[])
-
-        # The typed response still validates; the legacy field is captured.
-        assert response.session_id == "sess-9"
-        assert captured == [("sess-9", self.MODELS)]
-
-    async def test_load_session_captures_models_under_requested_id(self):
-        # A session/load response has no sessionId of its own; the capture is
-        # keyed by the requested session ID.
-        conn, captured = self._connection({"models": self.MODELS})
-
-        await conn.load_session(cwd="/tmp", session_id="sess-9", mcp_servers=[])
-
-        assert captured == [("sess-9", self.MODELS)]
-
-    async def test_response_without_models_is_not_captured(self):
-        conn, captured = self._connection({"sessionId": "sess-9", "modes": None})
-
-        await conn.new_session(cwd="/tmp", mcp_servers=[])
-
-        assert captured == []
-
-    def test_store_and_pop_round_trip(self):
+    async def test_ext_notification_raises_method_not_found(self):
         client, _, _ = _make_client_and_persona()
 
-        client._store_legacy_models("sess-9", self.MODELS)
+        for method in ("kiro.dev/metadata", "kiro.dev/commands/available", "other.vendor/thing"):
+            with pytest.raises(RequestError) as exc_info:
+                await client.ext_notification(method, {"sessionId": SESSION_ID})
+            assert exc_info.value.code == -32601, method
 
-        assert client.pop_legacy_models("sess-9") == self.MODELS
-        # pop is one-shot: the captured payload is handed over once.
-        assert client.pop_legacy_models("sess-9") is None
-
-    async def test_set_session_model_sends_legacy_request(self):
-        client, conn, _ = _make_client_and_persona()
-
-        await client.set_session_model("auto", SESSION_ID)
-
-        conn.send_raw_request.assert_awaited_once_with(
-            "session/set_model", {"sessionId": SESSION_ID, "modelId": "auto"}
-        )
-
-
-class TestKiroCommands:
-    """Kiro's vendor commands notification is published as slash commands."""
-
-    async def test_commands_notification_publishes_slash_commands(self):
-        client, _, persona = _make_client_and_persona()
-        persona.report_slash_commands = MagicMock()
-
-        await client.ext_notification(
-            "kiro.dev/commands/available",
-            {
-                "sessionId": SESSION_ID,
-                "commands": [
-                    {"name": "/model", "description": "Select a model"},
-                    {
-                        "name": "compact",
-                        "description": "Compact context",
-                        "meta": {"local": True},
-                    },
-                    {"name": "/clear"},
-                ],
-                "tools": [],
-            },
-        )
-
-        commands = persona.report_slash_commands.call_args[0][0]
-        # Names are leading-slash normalized, like the standard update path.
-        assert [(c.name, c.description) for c in commands] == [
-            ("/model", "Select a model"),
-            ("/compact", "Compact context"),
-            ("/clear", None),
-        ]
-
-    async def test_commands_for_unknown_session_are_ignored(self):
-        client, _, persona = _make_client_and_persona()
-        persona.report_slash_commands = MagicMock()
-
-        await client.ext_notification(
-            "kiro.dev/commands/available",
-            {"sessionId": "nope", "commands": [{"name": "/model"}]},
-        )
-
-        persona.report_slash_commands.assert_not_called()
-
-    async def test_malformed_command_entries_are_skipped(self):
-        client, _, persona = _make_client_and_persona()
-        persona.report_slash_commands = MagicMock()
-
-        await client.ext_notification(
-            "kiro.dev/commands/available",
-            {
-                "sessionId": SESSION_ID,
-                "commands": ["not-a-dict", {}, {"name": 5}, {"name": "/ok"}],
-            },
-        )
-
-        commands = persona.report_slash_commands.call_args[0][0]
-        assert [(c.name, c.description) for c in commands] == [("/ok", None)]
-
-    async def test_empty_commands_keep_previous_advertisement(self):
-        client, _, persona = _make_client_and_persona()
-        persona.report_slash_commands = MagicMock()
-
-        await client.ext_notification(
-            "kiro.dev/commands/available",
-            {"sessionId": SESSION_ID, "commands": []},
-        )
-
-        persona.report_slash_commands.assert_not_called()
-
-    async def test_unknown_ext_notification_raises_method_not_found(self):
+    async def test_ext_method_raises_method_not_found(self):
         client, _, _ = _make_client_and_persona()
 
         with pytest.raises(RequestError) as exc_info:
-            await client.ext_notification(
-                "other.vendor/thing", {"sessionId": SESSION_ID}
-            )
-
-        # Specifically JSON-RPC method-not-found, not another error variant.
+            await client.ext_method("kiro.dev/metadata", {"sessionId": SESSION_ID})
         assert exc_info.value.code == -32601
 
 
