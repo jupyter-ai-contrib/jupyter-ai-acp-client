@@ -2,6 +2,41 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## 0.2.0
+
+([Full Changelog](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/compare/v0.1.5...4dc07a90698ee5cf2d1bdae62307b86de50008ba))
+
+### Enhancements made
+
+- Drop the input controls moved to persona-manager [#140](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/140) ([@andrii-i](https://github.com/andrii-i), [@dlqqq](https://github.com/dlqqq))
+- Cancel responses via persona-manager instead of a custom ACP stop route [#139](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/139) ([@dlqqq](https://github.com/dlqqq), [@andrii-i](https://github.com/andrii-i))
+- Implement the persona-manager awareness API in the ACP adapter [#138](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/138) ([@dlqqq](https://github.com/dlqqq), [@andrii-i](https://github.com/andrii-i))
+- Stamp persona/model/settings into message metadata; drop the active-persona REST [#135](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/135) ([@dlqqq](https://github.com/dlqqq), [@andrii-i](https://github.com/andrii-i))
+- Show context, token, and cost usage for the active persona in the chat input [#133](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/133) ([@andrii-i](https://github.com/andrii-i), [@dlqqq](https://github.com/dlqqq))
+- Add session controls and a persona selector to the chat input [#129](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/129) ([@andrii-i](https://github.com/andrii-i), [@dlqqq](https://github.com/dlqqq))
+- Add Kilo ACP persona [#127](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/127) ([@dominikbayerl](https://github.com/dominikbayerl), [@andrii-i](https://github.com/andrii-i))
+
+### Bugs fixed
+
+- Fix README [#131](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/131) ([@andrii-i](https://github.com/andrii-i), [@dlqqq](https://github.com/dlqqq))
+
+### Maintenance and upkeep improvements
+
+- Scope Kiro ACP workarounds to a KiroAcpClient subclass [#142](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/142) ([@dlqqq](https://github.com/dlqqq), [@andrii-i](https://github.com/andrii-i))
+- Add E2E test harness with fake ACP agents [#137](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/137) ([@dlqqq](https://github.com/dlqqq), [@andrii-i](https://github.com/andrii-i))
+- Remove deprecated Gemini CLI persona [#130](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/pull/130) ([@srdas](https://github.com/srdas), [@andrii-i](https://github.com/andrii-i), [@dlqqq](https://github.com/dlqqq))
+
+### Contributors to this release
+
+The following people contributed discussions, new ideas, code and documentation contributions, and review.
+See [our definition of contributors](https://github-activity.readthedocs.io/en/latest/use/#how-does-this-tool-define-contributions-in-the-reports).
+
+([GitHub contributors page for this release](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/graphs/contributors?from=2026-05-20&to=2026-07-22&type=c))
+
+@andrii-i ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Aandrii-i+updated%3A2026-05-20..2026-07-22&type=Issues)) | @dlqqq ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Adlqqq+updated%3A2026-05-20..2026-07-22&type=Issues)) | @dominikbayerl ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Adominikbayerl+updated%3A2026-05-20..2026-07-22&type=Issues)) | @srdas ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Asrdas+updated%3A2026-05-20..2026-07-22&type=Issues))
+
+<!-- <END NEW CHANGELOG ENTRY> -->
+
 ## 0.2.0rc1
 
 ([Full Changelog](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/compare/v0.2.0rc0...4dc07a90698ee5cf2d1bdae62307b86de50008ba))
@@ -18,8 +53,6 @@ See [our definition of contributors](https://github-activity.readthedocs.io/en/l
 ([GitHub contributors page for this release](https://github.com/jupyter-ai-contrib/jupyter-ai-acp-client/graphs/contributors?from=2026-07-16&to=2026-07-18&type=c))
 
 @andrii-i ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Aandrii-i+updated%3A2026-07-16..2026-07-18&type=Issues)) | @dlqqq ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyter-ai-acp-client+involves%3Adlqqq+updated%3A2026-07-16..2026-07-18&type=Issues))
-
-<!-- <END NEW CHANGELOG ENTRY> -->
 
 ## 0.2.0rc0
 
