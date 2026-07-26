@@ -3,6 +3,8 @@ from __future__ import annotations
 from jupyter_server.base.handlers import APIHandler
 import tornado
 
+from .base_acp_persona import BaseAcpPersona
+
 
 class PermissionHandler(APIHandler):
     """
