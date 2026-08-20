@@ -93,10 +93,18 @@ jobs:
           jupyter labextension list 2>&1 | grep -ie "@jupyter-ai/acp-client.*OK"
           python -m jupyterlab.browser_check --no-browser-test
 
-  integration-tests:
-    name: Integration tests
+  e2e:
+    name: E2E tests
     needs: build
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Renders as "E2E tests (default)", "E2E tests (+JCollab)",
+        # "E2E tests (+JSD)". Each variant maps to a nox session below that
+        # installs the matching transport into an isolated venv.
+        variant: [default, +JCollab, +JSD]
 
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/pw-browsers
@@ -113,42 +121,52 @@ jobs:
       with:
         name: extension-artifacts
 
-    - name: Install the extension
-      run: |
-        set -eux
-        python -m pip install "jupyterlab>=4.0.0,<5" jupyter_ai_acp_client*.whl
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
 
-    - name: Install dependencies
-      working-directory: ui-tests
-      env:
-        YARN_ENABLE_IMMUTABLE_INSTALLS: 0
-        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
-      run: jlpm install
+    - name: Install nox
+      run: uv tool install nox
 
-    - name: Set up browser cache
+    - name: Restore browser cache
       uses: actions/cache@v4
       with:
         path: |
           ${{ github.workspace }}/pw-browsers
         key: ${{ runner.os }}-${{ hashFiles('ui-tests/yarn.lock') }}
 
-    - name: Install browser
+    # Transport-independent, so it runs once at the job level: jlpm needs a
+    # bootstrap jupyterlab, and `playwright install-deps` needs sudo (not
+    # available inside a nox venv). nox reuses this node_modules + browser cache;
+    # the per-transport server deps are installed by nox in the next step.
+    - name: Set up ui-tests deps + browser
+      working-directory: ui-tests
+      env:
+        YARN_ENABLE_IMMUTABLE_INSTALLS: 0
+        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
       run: |
         set -eux
+        python -m pip install "jupyterlab>=4.0.0,<5"
+        jlpm install
         jlpm playwright install-deps
         jlpm playwright install chromium
-      working-directory: ui-tests
 
-    - name: Execute integration tests
-      working-directory: ui-tests
+    - name: Run E2E tests (${{ matrix.variant }})
       run: |
-        jlpm playwright test
+        set -eux
+        case "${{ matrix.variant }}" in
+          default)  SESSION="e2e(env='default')" ;;
+          +JCollab) SESSION="e2e(env='jcollab')" ;;
+          +JSD)     SESSION="e2e(env='jsd')" ;;
+          *) echo "unknown variant: ${{ matrix.variant }}" >&2; exit 1 ;;
+        esac
+        export E2E_WHEEL="$(pwd)/$(ls jupyter_ai_acp_client*.whl)"
+        nox -s "$SESSION"
 
     - name: Upload Playwright Test report
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: jupyter_ai_acp_client-playwright-tests
+        name: jupyter_ai_acp_client-playwright-tests-${{ matrix.variant }}
         path: |
           ui-tests/test-results
           ui-tests/playwright-report
