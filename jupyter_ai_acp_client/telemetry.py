@@ -101,6 +101,15 @@ def auto_emit_event(operation: str, details_fn=None):
                 return result
             except Exception as e:
                 fail_details = {**details, "error_message": f"{type(e).__name__}: {e}"}
+                # Include structured error data from RequestError if available
+                if hasattr(e, "code"):
+                    fail_details["error_code"] = str(e.code)
+                if hasattr(e, "data") and e.data is not None:
+                    import json
+                    try:
+                        fail_details["error_data"] = json.dumps(e.data)
+                    except (TypeError, ValueError):
+                        fail_details["error_data"] = str(e.data)
                 emit_event(self.event_logger, operation, "failure", fail_details)
                 raise
         return wrapper

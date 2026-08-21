@@ -359,6 +359,7 @@ class BaseAcpPersona(BasePersona):
 
             return response
 
+    @auto_emit_event("acp_auth_completed")
     async def _resume_after_auth(
         self, client: JaiAcpClient, session_id: str
     ) -> None:
@@ -428,6 +429,7 @@ class BaseAcpPersona(BasePersona):
         """
         return True
 
+    @auto_emit_event("acp_auth_required")
     async def handle_no_auth(self, message: Message) -> None:
         """
         Method called when the persona receives a message while the user is not

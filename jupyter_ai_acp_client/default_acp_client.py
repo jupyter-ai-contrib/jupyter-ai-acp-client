@@ -62,6 +62,7 @@ from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
 from .tool_call_renderer import ensure_serializable, extract_diffs, extract_diffs_from_raw_input
 from .permission_manager import PermissionManager
+from .telemetry import emit_event
 
 import traceback as tb_mod
 
@@ -516,6 +517,11 @@ class JaiAcpClient(Client):
             )
 
         try:
+            base_details = {
+                "persona_class": persona.__class__.__name__,
+                "tool_call_id": tool_call.tool_call_id,
+            }
+
             persona.log.info(
                 f"request_permission: CALLED session={session_id} "
                 f"tool_call_id={tool_call.tool_call_id} "
@@ -574,6 +580,12 @@ class JaiAcpClient(Client):
             if selected_option_id is None:
                 tc.permission_status = "resolved"
                 self._tool_call_manager.flush_tool_call(session_id, tool_call.tool_call_id, persona)
+                emit_event(
+                    persona.event_logger,
+                    "acp_tool_call_approval",
+                    "success",
+                    {**base_details, "decision": "cancelled"},
+                )
                 return RequestPermissionResponse(
                     outcome=DeniedOutcome(outcome="cancelled")
                 )
@@ -582,11 +594,24 @@ class JaiAcpClient(Client):
             tc.selected_option_id = selected_option_id
             self._tool_call_manager.flush_tool_call(session_id, tool_call.tool_call_id, persona)
 
+            emit_event(
+                persona.event_logger,
+                "acp_tool_call_approval",
+                "success",
+                {**base_details, "decision": "approved", "option_id": selected_option_id},
+            )
+
             return RequestPermissionResponse(
                 outcome=AllowedOutcome(option_id=selected_option_id, outcome='selected')
             )
         except Exception as e:
             persona.log.error(f"request_permission FAILED: {e}\n{tb_mod.format_exc()}")
+            emit_event(
+                persona.event_logger,
+                "acp_tool_call_approval",
+                "failure",
+                {**base_details, "error_message": f"{type(e).__name__}: {e}"},
+            )
             raise
 
     async def write_text_file(
