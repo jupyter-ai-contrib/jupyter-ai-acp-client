@@ -556,6 +556,47 @@ class BaseAcpPersona(BasePersona):
         client = await self.get_client()
         await client.stop_streaming(session_id)
 
+    async def _publish_permission_request(self, request_id, request):
+        """Render a pending permission on its ACP tool-call row.
+
+        Overrides ``BasePersona._publish_permission_request`` so ACP keeps its
+        rich tool-call rendering (diffs, kind-specific detail) instead of the
+        generic permission block. The tool call is located via
+        ``request.context`` (the ACP ``session_id`` / ``tool_call_id``), and the
+        frontend event identifiers are stamped onto it. Async because the ACP
+        client (which owns the tool-call renderer) is reached via ``get_client``.
+        """
+        ctx = request.context or {}
+        session_id = ctx.get("session_id")
+        tool_call_id = ctx.get("tool_call_id")
+        client = await self.get_client()
+        tcm = client._tool_call_manager
+        tc = tcm.get_tool_call(session_id, tool_call_id)
+        if tc is None:
+            return None
+        tc.permission_status = "pending"
+        tc.request_id = request_id
+        tc.chat_id = self.chat.get_id()
+        tc.persona_id = self.id
+        tcm.flush_tool_call(session_id, tool_call_id, self)
+        return tcm.get_message_id(session_id, tool_call_id)
+
+    async def _finalize_permission_request(
+        self, request_id, request, message_id, option_id
+    ):
+        """Reflect the resolved permission on its ACP tool-call row."""
+        ctx = request.context or {}
+        session_id = ctx.get("session_id")
+        tool_call_id = ctx.get("tool_call_id")
+        client = await self.get_client()
+        tcm = client._tool_call_manager
+        tc = tcm.get_tool_call(session_id, tool_call_id)
+        if tc is None:
+            return
+        tc.permission_status = "resolved"
+        tc.selected_option_id = option_id
+        tcm.flush_tool_call(session_id, tool_call_id, self)
+
     @property
     def acp_slash_commands(self) -> list[AvailableCommand]:
         """

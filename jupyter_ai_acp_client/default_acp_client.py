@@ -61,7 +61,6 @@ from asyncio.subprocess import Process
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
 from .tool_call_renderer import ensure_serializable, extract_diffs, extract_diffs_from_raw_input
-from .permission_manager import PermissionManager
 
 import traceback as tb_mod
 
@@ -110,7 +109,6 @@ class JaiAcpClient(Client):
         self._prompt_locks_by_session: dict[str, asyncio.Lock] = {}
         self._terminal_manager = TerminalManager(event_loop)
         self._tool_call_manager = ToolCallManager()
-        self._permission_manager = PermissionManager(event_loop)
         self._loading_sessions: dict[str, asyncio.Task[LoadSessionResponse]] = {}
         super().__init__(*args, **kwargs)
         self._cancel_requested: dict[str, bool] = {}
@@ -275,7 +273,7 @@ class JaiAcpClient(Client):
             persona.log.info(f"prompt_and_reply: starting for session {session_id}")
 
             # Set awareness to indicate writing
-            persona.set_writing_status(True)
+            persona.set_status()
 
             try:
                 # Build content blocks: text prompt + optional attachment resources
@@ -349,7 +347,7 @@ class JaiAcpClient(Client):
                 raise
             finally:
                 # Clear awareness writing state
-                persona.set_writing_status(False)
+                persona.clear_status()
 
     def _handle_agent_message_chunk(self, session_id: str, update: AgentMessageChunk) -> None:
         """Handle an AgentMessageChunk event by appending text to the message."""
@@ -488,17 +486,6 @@ class JaiAcpClient(Client):
         """
         persona._sync_awareness_usage()
 
-    def includes_session(self, session_id: str) -> bool:
-        """Returns whether this client manages the given session."""
-        return session_id in self._personas_by_session
-
-    def resolve_permission(self, session_id: str, tool_call_id: str, option_id: str) -> bool:
-        """
-        Called by the REST endpoint when the user clicks a permission button.
-        Delegates to PermissionManager to resolve the pending Future.
-        """
-        return self._permission_manager.resolve(session_id, tool_call_id, option_id)
-
     def list_sessions(self) -> list[str]:
         """Returns the list of active session IDs managed by this client."""
         return list(self._personas_by_session.keys())
@@ -508,7 +495,20 @@ class JaiAcpClient(Client):
     ) -> RequestPermissionResponse:
         """
         Handles `session/request_permission` requests from the ACP agent.
+
+        The request lifecycle and the user's decision transport are owned by
+        jupyter-ai-persona-manager: this maps the ACP request onto
+        ``BasePersona.request_permission`` (via ``PermissionRequest.context``,
+        which carries the ACP ``session_id`` / ``tool_call_id``). The ACP tool
+        call keeps its rich rendering (diffs, kind-specific detail) through the
+        persona's ``_publish_permission_request`` / ``_finalize_permission_request``
+        overrides.
         """
+        from jupyter_ai_persona_manager import (
+            PermissionOption as JaiPermissionOption,
+            PermissionRequest,
+        )
+
         persona = self._personas_by_session.get(session_id)
         if persona is None:
             raise RuntimeError(
@@ -516,26 +516,10 @@ class JaiAcpClient(Client):
             )
 
         try:
-            persona.log.info(
-                f"request_permission: CALLED session={session_id} "
-                f"tool_call_id={tool_call.tool_call_id} "
-                f"options_count={len(options)} "
-                f"options={[{'id': o.option_id, 'name': o.name, 'kind': o.kind} for o in options]} "
-                f"persona_class={persona.__class__.__name__}"
-            )
-
             permission_options = list(options)
 
-            future = self._permission_manager.create_request(
-                session_id, tool_call.tool_call_id, options=permission_options
-            )
-
-            persona.log.info(
-                f"request_permission: {len(permission_options)} permission_options"
-            )
-
-            # Set the permission options + pending status on the tool call state,
-            # then flush to Yjs so the frontend renders the buttons.
+            # Ensure the tool call state exists and carries the options + diffs,
+            # so the persona's render hook can display buttons and diffs.
             tc = self._tool_call_manager.get_tool_call(session_id, tool_call.tool_call_id)
             if tc is None:
                 # Agent sent request_permission without a prior tool_call start —
@@ -547,17 +531,11 @@ class JaiAcpClient(Client):
                 )
                 tc = self._tool_call_manager.get_tool_call(session_id, tool_call.tool_call_id)
             tc.permission_options = permission_options
-            tc.permission_status = "pending"
             tc.session_id = session_id
 
-            # Capture raw_input if not already set from ToolCallStart
             if tool_call.raw_input is not None and tc.raw_input is None:
                 tc.raw_input = ensure_serializable(tool_call.raw_input)
 
-            # Extract diffs from tool_call.content — agents may send
-            # FileEditToolCallContent here rather than on ToolCallStart.
-            # Fall back to parsing unified diffs from raw_input for agents
-            # that don't populate tool_call.content (e.g. OpenCode).
             diffs = extract_diffs(tool_call.content, root_dir=persona.parent.root_dir)
             if not diffs:
                 diffs = extract_diffs_from_raw_input(
@@ -566,24 +544,32 @@ class JaiAcpClient(Client):
             if diffs:
                 tc.diffs = diffs
 
-            self._tool_call_manager.flush_tool_call(session_id, tool_call.tool_call_id, persona)
+            # Delegate the request/await/resolve lifecycle + decision transport
+            # to persona-manager. The persona's render hooks (below) reflect the
+            # pending/resolved state on this tool call's row.
+            outcome = await persona.request_permission(
+                PermissionRequest(
+                    title=tool_call.title or "",
+                    options=[
+                        JaiPermissionOption(
+                            option_id=o.option_id, name=o.name, kind=o.kind
+                        )
+                        for o in permission_options
+                    ],
+                    context={
+                        "session_id": session_id,
+                        "tool_call_id": tool_call.tool_call_id,
+                    },
+                    correlation_id=tool_call.tool_call_id,
+                )
+            )
 
-            # Suspend until the user clicks a permission button
-            selected_option_id = await future
-
-            if selected_option_id is None:
-                tc.permission_status = "resolved"
-                self._tool_call_manager.flush_tool_call(session_id, tool_call.tool_call_id, persona)
+            if outcome.cancelled or outcome.option_id is None:
                 return RequestPermissionResponse(
                     outcome=DeniedOutcome(outcome="cancelled")
                 )
-
-            tc.permission_status = "resolved"
-            tc.selected_option_id = selected_option_id
-            self._tool_call_manager.flush_tool_call(session_id, tool_call.tool_call_id, persona)
-
             return RequestPermissionResponse(
-                outcome=AllowedOutcome(option_id=selected_option_id, outcome='selected')
+                outcome=AllowedOutcome(option_id=outcome.option_id, outcome="selected")
             )
         except Exception as e:
             persona.log.error(f"request_permission FAILED: {e}\n{tb_mod.format_exc()}")
@@ -767,7 +753,7 @@ class JaiAcpClient(Client):
                 persona.chat.update_message(msg, append=False, trigger_actions=[find_mentions])
 
         # Reset awareness
-        persona.set_writing_status(False)
+        persona.clear_status()
 
         self._cancel_pending_work(session_id)
 
@@ -779,9 +765,13 @@ class JaiAcpClient(Client):
         if persona:
             self._tool_call_manager.cancel_pending_tool_calls(session_id, persona)
 
-        # Cancel pending permissions
-        rejected = self._permission_manager.cancel_all_pending(session_id)
-        if rejected and persona:
-            persona.log.info(
-                f"_cancel_pending_work: auto-rejected {rejected} pending permission(s) for session {session_id}"
-            )
+        # Cancel pending permissions via persona-manager (owns the request
+        # lifecycle now). This resolves any awaiting request_permission as
+        # cancelled.
+        if persona:
+            rejected = persona.cancel_permissions()
+            if rejected:
+                persona.log.info(
+                    f"_cancel_pending_work: cancelled {rejected} pending "
+                    f"permission(s) for session {session_id}"
+                )

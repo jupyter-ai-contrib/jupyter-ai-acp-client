@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 from jupyter_server.extension.application import ExtensionApp
-from .routes import PermissionHandler
 
 
 class JaiAcpClientExtension(ExtensionApp):
@@ -10,9 +9,7 @@ class JaiAcpClientExtension(ExtensionApp):
     """
 
     name = "jupyter_ai_acp_client"
-    handlers = [
-        (r"ai/acp/permissions", PermissionHandler),
-    ]
+    handlers = []
 
     def initialize_settings(self):
         """Initialize router settings and register ACP event schema."""

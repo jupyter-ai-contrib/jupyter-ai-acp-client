@@ -1,64 +1,28 @@
-import { URLExt } from '@jupyterlab/coreutils';
+import { Event } from '@jupyterlab/services';
 
-import { ServerConnection } from '@jupyterlab/services';
-
-/**
- * Call a server extension endpoint under the given API namespace.
- *
- * @param namespace API namespace, e.g. 'ai/acp' (this extension) or 'api/ai'
- *   (the persona-manager extension).
- * @param endPoint API REST endpoint, appended to the namespace.
- * @param init Initial values for the request.
- * @returns The response body interpreted as JSON.
- */
-export async function requestAPI<T>(
-  namespace: string,
-  endPoint = '',
-  init: RequestInit = {}
-): Promise<T> {
-  // Make request to Jupyter API
-  const settings = ServerConnection.makeSettings();
-  const requestUrl = URLExt.join(settings.baseUrl, namespace, endPoint);
-
-  let response: Response;
-  try {
-    response = await ServerConnection.makeRequest(requestUrl, init, settings);
-  } catch (error) {
-    throw new ServerConnection.NetworkError(error as any);
-  }
-
-  let data: any = await response.text();
-
-  if (data.length > 0) {
-    try {
-      data = JSON.parse(data);
-    } catch (error) {
-      console.log('Not a JSON response body.', response);
-    }
-  }
-
-  if (!response.ok) {
-    throw new ServerConnection.ResponseError(response, data.message || data);
-  }
-
-  return data;
-}
+export const PERMISSION_RESPONSE_EVENT_SCHEMA_ID =
+  'https://schema.jupyter.org/jupyter_ai_persona_manager/permission_response/v1';
 
 /**
- * Send the user's permission decision to the backend.
+ * Send the user's permission decision to the server by emitting a
+ * `permission_response` Jupyter Event (client -> server). This replaces the
+ * previous bespoke REST endpoint: the request lifecycle is now owned by
+ * jupyter-ai-persona-manager, which routes the event by (chat_id, persona_id,
+ * request_id) to the requesting persona.
  */
 export async function submitPermissionDecision(
-  sessionId: string,
-  toolCallId: string,
-  optionId: string
+  events: Event.IManager,
+  ids: { chat_id: string; persona_id: string; request_id: string },
+  optionId: string | null
 ): Promise<void> {
-  await requestAPI('ai/acp', 'permissions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      session_id: sessionId,
-      tool_call_id: toolCallId,
+  await events.emit({
+    schema_id: PERMISSION_RESPONSE_EVENT_SCHEMA_ID,
+    version: '1',
+    data: {
+      chat_id: ids.chat_id,
+      persona_id: ids.persona_id,
+      request_id: ids.request_id,
       option_id: optionId
-    })
+    }
   });
 }

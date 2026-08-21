@@ -76,6 +76,13 @@ class ToolCallManager:
             return None
         return session.tool_calls.get(tool_call_id)
 
+    def get_message_id(self, session_id: str, tool_call_id: str) -> Optional[str]:
+        """Return the Yjs message id a tool call was rendered into, if any."""
+        session = self._sessions.get(session_id)
+        if session is None:
+            return None
+        return session.tool_call_message_ids.get(tool_call_id)
+
     def _create_message(self, session_id: str, persona: BasePersona) -> str:
         """Create a new Yjs message and return its ID.
 
@@ -90,7 +97,7 @@ class ToolCallManager:
         session.current_message_id = message_id
         session.all_message_ids.append(message_id)
         persona.log.info(f"Created message {message_id} for session {session_id}")
-        persona.set_writing_status(message_id)
+        persona.set_status()
 
         return message_id
 

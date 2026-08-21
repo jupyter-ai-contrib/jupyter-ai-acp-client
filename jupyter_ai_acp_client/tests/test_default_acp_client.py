@@ -46,7 +46,6 @@ def _make_client_and_persona():
     client = object.__new__(JaiAcpClient)
     client._prompt_locks_by_session = {}
     client._cancel_requested = {}
-    client._permission_manager = MagicMock()
 
     # Mock connection
     conn = AsyncMock()
@@ -261,11 +260,16 @@ def _real_usage_persona():
     persona._acp_context_usage = None
     persona._acp_session_usage = None
     persona.log = logging.getLogger("test")
+    # Permission/tool-call state that BasePersona.__init__ would set (bypassed
+    # here via __new__); the cancel-on-stop path touches these.
+    persona._pending_permissions = {}
+    persona._tool_calls = {}
+    persona._tool_call_message = {}
     # A real state slot so `_sync_awareness_usage` -> `report_usage`
     # round-trips through the real typed properties.
     persona.state = _state()
     persona.chat = MagicMock()
-    # `set_writing_status()` (called incidentally by `prompt_and_reply`) builds
+    # `set_status()` (called incidentally by `prompt_and_reply`) builds
     # `as_user()`, which reads `self.defaults`; this persona has none, so mock it.
     persona.as_user = MagicMock()
     return persona

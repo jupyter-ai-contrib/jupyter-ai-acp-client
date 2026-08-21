@@ -43,6 +43,11 @@ class ToolCallState(BaseModel):
     selected_option_id: Optional[str] = None
     session_id: Optional[str] = None
     diffs: Optional[list[ToolCallDiff]] = None
+    # Identifiers the frontend echoes back in the persona-manager
+    # `permission_response` event (set when a permission is attached).
+    request_id: Optional[str] = None
+    chat_id: Optional[str] = None
+    persona_id: Optional[str] = None
 
 
 def _resolve_path(path: str, root_dir: Optional[str]) -> str:

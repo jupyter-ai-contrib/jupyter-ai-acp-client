@@ -5,7 +5,7 @@ import {
 
 import { IMessagePreambleRegistry } from '@jupyter/chat';
 
-import { ToolCallsComponent } from './tool-calls';
+import { ToolCallsComponent, setPermissionEventManager } from './tool-calls';
 
 /**
  * Plugin registering the ACP tool-call UI (tool calls, permission requests,
@@ -21,6 +21,9 @@ export const toolCallsPlugin: JupyterFrontEndPlugin<void> = {
     app: JupyterFrontEnd,
     preambleRegistry: IMessagePreambleRegistry | null
   ) => {
+    // The permission buttons emit a `permission_response` Jupyter Event; give
+    // the renderer the event manager to emit with.
+    setPermissionEventManager(app.serviceManager.events);
     if (preambleRegistry) {
       preambleRegistry.addComponent(ToolCallsComponent);
     } else {

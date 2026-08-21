@@ -5,9 +5,21 @@ import {
   MessagePreambleProps
 } from '@jupyter/chat';
 import { PageConfig, PathExt } from '@jupyterlab/coreutils';
+import { Event } from '@jupyterlab/services';
 import { submitPermissionDecision } from './request';
 import clsx from 'clsx';
 import { DiffView } from './diff-view';
+
+/**
+ * The Jupyter Events manager used to emit permission decisions. Set once by the
+ * plugin at activation (the preamble component props don't carry it).
+ */
+let permissionEventManager: Event.IManager | null = null;
+
+/** Set the event manager used to emit permission-decision events. */
+export function setPermissionEventManager(events: Event.IManager): void {
+  permissionEventManager = events;
+}
 
 /**
  * Convert an absolute filesystem path to a server-relative path.
@@ -391,7 +403,10 @@ function PermissionButtons({
   if (
     !toolCall.permission_options?.length ||
     toolCall.permission_status !== 'pending' ||
-    !toolCall.session_id
+    !toolCall.request_id ||
+    !toolCall.chat_id ||
+    !toolCall.persona_id ||
+    !permissionEventManager
   ) {
     return null;
   }
@@ -400,8 +415,12 @@ function PermissionButtons({
     setSubmitting(true);
     try {
       await submitPermissionDecision(
-        toolCall.session_id!,
-        toolCall.tool_call_id,
+        permissionEventManager!,
+        {
+          chat_id: toolCall.chat_id!,
+          persona_id: toolCall.persona_id!,
+          request_id: toolCall.request_id!
+        },
         optionId
       );
     } catch (err) {

@@ -70,6 +70,13 @@ declare module '@jupyter/chat' {
      * File diffs from ACP FileEditToolCallContent.
      */
     diffs?: IToolCallDiff[];
+    /**
+     * Identifiers echoed back in the persona-manager `permission_response`
+     * event when the user answers an attached permission request.
+     */
+    request_id?: string;
+    chat_id?: string;
+    persona_id?: string;
   }
 
   export interface IPermissionOption {
