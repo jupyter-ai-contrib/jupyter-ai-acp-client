@@ -2,24 +2,25 @@ import os
 import shutil
 
 from acp.exceptions import RequestError
-from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
+from jupyter_ai_persona_manager import PersonaDefaults
 from jupyterlab_chat.models import Message
 
 from ..base_acp_persona import BaseAcpPersona
-
-
-if shutil.which("codex-acp") is None:
-    raise PersonaRequirementsUnmet(
-        "This persona requires `codex-acp`, the ACP adapter for OpenAI Codex."
-        " Install it via `npm install -g @zed-industries/codex-acp`"
-        " then restart."
-    )
 
 
 class CodexAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["codex-acp"]
         super().__init__(*args, executable=executable, **kwargs)
+
+    def check_requirements(self) -> str | None:
+        if shutil.which("codex-acp") is None:
+            return (
+                "This persona requires `codex-acp`, the ACP adapter for OpenAI Codex."
+                " Install it via `npm install -g @zed-industries/codex-acp`"
+                " then restart."
+            )
+        return None
 
     @property
     def defaults(self) -> PersonaDefaults:

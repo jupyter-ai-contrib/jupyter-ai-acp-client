@@ -6,7 +6,7 @@ from asyncio.subprocess import Process
 from pathlib import Path
 
 from acp.exceptions import RequestError
-from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
+from jupyter_ai_persona_manager import PersonaDefaults
 from jupyterlab_chat.models import Message
 
 from ..base_acp_persona import BaseAcpPersona
@@ -39,67 +39,65 @@ def _is_auth_error(error: Exception) -> bool:
     )
 
 
-def _check_opencode() -> None:
-    """Raise PersonaRequirementsUnmet if opencode is missing or wrong version."""
-    if shutil.which("opencode") is None:
-        raise PersonaRequirementsUnmet(
-            "This persona requires `opencode` to be installed."
-            " See https://opencode.ai for installation instructions."
-        )
-
-    try:
-        result = subprocess.run(
-            ["opencode", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except subprocess.TimeoutExpired:
-        raise PersonaRequirementsUnmet(
-            "opencode --version command timed out."
-            " Please ensure opencode is properly installed."
-        )
-    except FileNotFoundError:
-        raise PersonaRequirementsUnmet(
-            "opencode command not found."
-            " Please ensure opencode is properly installed."
-        )
-
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        error_msg = (
-            f"opencode --version returned non-zero exit code {result.returncode}."
-            " Please ensure opencode is properly installed."
-        )
-        if stderr:
-            error_msg += f"\nStderr output: {stderr}"
-        raise PersonaRequirementsUnmet(error_msg)
-
-    version_match = re.search(r"(\d+\.\d+\.\d+)", result.stdout)
-    if not version_match:
-        raise PersonaRequirementsUnmet(
-            "Could not extract version number from opencode --version output."
-            f" Got: {result.stdout.strip()}"
-        )
-
-    version_str = version_match.group(1)
-    current_version = tuple(int(x) for x in version_str.split("."))
-
-    if current_version < (1, 0, 0) or current_version[0] >= 2:
-        raise PersonaRequirementsUnmet(
-            f"opencode version {version_str} is installed,"
-            " but version >=1.0.0,<2 is required."
-            " Please upgrade opencode. See https://opencode.ai for instructions."
-        )
-
-
-_check_opencode()
-
-
 class OpenCodeAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["opencode", "acp"]
         super().__init__(*args, executable=executable, **kwargs)
+
+    def check_requirements(self) -> str | None:
+        """Check that opencode is installed and meets version requirements."""
+        if shutil.which("opencode") is None:
+            return (
+                "This persona requires `opencode` to be installed."
+                " See https://opencode.ai for installation instructions."
+            )
+
+        try:
+            result = subprocess.run(
+                ["opencode", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except subprocess.TimeoutExpired:
+            return (
+                "opencode --version command timed out."
+                " Please ensure opencode is properly installed."
+            )
+        except FileNotFoundError:
+            return (
+                "opencode command not found."
+                " Please ensure opencode is properly installed."
+            )
+
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            error_msg = (
+                f"opencode --version returned non-zero exit code {result.returncode}."
+                " Please ensure opencode is properly installed."
+            )
+            if stderr:
+                error_msg += f"\nStderr output: {stderr}"
+            return error_msg
+
+        version_match = re.search(r"(\d+\.\d+\.\d+)", result.stdout)
+        if not version_match:
+            return (
+                "Could not extract version number from opencode --version output."
+                f" Got: {result.stdout.strip()}"
+            )
+
+        version_str = version_match.group(1)
+        current_version = tuple(int(x) for x in version_str.split("."))
+
+        if current_version < (1, 0, 0) or current_version[0] >= 2:
+            return (
+                f"opencode version {version_str} is installed,"
+                " but version >=1.0.0,<2 is required."
+                " Please upgrade opencode. See https://opencode.ai for instructions."
+            )
+
+        return None
 
     @property
     def defaults(self) -> PersonaDefaults:

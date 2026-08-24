@@ -3,23 +3,12 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from jupyter_ai_persona_manager import PersonaRequirementsUnmet
 
-# opencode.py has a module-level guard that raises PersonaRequirementsUnmet
-# when the opencode CLI is not installed. Mock the guard so we can import
-# helpers in CI without the CLI.
-_mock_run = MagicMock()
-_mock_run.returncode = 0
-_mock_run.stdout = "1.0.0"
-_mock_run.stderr = ""
-
-with patch("shutil.which", return_value="/usr/bin/opencode"), \
-     patch("subprocess.run", return_value=_mock_run):
-    from jupyter_ai_acp_client.acp_personas.opencode import (
-        _check_opencode,
-        _has_user_config,
-        _is_auth_error,
-    )
+from jupyter_ai_acp_client.acp_personas.opencode import (
+    OpenCodeAcpPersona,
+    _has_user_config,
+    _is_auth_error,
+)
 
 
 class TestIsAuthError:
@@ -74,17 +63,18 @@ def _mock_result(stdout="1.0.0", returncode=0, stderr=""):
 
 
 class TestCheckOpencode:
-    """Tests for _check_opencode() version guard."""
+    """Tests for OpenCodeAcpPersona.check_requirements() version guard."""
 
     def test_not_installed(self):
-        with patch("shutil.which", return_value=None):
-            with pytest.raises(PersonaRequirementsUnmet, match="requires `opencode`"):
-                _check_opencode()
+        with patch("jupyter_ai_acp_client.acp_personas.opencode.shutil.which", return_value=None):
+            result = OpenCodeAcpPersona.check_requirements(None)
+            assert result is not None
+            assert "requires `opencode`" in result
 
     def test_valid_version(self):
-        with patch("shutil.which", return_value="/usr/bin/opencode"), \
-             patch("subprocess.run", return_value=_mock_result("opencode v1.2.3")):
-            _check_opencode()  # should not raise
+        with patch("jupyter_ai_acp_client.acp_personas.opencode.shutil.which", return_value="/usr/bin/opencode"), \
+             patch("jupyter_ai_acp_client.acp_personas.opencode.subprocess.run", return_value=_mock_result("opencode v1.2.3")):
+            assert OpenCodeAcpPersona.check_requirements(None) is None
 
 
 class TestHasUserConfig:

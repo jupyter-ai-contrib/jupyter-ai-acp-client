@@ -21,6 +21,7 @@ def _make_persona(attachments_map: dict | None = None):
     persona.get_client = AsyncMock()
     persona.get_session_id = AsyncMock(return_value="sess-1")
     persona.is_authed = AsyncMock(return_value=True)
+    persona.check_requirements = MagicMock(return_value=None)
     persona._pending_session_recovery_context = False
     persona._was_initially_unauthenticated = False
 

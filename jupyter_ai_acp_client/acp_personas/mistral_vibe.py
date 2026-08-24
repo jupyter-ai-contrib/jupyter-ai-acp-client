@@ -2,7 +2,7 @@ import os
 import shutil
 
 from acp.exceptions import RequestError
-from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
+from jupyter_ai_persona_manager import PersonaDefaults
 from jupyterlab_chat.models import Message
 
 from ..base_acp_persona import BaseAcpPersona
@@ -23,18 +23,19 @@ def _is_auth_error(error: Exception) -> bool:
     )
 
 
-if shutil.which("vibe-acp") is None:
-    raise PersonaRequirementsUnmet(
-        "This persona requires `vibe-acp`, which is provided by the `mistral-vibe` package."
-        " Install it via `uv tool install mistral-vibe`, `pip install mistral-vibe`,"
-        " or Mistral's install script, then restart."
-    )
-
-
 class MistralVibeAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["vibe-acp"]
         super().__init__(*args, executable=executable, **kwargs)
+
+    def check_requirements(self) -> str | None:
+        if shutil.which("vibe-acp") is None:
+            return (
+                "This persona requires `vibe-acp`, which is provided by the `mistral-vibe` package."
+                " Install it via `uv tool install mistral-vibe`, `pip install mistral-vibe`,"
+                " or Mistral's install script, then restart."
+            )
+        return None
 
     @property
     def defaults(self) -> PersonaDefaults:

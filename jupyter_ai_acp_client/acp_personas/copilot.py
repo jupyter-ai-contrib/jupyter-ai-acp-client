@@ -2,7 +2,7 @@ import os
 import shutil
 
 from acp.exceptions import RequestError
-from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
+from jupyter_ai_persona_manager import PersonaDefaults
 from jupyterlab_chat.models import Message
 
 from ..base_acp_persona import BaseAcpPersona
@@ -25,22 +25,19 @@ def _is_auth_error(error: Exception) -> bool:
     )
 
 
-def _check_copilot() -> None:
-    if shutil.which("copilot") is None:
-        raise PersonaRequirementsUnmet(
-            "This persona requires the GitHub Copilot CLI."
-            " Install it via https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli"
-            " and restart."
-        )
-
-
-_check_copilot()
-
-
 class CopilotAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["copilot", "--acp", "--stdio"]
         super().__init__(*args, executable=executable, **kwargs)
+
+    def check_requirements(self) -> str | None:
+        if shutil.which("copilot") is None:
+            return (
+                "This persona requires the GitHub Copilot CLI."
+                " Install it via https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli"
+                " and restart."
+            )
+        return None
 
     @property
     def defaults(self) -> PersonaDefaults:

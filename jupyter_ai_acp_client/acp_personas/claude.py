@@ -1,13 +1,6 @@
-import shutil
-from jupyter_ai_persona_manager import PersonaRequirementsUnmet
-if shutil.which("claude-agent-acp") is None:
-    raise PersonaRequirementsUnmet(
-        "This persona requires the Claude Agent ACP adapter to be installed."
-        " Install it via `npm install -g @zed-industries/claude-agent-acp`"
-        " then restart."
-    )
-
 import os
+import shutil
+
 from jupyter_ai_persona_manager import PersonaDefaults
 from jupyterlab_chat.models import Message
 from acp.exceptions import RequestError
@@ -36,7 +29,16 @@ class ClaudeAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["claude-agent-acp"]
         super().__init__(*args, executable=executable, **kwargs)
-    
+
+    def check_requirements(self) -> str | None:
+        if shutil.which("claude-agent-acp") is None:
+            return (
+                "This persona requires the Claude Agent ACP adapter to be installed."
+                " Install it via `npm install -g @zed-industries/claude-agent-acp`"
+                " then restart."
+            )
+        return None
+
     @property
     def defaults(self) -> PersonaDefaults:
         avatar_path = str(os.path.abspath(

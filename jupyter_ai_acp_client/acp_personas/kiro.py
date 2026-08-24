@@ -9,73 +9,12 @@ from typing import ClassVar, Optional
 from jupyter_ai_persona_manager import (
     ModelOption,
     PersonaDefaults,
-    PersonaRequirementsUnmet,
 )
 from jupyterlab_chat.models import Message
 from ..base_acp_persona import BaseAcpPersona
 from ..default_acp_client import JaiAcpClient
 from ..kiro_client import KiroAcpClient, KiroModels
 
-# Raise `PersonaRequirementsUnmet` if `kiro-cli` not installed
-if shutil.which("kiro-cli") is None:
-    raise PersonaRequirementsUnmet(
-        "This persona requires `kiro-cli` to be installed."
-        " See https://kiro.dev for installation instructions."
-    )
-
-# Raise `PersonaRequirementsUnmet` if `kiro-cli<1.25.0`
-try:
-    result = subprocess.run(
-        ["kiro-cli", "--version"],
-        capture_output=True,
-        text=True,
-        timeout=5
-    )
-
-    # Check for non-zero exit code
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        error_msg = (
-            f"kiro-cli --version returned non-zero exit code {result.returncode}."
-            " Please ensure kiro-cli is properly installed."
-        )
-        if stderr:
-            error_msg += f"\nStderr output: {stderr}"
-
-        raise PersonaRequirementsUnmet(error_msg)
-
-    # Extract semver from stdout using regex
-    version_match = re.search(r'(\d+\.\d+\.\d+)', result.stdout)
-    if not version_match:
-        raise PersonaRequirementsUnmet(
-            "Could not extract version number from kiro-cli --version output."
-            f" Got: {result.stdout.strip()}"
-        )
-
-    version_str = version_match.group(1)
-    version_parts = [int(x) for x in version_str.split('.')]
-
-    # Check if version >= 1.25.0
-    required_version = (1, 25, 0)
-    current_version = tuple(version_parts)
-
-    if current_version < required_version or current_version[0] >= 3:
-        raise PersonaRequirementsUnmet(
-            f"kiro-cli version {version_str} is installed, but version >=1.25.0,<3 is required."
-            " Please upgrade kiro-cli. See https://kiro.dev for instructions."
-        )
-
-except subprocess.TimeoutExpired:
-    raise PersonaRequirementsUnmet(
-        "kiro-cli --version command timed out."
-        " Please ensure kiro-cli is properly installed."
-    )
-except FileNotFoundError:
-    # This shouldn't happen since we checked with shutil.which, but handle it anyway
-    raise PersonaRequirementsUnmet(
-        "kiro-cli command not found."
-        " Please ensure kiro-cli is properly installed."
-    )
 
 class KiroAcpPersona(BaseAcpPersona):
     _terminal_opened: bool
@@ -93,6 +32,63 @@ class KiroAcpPersona(BaseAcpPersona):
         # response (`None` until a session is created/loaded). Kiro advertises
         # models this way instead of through ACP v1 config options.
         self._kiro_models: Optional[KiroModels] = None
+
+    def check_requirements(self) -> str | None:
+        """Check that kiro-cli is installed and meets version requirements."""
+        if shutil.which("kiro-cli") is None:
+            return (
+                "This persona requires `kiro-cli` to be installed."
+                " See https://kiro.dev for installation instructions."
+            )
+
+        try:
+            result = subprocess.run(
+                ["kiro-cli", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            if result.returncode != 0:
+                stderr = result.stderr.strip()
+                error_msg = (
+                    f"kiro-cli --version returned non-zero exit code {result.returncode}."
+                    " Please ensure kiro-cli is properly installed."
+                )
+                if stderr:
+                    error_msg += f"\nStderr output: {stderr}"
+                return error_msg
+
+            version_match = re.search(r'(\d+\.\d+\.\d+)', result.stdout)
+            if not version_match:
+                return (
+                    "Could not extract version number from kiro-cli --version output."
+                    f" Got: {result.stdout.strip()}"
+                )
+
+            version_str = version_match.group(1)
+            version_parts = [int(x) for x in version_str.split('.')]
+            required_version = (1, 25, 0)
+            current_version = tuple(version_parts)
+
+            if current_version < required_version or current_version[0] >= 3:
+                return (
+                    f"kiro-cli version {version_str} is installed, but version >=1.25.0,<3 is required."
+                    " Please upgrade kiro-cli. See https://kiro.dev for instructions."
+                )
+
+        except subprocess.TimeoutExpired:
+            return (
+                "kiro-cli --version command timed out."
+                " Please ensure kiro-cli is properly installed."
+            )
+        except FileNotFoundError:
+            return (
+                "kiro-cli command not found."
+                " Please ensure kiro-cli is properly installed."
+            )
+
+        return None
 
     def set_kiro_models(self, models: Optional[KiroModels]) -> None:
         """

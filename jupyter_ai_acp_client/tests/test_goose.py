@@ -4,22 +4,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from acp.exceptions import RequestError
-from jupyter_ai_persona_manager import PersonaRequirementsUnmet
 
-# goose.py has a module-level guard that raises PersonaRequirementsUnmet
-# when the goose CLI is not installed. Mock the guard so we can import
-# helpers in CI without the CLI.
-_mock_run = MagicMock()
-_mock_run.returncode = 0
-_mock_run.stdout = "goose 1.28.0"
-_mock_run.stderr = ""
-
-with patch("shutil.which", return_value="/usr/bin/goose"), \
-     patch("subprocess.run", return_value=_mock_run):
-    from jupyter_ai_acp_client.acp_personas.goose import (
-        _check_goose,
-        _is_setup_error,
-    )
+from jupyter_ai_acp_client.acp_personas.goose import (
+    GooseAcpPersona,
+    _is_setup_error,
+)
 
 
 class TestIsSetupError:
@@ -87,31 +76,34 @@ def _mock_result(stdout="goose 1.28.0", returncode=0, stderr=""):
 
 
 class TestCheckGoose:
-    """Tests for _check_goose() version guard."""
+    """Tests for GooseAcpPersona.check_requirements() version guard."""
 
     def test_not_installed(self):
-        with patch("shutil.which", return_value=None):
-            with pytest.raises(PersonaRequirementsUnmet, match="requires the Goose CLI"):
-                _check_goose()
+        with patch("jupyter_ai_acp_client.acp_personas.goose.shutil.which", return_value=None):
+            result = GooseAcpPersona.check_requirements(None)
+            assert result is not None
+            assert "requires the Goose CLI" in result
 
     def test_valid_version(self):
-        with patch("shutil.which", return_value="/usr/bin/goose"), \
-             patch("subprocess.run", return_value=_mock_result("goose 1.28.0")):
-            _check_goose()  # should not raise
+        with patch("jupyter_ai_acp_client.acp_personas.goose.shutil.which", return_value="/usr/bin/goose"), \
+             patch("jupyter_ai_acp_client.acp_personas.goose.subprocess.run", return_value=_mock_result("goose 1.28.0")):
+            assert GooseAcpPersona.check_requirements(None) is None
 
     def test_old_version(self):
-        with patch("shutil.which", return_value="/usr/bin/goose"), \
-             patch("subprocess.run", return_value=_mock_result("goose 1.7.0")):
-            with pytest.raises(PersonaRequirementsUnmet, match=">=1.8.0"):
-                _check_goose()
+        with patch("jupyter_ai_acp_client.acp_personas.goose.shutil.which", return_value="/usr/bin/goose"), \
+             patch("jupyter_ai_acp_client.acp_personas.goose.subprocess.run", return_value=_mock_result("goose 1.7.0")):
+            result = GooseAcpPersona.check_requirements(None)
+            assert result is not None
+            assert ">=1.8.0" in result
 
     def test_exact_minimum_version(self):
-        with patch("shutil.which", return_value="/usr/bin/goose"), \
-             patch("subprocess.run", return_value=_mock_result("goose 1.8.0")):
-            _check_goose()  # should not raise
+        with patch("jupyter_ai_acp_client.acp_personas.goose.shutil.which", return_value="/usr/bin/goose"), \
+             patch("jupyter_ai_acp_client.acp_personas.goose.subprocess.run", return_value=_mock_result("goose 1.8.0")):
+            assert GooseAcpPersona.check_requirements(None) is None
 
     def test_major_version_2_rejected(self):
-        with patch("shutil.which", return_value="/usr/bin/goose"), \
-             patch("subprocess.run", return_value=_mock_result("goose 2.0.0")):
-            with pytest.raises(PersonaRequirementsUnmet, match=">=1.8.0,<2"):
-                _check_goose()
+        with patch("jupyter_ai_acp_client.acp_personas.goose.shutil.which", return_value="/usr/bin/goose"), \
+             patch("jupyter_ai_acp_client.acp_personas.goose.subprocess.run", return_value=_mock_result("goose 2.0.0")):
+            result = GooseAcpPersona.check_requirements(None)
+            assert result is not None
+            assert ">=1.8.0,<2" in result

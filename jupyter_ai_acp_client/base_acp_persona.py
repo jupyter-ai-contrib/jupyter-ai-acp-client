@@ -162,40 +162,56 @@ class BaseAcpPersona(BasePersona):
         self._executable = executable
         self._pending_session_recovery_context: bool = False
         self._was_initially_unauthenticated: bool = False
+        self._requirements_met: bool = self.check_requirements() is None
 
-        # Ensure each subclass has its own subprocess and client by checking if the
-        # class variable is defined directly on this class (not inherited)
-        if (
-            "_before_subprocess_future" not in self.__class__.__dict__
-            or self.__class__._before_subprocess_future is None
-        ):
-            self.__class__._before_subprocess_future = self.event_loop.create_task(
-                self.before_agent_subprocess()
-            )
-        if (
-            "_subprocess_future" not in self.__class__.__dict__
-            or self.__class__._subprocess_future is None
-        ):
-            self.__class__._subprocess_future = self.event_loop.create_task(
-                self._init_agent_subprocess()
-            )
-        if (
-            "_client_future" not in self.__class__.__dict__
-            or self.__class__._client_future is None
-        ):
-            self.__class__._client_future = self.event_loop.create_task(
-                self._init_client()
+        # Only start subprocess/client/session if requirements are met
+        if self._requirements_met:
+            # Ensure each subclass has its own subprocess and client by checking if the
+            # class variable is defined directly on this class (not inherited)
+            if (
+                "_before_subprocess_future" not in self.__class__.__dict__
+                or self.__class__._before_subprocess_future is None
+            ):
+                self.__class__._before_subprocess_future = self.event_loop.create_task(
+                    self.before_agent_subprocess()
+                )
+            if (
+                "_subprocess_future" not in self.__class__.__dict__
+                or self.__class__._subprocess_future is None
+            ):
+                self.__class__._subprocess_future = self.event_loop.create_task(
+                    self._init_agent_subprocess()
+                )
+            if (
+                "_client_future" not in self.__class__.__dict__
+                or self.__class__._client_future is None
+            ):
+                self.__class__._client_future = self.event_loop.create_task(
+                    self._init_client()
+                )
+
+            self._client_session_future = self.event_loop.create_task(
+                self._init_client_session()
             )
 
-        self._client_session_future = self.event_loop.create_task(
-            self._init_client_session()
-        )
         self._acp_slash_commands = []
         self._acp_modes = []
         self._acp_current_mode_id = None
         self._acp_config_options = []
         self._acp_context_usage = None
         self._acp_session_usage = None
+
+    def check_requirements(self) -> str | None:
+        """Check whether this persona's runtime requirements are met.
+
+        Returns None if the persona is ready to use, or a user-facing error
+        message string describing what is missing.
+
+        Subclasses should override this method to perform their own checks
+        (e.g. verifying that a CLI executable is installed and meets version
+        requirements).
+        """
+        return None
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -484,6 +500,12 @@ class BaseAcpPersona(BasePersona):
 
         This method may be overriden by child classes.
         """
+        # If requirements are not met, inform the user and return early
+        unmet = self.check_requirements()
+        if unmet:
+            self.send_message(f"⚠️ **@{self.defaults.name}** isn't available yet:\n\n{unmet}")
+            return
+
         # If not authenticated, return early
         if not await self.is_authed():
             await self.handle_no_auth(message)
