@@ -11,6 +11,9 @@ This client provides a `prompt_and_reply()` method which calls the ACP server
 and streams the reply back to the chat. In addition, it provides file read, file
 write, and terminal use capabilities.
 
+Grouped ACP tool call rendering in chat is provided by the
+`jupyter-chat-components` JupyterLab extension.
+
 This package also provides a default `BaseAcpPersona` class which can be easily
 extended to add ACP agents as AI personas in JupyterLab. This base class takes
 an additional `executable` argument which starts the ACP agent server. This
@@ -79,6 +82,7 @@ Currently, this package provides 8 personas:
 
 - JupyterLab >= 4.0.0
 - `jupyter-ai-persona-manager>=0.0.5`
+- `jupyter-chat-components>=0.4.0`
 - `agent_client_protocol`
 
 **Optional**
