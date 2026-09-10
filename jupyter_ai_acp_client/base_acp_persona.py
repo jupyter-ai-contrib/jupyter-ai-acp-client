@@ -29,6 +29,7 @@ from jupyter_ai_persona_manager import Usage as AwarenessUsage
 from jupyterlab_chat.models import FileAttachment, Message, NotebookAttachment
 
 from .default_acp_client import JaiAcpClient
+from .prompt_context import get_prompt_context
 from .telemetry import emit_event, auto_emit_event
 
 # A single session config option the agent advertises: either a select (one of
@@ -376,6 +377,7 @@ class BaseAcpPersona(BasePersona):
         After the user signs in, send a hidden prompt with chat history and a
         prescribed message template for the agent to follow.
         """
+        context = await get_prompt_context(None, self.chat.get_messages())
         history = self._build_history_context(
             preamble=(
                 "You just became available after the user signed in. "
@@ -396,6 +398,8 @@ class BaseAcpPersona(BasePersona):
                 "\"I'm logged in now and ready to help. What can I do for you?\""
             )
 
+        if context:
+            prompt += "\n\n" + context
         await client.prompt_and_reply(
             session_id=session_id,
             prompt=prompt,
@@ -592,6 +596,7 @@ class BaseAcpPersona(BasePersona):
             await self._resume_after_auth(client, session_id)
             return
 
+        context = await get_prompt_context(message, self.chat.get_messages())
         client = await self.get_client()
         session_id = await self.get_session_id()
         prompt = message.body.strip()
@@ -626,6 +631,8 @@ class BaseAcpPersona(BasePersona):
                 resolved.append(raw)
             attachments = resolved or None
 
+        if context:
+            prompt += "\n\n" + context
         await client.prompt_and_reply(
             session_id=session_id,
             prompt=prompt,
