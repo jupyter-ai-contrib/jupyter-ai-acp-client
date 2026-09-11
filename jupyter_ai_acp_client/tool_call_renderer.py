@@ -95,12 +95,22 @@ def extract_diffs_from_raw_input(
 
     Handles agents that send a unified diff string in raw_input.diff
     instead of using FileEditToolCallContent in tool_call.content.
+    Also handles agents that send create/write payloads as path + content.
     """
     if not isinstance(raw_input, dict):
         return None
 
-    filepath = raw_input.get("filepath") or raw_input.get("filePath")
+    filepath = (
+        raw_input.get("filepath")
+        or raw_input.get("filePath")
+        or raw_input.get("path")
+    )
     diff_str = raw_input.get("diff")
+    content = raw_input.get("content")
+
+    if filepath and isinstance(content, str):
+        path = _resolve_path(filepath, root_dir)
+        return [ToolCallDiff(path=path, new_text=content, old_text=None)]
 
     if not filepath or not isinstance(diff_str, str):
         return None
