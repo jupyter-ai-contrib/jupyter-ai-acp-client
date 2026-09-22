@@ -1,7 +1,9 @@
 """Tests for content block building and session management in JaiAcpClient."""
 
 import asyncio
+import json
 import logging
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,7 +20,11 @@ from acp.schema import (
     UsageUpdate,
 )
 
-from jupyterlab_chat.models import FileAttachment, NotebookAttachment
+from jupyterlab_chat.models import (
+    FileAttachment,
+    NotebookAttachment,
+    NotebookAttachmentCell,
+)
 
 from jupyter_ai_persona_manager.persona_events import PersonaSessionState
 
@@ -265,6 +271,205 @@ class TestPromptAndReplyContentBlocks:
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
         assert blocks[1].uri == "../../../etc/passwd"
+
+
+NOTEBOOK_MIME = "application/x-ipynb+json"
+"""What the chat frontend sets on every notebook-cell attachment."""
+
+
+def _write_notebook(tmp_path: Path, name: str, *cells: tuple[str, str]) -> Path:
+    """An nbformat 4.5 notebook of code cells, given as (id, source) pairs."""
+    notebook = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [
+            {
+                "cell_type": "code",
+                "id": cell_id,
+                "source": source,
+                "metadata": {},
+                "outputs": [],
+                "execution_count": None,
+            }
+            for cell_id, source in cells
+        ],
+    }
+    path = tmp_path / name
+    path.write_text(json.dumps(notebook), encoding="utf-8")
+    return path
+
+
+def _dragged(value: str, *ids: str) -> NotebookAttachment:
+    """A cell attachment as the chat frontend builds it: the notebook's
+    path, the notebook media type and the dragged cells' ids."""
+    cells = [NotebookAttachmentCell(id=cell_id, input_type="code") for cell_id in ids]
+    return NotebookAttachment(value=value, mimetype=NOTEBOOK_MIME, cells=cells)
+
+
+class TestNotebookCellAttachments:
+    """How prompt_and_reply sends a notebook attachment that names cells.
+    The rendering itself is tested in test_notebook_cells.py."""
+
+    @pytest.fixture(autouse=True)
+    def _without_jupyter_ai_tools(self, monkeypatch):
+        """Make the live-document lookup unavailable, so the file on disk is
+        the source regardless of what the environment has installed."""
+        monkeypatch.setitem(sys.modules, "jupyter_ai_tools", None)
+
+    async def test_notebook_cells_are_sent_as_text(self, tmp_path):
+        """The named cell is sent as a text block after the prompt, with the
+        notebook's absolute path, instead of a resource link."""
+        client, conn, _ = _make_client_and_persona()
+        path = _write_notebook(
+            tmp_path, "analysis.ipynb", ("c1", "secret = 1\n"), ("c2", "print(secret)\n")
+        )
+
+        await client.prompt_and_reply(
+            session_id=SESSION_ID,
+            prompt="explain",
+            attachments=[_dragged("analysis.ipynb", "c2")],
+            root_dir=str(tmp_path),
+        )
+
+        blocks = conn.prompt.call_args.kwargs["prompt"]
+        assert len(blocks) == 2
+        assert blocks[0].text == "explain"
+        assert isinstance(blocks[1], TextContentBlock)
+        assert "Cell 2 of 2 (code, never run, id=c2):" in blocks[1].text
+        assert "print(secret)" in blocks[1].text
+        assert "secret = 1" not in blocks[1].text
+        assert str(path.resolve()) in blocks[1].text
+
+    async def test_notebook_cells_renderer_failure_falls_back_to_resource_link(
+        self, tmp_path, monkeypatch
+    ):
+        """A failure inside the renderer is logged and the attachment is sent
+        as a resource link without the notebook media type, instead of
+        failing the prompt."""
+        client, conn, persona = _make_client_and_persona()
+        _write_notebook(tmp_path, "nb.ipynb", ("c1", "x = 1\n"))
+
+        async def boom(*args, **kwargs):
+            raise RuntimeError("renderer bug")
+
+        monkeypatch.setattr("jupyter_ai_acp_client.default_acp_client.render_cell_block", boom)
+
+        await client.prompt_and_reply(
+            session_id=SESSION_ID,
+            prompt="explain",
+            attachments=[_dragged("nb.ipynb", "c1")],
+            root_dir=str(tmp_path),
+        )
+
+        blocks = conn.prompt.call_args.kwargs["prompt"]
+        assert len(blocks) == 2
+        assert isinstance(blocks[1], ResourceContentBlock)
+        assert blocks[1].uri == (tmp_path / "nb.ipynb").resolve().as_uri()
+        assert blocks[1].mime_type is None
+        assert "Could not render the cells" in persona.log.warning.call_args.args[0]
+
+    async def test_stop_while_rendering_sends_no_prompt(self, tmp_path, monkeypatch):
+        """Rendering awaits a live lookup and a file read. If the user stops
+        the turn meanwhile, the prompt is not sent afterwards: the turn that
+        stop_streaming() finalized does not run unseen."""
+        client, conn, _ = _make_client_and_persona()
+        _write_notebook(tmp_path, "nb.ipynb", ("c1", "x = 1\n"))
+        rendering = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_render(*args, **kwargs):
+            rendering.set()
+            await release.wait()
+            return TextContentBlock(type="text", text="cells")
+
+        monkeypatch.setattr(
+            "jupyter_ai_acp_client.default_acp_client.render_cell_block", slow_render
+        )
+
+        task = asyncio.create_task(
+            client.prompt_and_reply(
+                session_id=SESSION_ID,
+                prompt="explain",
+                attachments=[_dragged("nb.ipynb", "c1")],
+                root_dir=str(tmp_path),
+            )
+        )
+        await asyncio.wait_for(rendering.wait(), 5)
+        await client.stop_streaming(SESSION_ID)
+        release.set()
+        response = await asyncio.wait_for(task, 5)
+
+        conn.cancel.assert_awaited_once_with(SESSION_ID)
+        conn.prompt.assert_not_awaited()
+        assert response.stop_reason == "cancelled"
+
+    async def test_notebook_attachment_without_cells_keeps_resource_link(self, tmp_path):
+        """A notebook attachment naming no cell id is still a resource link,
+        without the notebook media type."""
+        client, conn, _ = _make_client_and_persona()
+        _write_notebook(tmp_path, "nb.ipynb", ("c1", "x = 1\n"))
+        raw = {
+            "value": "nb.ipynb",
+            "type": "notebook",
+            "mimetype": NOTEBOOK_MIME,
+            "cells": [{"input_type": "code"}],
+        }
+
+        for attachment in (NotebookAttachment(value="nb.ipynb"), NotebookAttachment(**raw)):
+            await client.prompt_and_reply(
+                session_id=SESSION_ID,
+                prompt="review",
+                attachments=[attachment],
+                root_dir=str(tmp_path),
+            )
+            blocks = conn.prompt.call_args.kwargs["prompt"]
+            assert isinstance(blocks[1], ResourceContentBlock)
+            assert blocks[1].uri == (tmp_path / "nb.ipynb").resolve().as_uri()
+            assert blocks[1].mime_type is None
+
+    async def test_notebook_cells_without_root_dir_keep_resource_link(self):
+        """Without a root_dir the notebook cannot be located, so the
+        attachment stays a resource link to the relative path, without the
+        notebook media type, and the reason is logged."""
+        client, conn, persona = _make_client_and_persona()
+
+        await client.prompt_and_reply(
+            session_id=SESSION_ID,
+            prompt="explain",
+            attachments=[_dragged("nb.ipynb", "c1")],
+            root_dir=None,
+        )
+
+        blocks = conn.prompt.call_args.kwargs["prompt"]
+        assert isinstance(blocks[1], ResourceContentBlock)
+        assert blocks[1].uri == "nb.ipynb"
+        assert blocks[1].mime_type is None
+        messages = [call.args[0] for call in persona.log.debug.call_args_list]
+        assert any("did not resolve under root_dir" in message for message in messages)
+
+    async def test_notebook_cells_do_not_bypass_root_dir_guard(self, tmp_path):
+        """A cell attachment whose path escapes root_dir is not read; it falls
+        back to the raw path like any other attachment (a regression guard:
+        this behaviour predates cell rendering)."""
+        client, conn, persona = _make_client_and_persona()
+        _write_notebook(tmp_path, "outside.ipynb", ("c1", "secret = 1\n"))
+        root = tmp_path / "root"
+        root.mkdir()
+
+        await client.prompt_and_reply(
+            session_id=SESSION_ID,
+            prompt="explain",
+            attachments=[_dragged("../outside.ipynb", "c1")],
+            root_dir=str(root),
+        )
+
+        blocks = conn.prompt.call_args.kwargs["prompt"]
+        assert isinstance(blocks[1], ResourceContentBlock)
+        assert blocks[1].uri == "../outside.ipynb"
+        assert blocks[1].mime_type is None
+        assert persona.log.warning.called
+        assert not any(isinstance(b, TextContentBlock) for b in blocks[1:])
 
 
 def _real_usage_persona():
