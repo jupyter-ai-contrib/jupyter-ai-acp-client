@@ -43,7 +43,8 @@ from jupyter_ai_acp_client.kiro_client import (
     KiroModelOption,
     KiroModels,
 )
-from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona, _NotAuthenticated
+from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
+from jupyter_ai_persona_manager import PersonaNotAuthenticated
 
 _ALL_KIRO_MODELS = [
     KiroModels,
@@ -738,32 +739,30 @@ class TestKiroClientInjection:
 
 class TestKiroUnauthenticated:
     """
-    Kiro's wait-for-login auth handling. Unlike the base persona (which
-    fast-fails by raising `_NotAuthenticated`), Kiro overrides
-    `_on_unauthenticated` to show the login prompt and *return* — so `prepare()`
-    proceeds into `before_agent_subprocess()`'s poll loop and completes once the
-    user signs in, auto-resuming even when `prepare()` was triggered by
-    selection rather than a message.
+    Kiro's auth handling under the unified lifecycle. `prepare()` gates on auth
+    and raises `PersonaNotAuthenticated` (inherited base `_on_unauthenticated`)
+    when signed out — silently, so an eager prepare on selection opens no
+    terminal. The sign-in prompt is shown from `handle_message_no_auth` (which
+    the base bridges to Kiro's `handle_no_auth`), only on the message path.
     """
 
-    async def test_on_unauthenticated_prompts_and_does_not_raise(self):
+    async def test_on_unauthenticated_raises_silently(self):
+        # Kiro no longer overrides `_on_unauthenticated`; it inherits the base
+        # seam, which raises without prompting (no terminal on load).
         persona = _kiro_persona()
         persona.handle_no_auth = AsyncMock()
 
-        # Must NOT raise (the base default would); this is what keeps prepare()
-        # alive to wait for login instead of ending.
-        await persona._on_unauthenticated()
+        with pytest.raises(PersonaNotAuthenticated):
+            await persona._on_unauthenticated()
 
-        persona.handle_no_auth.assert_awaited_once_with(None)
+        # Raising is silent: no prompt from the auth gate itself.
+        persona.handle_no_auth.assert_not_awaited()
 
-    async def test_on_unauthenticated_differs_from_base_fast_fail(self):
-        # The base seam raises for the same call; Kiro overrides that to wait.
+    async def test_handle_message_no_auth_prompts_via_handle_no_auth(self):
+        # On the message path, the base `handle_message_no_auth` bridge calls
+        # Kiro's `handle_no_auth`, which shows the `kiro-cli login` prompt.
         persona = _kiro_persona()
         persona.handle_no_auth = AsyncMock()
 
-        with pytest.raises(_NotAuthenticated):
-            await BaseAcpPersona._on_unauthenticated(persona)
-
-        # Kiro's override, by contrast, returns without raising.
-        await persona._on_unauthenticated()
+        await persona.handle_message_no_auth(None)
         persona.handle_no_auth.assert_awaited_once_with(None)

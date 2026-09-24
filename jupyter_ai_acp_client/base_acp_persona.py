@@ -22,6 +22,8 @@ from jupyter_ai_persona_manager import (
     BasePersona,
     ModelConfiguration,
     ModelOption,
+    PersonaAuthManager,
+    PersonaNotAuthenticated,
     SettingConfiguration,
     SettingOption,
 )
@@ -63,11 +65,6 @@ def _flatten_select_options(options) -> list:
             flat.extend(item.options or [])
     return flat
 
-
-class _NotAuthenticated(Exception):
-    """Raised by `prepare()` when the user is not signed in, so the manager
-    re-runs `prepare()` on the next message. `handle_uncaught_exception` turns
-    it into a login prompt instead of a generic error."""
 
 
 class BaseAcpPersona(BasePersona):
@@ -172,6 +169,8 @@ class BaseAcpPersona(BasePersona):
 
     def __init__(self, *args, executable: list[str], **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.auth = PersonaAuthManager(parent=self, check_auth_fn=self.is_authed)
 
         self._executable = executable
         self._pending_session_recovery_context: bool = False
@@ -417,11 +416,11 @@ class BaseAcpPersona(BasePersona):
         `BasePersona`, awaiting an in-flight run for concurrent messages and
         re-running it after a failed one.
 
-        If the user is not authenticated, raise `_NotAuthenticated` so the
-        manager re-runs this on the next message (retrying login each time). The
-        login prompt is shown from `handle_uncaught_exception`. A class-level
-        startup task that previously failed is discarded here so a fresh persona
-        instance recreates it.
+        If the user is not authenticated, raise `PersonaNotAuthenticated` so the
+        manager marks this NOT_AUTHED and prompts the user to sign in on the
+        next message (retrying login each time). A class-level startup task that
+        previously failed is discarded here so a fresh persona instance
+        recreates it.
         """
         # Reset class-level startup tasks that failed so the checks below.
         self._discard_failed_startup()
@@ -469,7 +468,7 @@ class BaseAcpPersona(BasePersona):
         """
         Called by `prepare()` when the auth pre-check (`is_authed()`) fails.
         """
-        raise _NotAuthenticated()
+        raise PersonaNotAuthenticated()
 
     def _discard_failed_startup(self) -> None:
         """
@@ -540,6 +539,14 @@ class BaseAcpPersona(BasePersona):
         self.log.warning(
             "[%s] Received message while unauthenticated.", self.__class__.__name__
         )
+
+    async def handle_message_no_auth(self, message: "Message") -> None:
+        """Bridge the framework's no-auth hook to ACP's existing `handle_no_auth`."""
+        await self.handle_no_auth(message)
+
+    async def handle_auth(self) -> None:
+        """Resume after the user signs in."""
+        await self._ensure_prepared()
 
     def _build_history_context(
         self,
@@ -1065,7 +1072,7 @@ class BaseAcpPersona(BasePersona):
     async def handle_uncaught_exception(self, exc: Exception) -> None:
         """Show the login prompt for an auth failure from `prepare()`; show
         structured info for an ACP RequestError; otherwise fall back."""
-        if isinstance(exc, _NotAuthenticated):
+        if isinstance(exc, PersonaNotAuthenticated):
             await self.handle_no_auth(None)
             return
         if not isinstance(exc, RequestError):

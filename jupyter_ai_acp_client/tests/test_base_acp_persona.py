@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from jupyterlab_chat.models import Message
 
-from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona, _NotAuthenticated
+from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
+from jupyter_ai_persona_manager import PersonaNotAuthenticated
 
 
 def _make_chat_message(
@@ -835,7 +836,7 @@ class TestFunnelEvents:
         cls, persona = _make_lazy_persona()
         persona.is_authed = AsyncMock(return_value=False)
 
-        with pytest.raises(_NotAuthenticated):
+        with pytest.raises(PersonaNotAuthenticated):
             await persona.prepare()
 
         calls = [
@@ -856,17 +857,16 @@ class TestFunnelEvents:
 class TestOnUnauthenticated:
     """
     The `_on_unauthenticated()` seam `prepare()` calls when `is_authed()` is
-    False. The base default fast-fails (raise `_NotAuthenticated`); a persona
-    that waits for sign-in (e.g. Kiro) overrides it to prompt-and-return so
-    `prepare()` proceeds into its wait instead of ending. See the Kiro
-    auto-resume-after-login fix.
+    False. It raises `PersonaNotAuthenticated`, which the manager maps to
+    `PreparationState.NOT_AUTHED`; `on_message` then prompts the user to sign in
+    on the message path, so an eager prepare on selection stays silent.
     """
 
     async def test_base_default_raises_not_authenticated(self):
         """The base seam preserves the fast-fail contract."""
         cls, persona = _make_lazy_persona()
 
-        with pytest.raises(_NotAuthenticated):
+        with pytest.raises(PersonaNotAuthenticated):
             await persona._on_unauthenticated()
 
     async def test_prepare_fast_fails_when_seam_raises(self):
@@ -875,7 +875,7 @@ class TestOnUnauthenticated:
         cls, persona = _make_lazy_persona()
         persona.is_authed = AsyncMock(return_value=False)
 
-        with pytest.raises(_NotAuthenticated):
+        with pytest.raises(PersonaNotAuthenticated):
             await persona.prepare()
 
         assert "_subprocess_future" not in cls.__dict__
