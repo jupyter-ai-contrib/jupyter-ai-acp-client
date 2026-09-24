@@ -70,10 +70,10 @@ class MistralVibeAcpPersona(BaseAcpPersona):
                 "[Mistral Vibe] Authentication or configuration required: %s",
                 error,
             )
-            await self.handle_no_auth(message)
+            await self.handle_message_no_auth(message)
 
-    async def handle_no_auth(self, message: Message | None = None) -> None:
-        await super().handle_no_auth(message)
+    async def handle_message_no_auth(self, message: Message | None = None) -> None:
+        await super().handle_message_no_auth(message)
         self.send_message(
             "Mistral Vibe isn't configured yet."
             "\n\n- Run `vibe --setup` in a terminal to configure your API key."

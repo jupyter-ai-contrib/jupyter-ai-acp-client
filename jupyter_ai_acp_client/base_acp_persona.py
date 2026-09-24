@@ -427,12 +427,6 @@ class BaseAcpPersona(BasePersona):
 
         self.emit_once("acp_engagement")
 
-        if not await self.is_authed():
-            self.emit("acp_login", "failure")
-            await self._on_unauthenticated()
-
-        self.emit_once("acp_login")
-
         cls = self.__class__
         if (
             "_before_subprocess_future" not in cls.__dict__
@@ -455,20 +449,23 @@ class BaseAcpPersona(BasePersona):
         # Await startup to readiness so success/failure reflects the real
         # outcome. 
         try:
+            # Spawn ACP subprocess and initialize the connection.
             await self.get_agent_subprocess()
-            await self.get_client()
+            client = await self.get_client()
+            await client.get_connection()
+            # Assert the authentication requirement is met before the session.
+            await self.auth.assert_auth()
+            self.emit_once("acp_login")
+            # Create or load the session.
             await self.get_session_response()
+        except PersonaNotAuthenticated:
+            self.emit("acp_login", "failure")
+            raise
         except Exception:
             self.emit("acp_success", "failure")
             raise
 
         self.emit_once("acp_success")
-
-    async def _on_unauthenticated(self) -> None:
-        """
-        Called by `prepare()` when the auth pre-check (`is_authed()`) fails.
-        """
-        raise PersonaNotAuthenticated()
 
     def _discard_failed_startup(self) -> None:
         """
@@ -529,20 +526,13 @@ class BaseAcpPersona(BasePersona):
         """
         return True
 
-    async def handle_no_auth(self, message: Message | None = None) -> None:
-        """
-        Ask the user to sign in. Sets `_was_initially_unauthenticated` so the
-        agent can resume the request after sign-in. Subclasses override to send
-        the sign-in instructions and open a login terminal.
-        """
+    async def handle_message_no_auth(self, message: Message | None = None) -> None:
+        """Prompt the user to sign in and set `_was_initially_unauthenticated` so a reactive agent resumes on its next message. 
+        Subclasses override to add the sign-in instructions/terminal."""
         self._was_initially_unauthenticated = True
         self.log.warning(
             "[%s] Received message while unauthenticated.", self.__class__.__name__
         )
-
-    async def handle_message_no_auth(self, message: "Message") -> None:
-        """Bridge the framework's no-auth hook to ACP's existing `handle_no_auth`."""
-        await self.handle_no_auth(message)
 
     async def handle_auth(self) -> None:
         """Resume after the user signs in."""
@@ -1073,7 +1063,7 @@ class BaseAcpPersona(BasePersona):
         """Show the login prompt for an auth failure from `prepare()`; show
         structured info for an ACP RequestError; otherwise fall back."""
         if isinstance(exc, PersonaNotAuthenticated):
-            await self.handle_no_auth(None)
+            await self.handle_message_no_auth(None)
             return
         if not isinstance(exc, RequestError):
             await super().handle_uncaught_exception(exc)

@@ -154,18 +154,18 @@ class KiroAcpPersona(BaseAcpPersona):
         )
     
     async def before_agent_subprocess(self) -> None:
-        # Auth is gated up front in `prepare()` (which raises before spawning
-        # when unauthenticated), so by the time the subprocess starts the user
-        # is already signed in. Nothing to wait for here.
-        return None
+        # The kiro-cli ACP subprocess fails to start unless the user is signed
+        # in, so Kiro must gate auth before the subprocess spawns.
+        await self.auth.assert_auth()
+
     
     async def is_authed(self) -> bool:
         # One-shot auth check. `PersonaAuthManager` caches a True result, so
         # signed-in users aren't re-checked on every call.
         return await self._check_kiro_auth()
     
-    async def handle_no_auth(self, message: Message | None = None) -> None:
-        await super().handle_no_auth(message)
+    async def handle_message_no_auth(self, message: Message | None = None) -> None:
+        await super().handle_message_no_auth(message)
 
         # Determine which command to show
         use_device_flow = await self._should_use_device_flow()

@@ -576,12 +576,17 @@ def _make_lazy_persona(persona_cls=None, subprocess_impl=None):
     persona._emitted = set()
     persona.is_authed = AsyncMock(return_value=True)
     persona.event_logger = MagicMock()
+    persona.auth = MagicMock()
+    persona.auth.assert_auth = AsyncMock()
 
     async def _fake_subprocess():
         return "subprocess"
 
     async def _fake_client():
-        return "client"
+        # Client whose get_connection() is awaitable.
+        client = MagicMock()
+        client.get_connection = AsyncMock(return_value="connection")
+        return client
 
     async def _fake_session():
         return "session"
@@ -619,7 +624,7 @@ class TestPrepareLifecycle:
         assert persona._client_started() is True
         # The futures resolve to the stubbed startup results.
         assert await persona.get_agent_subprocess() == "subprocess"
-        assert await persona.get_client() == "client"
+        assert await persona.get_client() is not None
         assert await persona.get_session_response() == "session"
 
     async def test_prepare_is_idempotent(self):
@@ -834,7 +839,7 @@ class TestFunnelEvents:
 
     async def test_login_failure_and_no_success_when_unauthenticated(self):
         cls, persona = _make_lazy_persona()
-        persona.is_authed = AsyncMock(return_value=False)
+        persona.auth.assert_auth = AsyncMock(side_effect=PersonaNotAuthenticated())
 
         with pytest.raises(PersonaNotAuthenticated):
             await persona.prepare()
@@ -854,63 +859,45 @@ class TestFunnelEvents:
 
 
 
-class TestOnUnauthenticated:
+class TestUnauthenticated:
     """
-    The `_on_unauthenticated()` seam `prepare()` calls when `is_authed()` is
-    False. It raises `PersonaNotAuthenticated`, which the manager maps to
-    `PreparationState.NOT_AUTHED`; `on_message` then prompts the user to sign in
-    on the message path, so an eager prepare on selection stays silent.
+    Auth is asserted in `prepare()` via `self.auth.assert_auth()` (after the
+    connection, before the session). When it raises `PersonaNotAuthenticated`,
+    `prepare()` stops without creating a session; the manager maps that to
+    `PreparationState.NOT_AUTHED` and prompts on the message path. The base
+    `handle_message_no_auth` records `_was_initially_unauthenticated` so reactive
+    agents resume on their next message.
     """
 
-    async def test_base_default_raises_not_authenticated(self):
-        """The base seam preserves the fast-fail contract."""
+    async def test_prepare_raises_and_creates_no_session_when_unauthed(self):
         cls, persona = _make_lazy_persona()
-
-        with pytest.raises(PersonaNotAuthenticated):
-            await persona._on_unauthenticated()
-
-    async def test_prepare_fast_fails_when_seam_raises(self):
-        """With the default seam, an unauthenticated prepare() raises and spawns
-        nothing (the fast-fail path used by non-waiting agents)."""
-        cls, persona = _make_lazy_persona()
-        persona.is_authed = AsyncMock(return_value=False)
+        persona.auth.assert_auth = AsyncMock(side_effect=PersonaNotAuthenticated())
 
         with pytest.raises(PersonaNotAuthenticated):
             await persona.prepare()
 
-        assert "_subprocess_future" not in cls.__dict__
-        assert persona._client_session_future is None
+        # assert_auth runs before the session is obtained, so prepare never
+        # reaches success (no acp_success emitted, session not awaited).
+        ops = [
+            c.kwargs.get("data", {}).get("operation")
+            for c in persona.event_logger.emit.call_args_list
+        ]
+        assert "acp_success" not in ops
 
-    async def test_prepare_proceeds_when_seam_does_not_raise(self):
-        """A persona overriding `_on_unauthenticated()` to return (not raise)
-        makes prepare() continue past the auth gate and start the
-        subprocess/client/session — even though `is_authed()` is False. This is
-        the mechanism behind Kiro's wait-for-login auto-resume: prepare() stays
-        alive and completes once the agent's own wait (before_agent_subprocess)
-        resolves, rather than ending on the first no-auth check.
-        """
-        called = {"seam": 0}
-
-        class _WaitingPersona(BaseAcpPersona):
-            event_loop = None
-            event_logger = None
-
-            @property
-            def defaults(self):
-                return MagicMock()
-
-            async def _on_unauthenticated(self) -> None:
-                # Show a prompt (elided here) and return without raising.
-                called["seam"] += 1
-
-        cls, persona = _make_lazy_persona(persona_cls=_WaitingPersona)
-        persona.is_authed = AsyncMock(return_value=False)
-
+    async def test_prepare_proceeds_when_authed(self):
+        cls, persona = _make_lazy_persona()
+        # assert_auth passes (default), so startup completes.
         await persona.prepare()
 
-        # The seam ran instead of raising, and startup proceeded.
-        assert called["seam"] == 1
         assert cls._subprocess_future is not None
         assert cls._client_future is not None
         assert persona._client_session_future is not None
-        assert await persona.get_agent_subprocess() == "subprocess"
+
+    async def test_handle_message_no_auth_sets_resume_flag(self):
+        cls, persona = _make_lazy_persona()
+        persona._was_initially_unauthenticated = False
+
+        await BaseAcpPersona.handle_message_no_auth(persona, None)
+
+        assert persona._was_initially_unauthenticated is True
+

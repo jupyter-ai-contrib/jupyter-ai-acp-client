@@ -143,10 +143,10 @@ class OpenCodeAcpPersona(BaseAcpPersona):
                 "[OpenCode] Authentication or configuration required: %s",
                 error,
             )
-            await self.handle_no_auth(message)
+            await self.handle_message_no_auth(message)
 
-    async def handle_no_auth(self, message: Message | None = None) -> None:
-        await super().handle_no_auth(message)
+    async def handle_message_no_auth(self, message: Message | None = None) -> None:
+        await super().handle_message_no_auth(message)
         self.send_message(
             "OpenCode isn't configured yet."
             "\n\n- Run `opencode auth` in a terminal to configure your LLM provider."

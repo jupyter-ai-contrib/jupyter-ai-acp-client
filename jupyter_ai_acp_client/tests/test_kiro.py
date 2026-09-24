@@ -739,30 +739,43 @@ class TestKiroClientInjection:
 
 class TestKiroUnauthenticated:
     """
-    Kiro's auth handling under the unified lifecycle. `prepare()` gates on auth
-    and raises `PersonaNotAuthenticated` (inherited base `_on_unauthenticated`)
-    when signed out — silently, so an eager prepare on selection opens no
-    terminal. The sign-in prompt is shown from `handle_message_no_auth` (which
-    the base bridges to Kiro's `handle_no_auth`), only on the message path.
+    Kiro gates auth *before* spawning its subprocess (kiro-cli can't start
+    unauthenticated): `before_agent_subprocess` calls `auth.assert_auth()`, so an
+    unauthenticated prepare raises `PersonaNotAuthenticated` before the spawn and
+    the manager surfaces it as NOT_AUTHED. The sign-in prompt is shown by
+    `handle_message_no_auth` on the message path.
     """
 
-    async def test_on_unauthenticated_raises_silently(self):
-        # Kiro no longer overrides `_on_unauthenticated`; it inherits the base
-        # seam, which raises without prompting (no terminal on load).
+    async def test_before_agent_subprocess_asserts_auth(self):
+        # Raises when unauthenticated, so the subprocess never spawns.
         persona = _kiro_persona()
-        persona.handle_no_auth = AsyncMock()
+        persona.auth = MagicMock()
+        persona.auth.assert_auth = AsyncMock(side_effect=PersonaNotAuthenticated())
 
         with pytest.raises(PersonaNotAuthenticated):
-            await persona._on_unauthenticated()
+            await persona.before_agent_subprocess()
 
-        # Raising is silent: no prompt from the auth gate itself.
-        persona.handle_no_auth.assert_not_awaited()
-
-    async def test_handle_message_no_auth_prompts_via_handle_no_auth(self):
-        # On the message path, the base `handle_message_no_auth` bridge calls
-        # Kiro's `handle_no_auth`, which shows the `kiro-cli login` prompt.
+    async def test_before_agent_subprocess_passes_when_authed(self):
         persona = _kiro_persona()
-        persona.handle_no_auth = AsyncMock()
+        persona.auth = MagicMock()
+        persona.auth.assert_auth = AsyncMock()  # no raise
+
+        await persona.before_agent_subprocess()
+        persona.auth.assert_auth.assert_awaited_once()
+
+    async def test_handle_message_no_auth_shows_login_prompt(self):
+        persona = _kiro_persona()
+        persona._terminal_opened = True  # skip the terminal-opening branch
+        persona._was_initially_unauthenticated = False
+        persona.send_message = MagicMock()
+        persona._should_use_device_flow = AsyncMock(return_value=False)
 
         await persona.handle_message_no_auth(None)
-        persona.handle_no_auth.assert_awaited_once_with(None)
+
+        # Base recorded the pending request, and Kiro showed the kiro-cli prompt.
+        assert persona._was_initially_unauthenticated is True
+        assert any(
+            "kiro-cli login" in call.args[0]
+            for call in persona.send_message.call_args_list
+        )
+

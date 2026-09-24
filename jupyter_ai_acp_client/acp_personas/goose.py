@@ -127,10 +127,10 @@ class GooseAcpPersona(BaseAcpPersona):
                 str(error),
                 error.data,
             )
-            await self.handle_no_auth(message)
+            await self.handle_message_no_auth(message)
 
-    async def handle_no_auth(self, message: Message | None = None) -> None:
-        await super().handle_no_auth(message)
+    async def handle_message_no_auth(self, message: Message | None = None) -> None:
+        await super().handle_message_no_auth(message)
         self.send_message(
             "Goose isn't configured yet."
             "\n\n- Run `goose configure` in a terminal to set up a provider."

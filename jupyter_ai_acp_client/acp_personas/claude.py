@@ -73,13 +73,13 @@ class ClaudeAcpPersona(BaseAcpPersona):
         except RequestError as e:
             if _is_auth_error(e):
                 self.log.info("[Claude] User is not logged in.")
-                await self.handle_no_auth(message)
+                await self.handle_message_no_auth(message)
             else:
                 raise e
 
 
-    async def handle_no_auth(self, message: Message | None = None) -> None:
-        await super().handle_no_auth(message)
+    async def handle_message_no_auth(self, message: Message | None = None) -> None:
+        await super().handle_message_no_auth(message)
         # Claude supports several authentication options so we just send a
         # canned response and let the user choose for themselves.
         self.send_message(
