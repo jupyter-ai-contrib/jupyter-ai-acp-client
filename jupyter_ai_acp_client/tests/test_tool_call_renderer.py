@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from acp.schema import FileEditToolCallContent
 
 from jupyter_ai_acp_client.tool_call_renderer import (
@@ -11,6 +13,16 @@ from jupyter_ai_acp_client.tool_call_renderer import (
     update_tool_call_from_start,
     update_tool_call_from_progress,
 )
+
+# A POSIX-looking path such as '/srv' is not absolute on Windows (it has no
+# drive), so these tests build platform-native paths instead of hard-coding
+# POSIX spelling. `_p` mirrors what `_resolve_path` produces.
+_ANCHOR = Path.cwd().anchor
+
+
+def _abs(*parts: str) -> str:
+    """An absolute path on this platform, e.g. /srv/b.py or C:\\srv\\b.py."""
+    return str(Path(_ANCHOR).joinpath(*parts))
 
 
 def _serialize(tool_calls: dict[str, ToolCallState]) -> list[dict]:
@@ -704,19 +716,19 @@ class TestExtractDiffs:
                 path="b.py", newText="new", type="diff"
             )
         ]
-        result = extract_diffs(content, root_dir="/srv")
+        result = extract_diffs(content, root_dir=_abs("srv"))
         assert result is not None
-        assert result[0].path == "/srv/b.py"
+        assert result[0].path == _abs("srv", "b.py")
 
     def test_absolute_path_unchanged_with_root_dir(self):
         content = [
             FileEditToolCallContent(
-                path="/a/b.py", newText="new", type="diff"
+                path=_abs("a", "b.py"), newText="new", type="diff"
             )
         ]
-        result = extract_diffs(content, root_dir="/srv")
+        result = extract_diffs(content, root_dir=_abs("srv"))
         assert result is not None
-        assert result[0].path == "/a/b.py"
+        assert result[0].path == _abs("a", "b.py")
 
     def test_no_root_dir_preserves_relative_path(self):
         content = [
@@ -734,12 +746,12 @@ class TestExtractDiffs:
                 path="~/docs/b.py", newText="new", type="diff"
             )
         ]
-        result = extract_diffs(content, root_dir="/srv")
+        result = extract_diffs(content, root_dir=_abs("srv"))
         assert result is not None
-        # expanduser() resolves ~ to actual home dir
-        assert result[0].path.endswith("/docs/b.py")
+        # expanduser() resolves ~ to the actual home dir
+        assert result[0].path == str(Path.home() / "docs" / "b.py")
         assert not result[0].path.startswith("~")
-        assert result[0].path.startswith("/")
+        assert Path(result[0].path).is_absolute()
 
     def test_dotdot_path_resolved_with_root_dir(self):
         content = [
@@ -747,9 +759,9 @@ class TestExtractDiffs:
                 path="../nbs/b.py", newText="new", type="diff"
             )
         ]
-        result = extract_diffs(content, root_dir="/srv/root")
+        result = extract_diffs(content, root_dir=_abs("srv", "root"))
         assert result is not None
-        assert result[0].path == "/srv/nbs/b.py"
+        assert result[0].path == _abs("srv", "nbs", "b.py")
 
     def test_dot_relative_path_cleaned_with_root_dir(self):
         content = [
@@ -757,9 +769,9 @@ class TestExtractDiffs:
                 path="./dir/b.py", newText="new", type="diff"
             )
         ]
-        result = extract_diffs(content, root_dir="/srv")
+        result = extract_diffs(content, root_dir=_abs("srv"))
         assert result is not None
-        assert result[0].path == "/srv/dir/b.py"
+        assert result[0].path == _abs("srv", "dir", "b.py")
 
 
 class TestParseUnifiedDiff:
@@ -866,15 +878,17 @@ class TestExtractDiffsFromRawInput:
             "filepath": "foo.py",
             "diff": "@@ -0,0 +1,1 @@\n+x\n",
         }
-        result = extract_diffs_from_raw_input(raw, root_dir="/srv/project")
+        result = extract_diffs_from_raw_input(raw, root_dir=_abs("srv", "project"))
         assert result is not None
-        assert result[0].path == "/srv/project/foo.py"
+        assert result[0].path == _abs("srv", "project", "foo.py")
 
     def test_absolute_path_unchanged(self):
         raw = {
-            "filepath": "/abs/path/foo.py",
+            "filepath": _abs("abs", "path", "foo.py"),
             "diff": "@@ -0,0 +1,1 @@\n+x\n",
         }
-        result = extract_diffs_from_raw_input(raw, root_dir="/home/user/project")
+        result = extract_diffs_from_raw_input(
+            raw, root_dir=_abs("home", "user", "project")
+        )
         assert result is not None
-        assert result[0].path == "/abs/path/foo.py"
+        assert result[0].path == _abs("abs", "path", "foo.py")

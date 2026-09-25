@@ -108,6 +108,40 @@ To remove the extension, execute:
 pip uninstall jupyter_ai_acp_client
 ```
 
+## Windows
+
+ACP personas need no extra configuration on Windows. Two Windows-specific
+problems used to make every persona fail before its agent could start, and both
+are handled by the extension. `@Claude` and `@Codex` have been verified
+end to end on Windows; the other personas share this same startup path but have
+not been individually exercised there.
+
+- **The event loop.** `jupyter_server` runs the server on a `SelectorEventLoop`
+  on Windows, which cannot create subprocesses at all — spawning an agent raised
+  `NotImplementedError`. When the running loop lacks subprocess support, the
+  extension spawns the agent with `subprocess.Popen` and bridges its pipes onto
+  the loop instead. Servers configured to keep the `ProactorEventLoop` still get
+  native asyncio subprocesses.
+- **npm shims.** npm installs `claude-agent-acp` and friends as `.cmd` files, but
+  Windows only appends `.exe` when resolving a bare command name, so spawning
+  raised `FileNotFoundError: [WinError 2]` even though the command was on `PATH`.
+  Executables are now resolved with `shutil.which`, which honours `PATHEXT`.
+
+Agents are terminated by process tree, because an npm `.cmd` shim runs under an
+intermediate `cmd.exe` and killing only that would orphan the real agent.
+
+### Troubleshooting on Windows
+
+If a persona does not respond, check the adapter is visible to Python — this is
+the same lookup the extension performs:
+
+```bash
+python -c "import shutil; print(shutil.which('claude-agent-acp'))"
+```
+
+An empty result means the adapter is not on `PATH`. Reinstall that persona's
+adapter, then restart JupyterLab so the server picks up the new `PATH`.
+
 ## Troubleshoot
 
 If you are seeing the frontend extension, but it is not working, check
@@ -140,7 +174,8 @@ The `jlpm` command is JupyterLab's pinned version of
 
 # Set up a virtual environment and install package in development mode
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # macOS/Linux
+.venv\Scripts\activate      # Windows
 pip install --editable ".[dev,test]"
 
 # Link your development version of the extension with JupyterLab
