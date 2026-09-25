@@ -100,8 +100,9 @@ class TestPromptAndReplyContentBlocks:
         assert blocks[1].name == "main.py"
         assert blocks[1].mime_type == "text/x-python"
 
-    async def test_notebook_attachment_default_mime_type(self):
-        """Notebook attachments get application/x-ipynb+json when mimetype is None."""
+    async def test_notebook_attachment_without_mimetype_gets_none(self):
+        """A notebook attachment with no mimetype is sent without a media type,
+        like a file attachment: no application/x-ipynb+json default."""
         client, conn, _ = _make_client_and_persona()
 
         await client.prompt_and_reply(
@@ -112,7 +113,28 @@ class TestPromptAndReplyContentBlocks:
         )
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
-        assert blocks[1].mime_type == "application/x-ipynb+json"
+        assert isinstance(blocks[1], ResourceContentBlock)
+        assert blocks[1].mime_type is None
+
+    @pytest.mark.parametrize("attachment_class", [NotebookAttachment, FileAttachment])
+    async def test_notebook_mimetype_not_forwarded(self, attachment_class):
+        """application/x-ipynb+json, which the chat frontend sets on every
+        notebook-cell attachment and which agents may refuse, is dropped from
+        the link whichever attachment type carries it."""
+        client, conn, _ = _make_client_and_persona()
+        attachment = attachment_class(value="nb.ipynb", mimetype="application/x-ipynb+json")
+
+        await client.prompt_and_reply(
+            session_id=SESSION_ID,
+            prompt="review",
+            attachments=[attachment],
+            root_dir=None,
+        )
+
+        blocks = conn.prompt.call_args.kwargs["prompt"]
+        assert isinstance(blocks[1], ResourceContentBlock)
+        assert blocks[1].name == "nb.ipynb"
+        assert blocks[1].mime_type is None
 
     async def test_notebook_explicit_mimetype_preserved(self):
         """When notebook has explicit mimetype, it is preserved."""
@@ -147,7 +169,7 @@ class TestPromptAndReplyContentBlocks:
         assert blocks[0].text == "review all"
         assert blocks[1].name == "a.py"
         assert blocks[2].name == "b.ipynb"
-        assert blocks[2].mime_type == "application/x-ipynb+json"
+        assert blocks[2].mime_type is None
 
     async def test_none_attachments(self):
         """None attachments produces only the text block."""
