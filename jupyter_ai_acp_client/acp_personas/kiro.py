@@ -180,6 +180,9 @@ class KiroAcpPersona(BaseAcpPersona):
             if self._terminal_opened:
                 self.send_message("I've opened a new terminal to help with that.")
 
+        # Poll for sign-in and auto-resume once authenticated.
+        self.auth.start_poll()
+
     async def _check_kiro_auth(self) -> bool:
         """
         Helper method that checks if the client is authenticated with Kiro.

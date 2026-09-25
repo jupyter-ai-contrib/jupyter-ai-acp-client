@@ -769,6 +769,7 @@ class TestKiroUnauthenticated:
         persona._was_initially_unauthenticated = False
         persona.send_message = MagicMock()
         persona._should_use_device_flow = AsyncMock(return_value=False)
+        persona.auth = MagicMock()  # start_poll is a plain call
 
         await persona.handle_message_no_auth(None)
 
@@ -778,4 +779,6 @@ class TestKiroUnauthenticated:
             "kiro-cli login" in call.args[0]
             for call in persona.send_message.call_args_list
         )
+        # Opts into the resume poll.
+        persona.auth.start_poll.assert_called_once()
 
