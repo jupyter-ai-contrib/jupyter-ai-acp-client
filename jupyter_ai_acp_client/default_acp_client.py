@@ -65,6 +65,14 @@ from .permission_manager import PermissionManager
 
 import traceback as tb_mod
 
+NOTEBOOK_MIME_TYPE = "application/x-ipynb+json"
+"""Not forwarded on a ``resource_link``. The chat frontend sets it on every
+notebook-cell attachment, and an agent may refuse a media type it does not
+know: OpenCode fails the whole prompt with JSON-RPC -32603 on this one
+(anomalyco/opencode#50928). The ``.ipynb`` name already says what the file
+is, and a notebook attached from the file browser arrives with no media type
+at all."""
+
 class JaiAcpClient(Client):
     """
     The default ACP client. The client should be stored as a class attribute on each
@@ -285,7 +293,6 @@ class JaiAcpClient(Client):
                 if attachments:
                     for att in attachments:
                         att_value = att.value or ""
-                        att_type = att.type
 
                         # Resolve to absolute file:// URI when root_dir is available
                         if root_dir and att_value:
@@ -303,11 +310,11 @@ class JaiAcpClient(Client):
                         else:
                             uri = att_value
 
-                        # Determine MIME type: explicit value or notebook default
+                        # The link carries the attachment's own media type,
+                        # except the notebook type (see NOTEBOOK_MIME_TYPE).
                         mime_type = att.mimetype
-                        if mime_type is None and att_type == "notebook":
-                            mime_type = "application/x-ipynb+json"
-
+                        if mime_type == NOTEBOOK_MIME_TYPE:
+                            mime_type = None
                         content_blocks.append(
                             ResourceContentBlock(
                                 uri=uri,
