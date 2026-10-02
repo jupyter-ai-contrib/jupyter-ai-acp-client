@@ -148,7 +148,7 @@ source .venv/bin/activate
 pip install --editable ".[dev,test]"
 
 # Link your development version of the extension with JupyterLab
-jupyter labextension develop . --overwrite
+jupyter-builder develop . --overwrite
 # Server extension must be manually installed in develop mode
 jupyter server extension enable jupyter_ai_acp_client
 
@@ -183,7 +183,7 @@ jupyter server extension disable jupyter_ai_acp_client
 pip uninstall jupyter_ai_acp_client
 ```
 
-In development mode, you will also need to remove the symlink created by `jupyter labextension develop`
+In development mode, you will also need to remove the symlink created by `jupyter-builder develop`
 command. To find its location, you can run `jupyter labextension list` to figure out where the `labextensions`
 folder is located. Then you can remove the symlink named `@jupyter-ai/acp-client` within that folder.
 
@@ -196,9 +196,9 @@ This extension is using [Pytest](https://docs.pytest.org/) for Python code testi
 Install test dependencies (needed only once):
 
 ```sh
-pip install -e ".[test]"
+pip install -e ".[dev,test]"
 # Each time you install the Python package, you need to restore the front-end extension link
-jupyter labextension develop . --overwrite
+jupyter-builder develop . --overwrite
 ```
 
 To execute them, run:

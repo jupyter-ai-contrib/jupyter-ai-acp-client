@@ -466,7 +466,7 @@ source <path-to-venv>/bin/activate  # On macOS/Linux
 5. **Install the extension** (REQUIRED for JupyterLab to recognize it):
    ```bash
    pip install -e .
-   jupyter labextension develop . --overwrite
+   jupyter-builder develop . --overwrite
    jupyter server extension enable jupyter_ai_acp_client
    ```
 6. **Verify installation**:
@@ -494,7 +494,7 @@ Many issues arise from confusing these two steps:
 - **Output**: Creates files in `lib/` and `jupyter_ai_acp_client/labextension/`
 - **What it does NOT do**: Register the extension with JupyterLab
 
-#### `pip install -e .` + `jupyter labextension develop .` — Registers the Extension. Do this once as a setup step.
+#### `pip install -e .` + `jupyter-builder develop .` — Registers the Extension. Do this once as a setup step.
 
 - **What it does**: Tells JupyterLab where to find your extension
 - **Output**: Creates symlinks so changes are reflected
@@ -511,7 +511,7 @@ Many issues arise from confusing these two steps:
 
 ```bash
 pip install -e ".[dev,test]"
-jupyter labextension develop . --overwrite
+jupyter-builder develop . --overwrite
 jupyter server extension enable jupyter_ai_acp_client
 ```
 
@@ -586,7 +586,7 @@ Your extension should appear as **"enabled"** and **"OK"**.
 
 ```bash
 pip install -e .
-jupyter labextension develop . --overwrite
+jupyter-builder develop . --overwrite
 jupyter server extension enable jupyter_ai_acp_client
 ```
 
@@ -625,7 +625,7 @@ jlpm clean:all       # Clean build artifacts
 jlpm install         # Only needed if you used 'git clean -fdX'
 jlpm build
 pip install -e ".[dev,test]"
-jupyter labextension develop . --overwrite
+jupyter-builder develop . --overwrite
 jupyter server extension enable jupyter_ai_acp_client
 ```
 
