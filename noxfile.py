@@ -51,7 +51,7 @@ def e2e(session: nox.Session, env: str) -> None:
     """Run the ui-tests suite against one transport."""
     # The prebuilt wheel from the CI ``build`` job; from source for local runs.
     target = os.environ.get("E2E_WHEEL") or "."
-    session.install("jupyterlab>=4.0.0,<5", target, *_ENVS[env])
+    session.install("jupyterlab>=4.6.0,<5", target, *_ENVS[env])
     with session.chdir("ui-tests"):
         session.run("jlpm", "install", external=True)
         session.run("jlpm", "playwright", "install", "chromium", external=True)
