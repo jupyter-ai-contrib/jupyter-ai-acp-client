@@ -1,0 +1,60 @@
+name: Test Windows
+
+on:
+  push:
+    branches: main
+  pull_request:
+    branches: '*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both ends of the supported range. 3.14 matters specifically because
+        # it deprecates asyncio event loop policies, which is how jupyter_server
+        # selects the loop that caused the original Windows failure.
+        python-version: ['3.10', '3.14']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[test]
+
+      - name: Run tests
+        run: pytest -vv -r ap jupyter_ai_acp_client/tests/
+
+      - name: Verify the server extension loads
+        run: |
+          jupyter server extension list
+          # Select-String -Quiet returns a boolean; it does not set an exit
+          # code, so the failure has to be raised explicitly.
+          if (-not (jupyter server extension list 2>&1 |
+                    Select-String -Pattern "jupyter_ai_acp_client.*OK" -Quiet)) {
+            throw "server extension did not report OK"
+          }
+
+      # Guards the two independent Windows defects end to end, against a real
+      # npm-installed `.cmd` shim rather than a mock:
+      #   1. SelectorEventLoop cannot spawn subprocesses (NotImplementedError)
+      #   2. CreateProcessW only resolves `.exe`, so npm shims are invisible
+      #      to a bare command name (FileNotFoundError: [WinError 2])
+      - name: Install an ACP adapter
+        run: npm install -g @agentclientprotocol/claude-agent-acp
+
+      - name: Spawn a real ACP adapter on a SelectorEventLoop
+        run: python jupyter_ai_acp_client/tests/_windows_smoke.py
