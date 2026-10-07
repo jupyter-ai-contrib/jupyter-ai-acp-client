@@ -29,10 +29,12 @@ def persona_type():
         get_session_response = BaseAcpPersona.get_session_response
         get_session_id = BaseAcpPersona.get_session_id
         _shutdown = BaseAcpPersona._shutdown
+        _client_started = BaseAcpPersona._client_started
 
         def __init__(self):
             self.event_loop = asyncio.get_running_loop()
             self.id = "test"
+            self._was_initially_unauthenticated = False
             self.log = MagicMock()
             self.before_agent_subprocess = AsyncMock()
             self._init_agent_subprocess = AsyncMock(
@@ -220,3 +222,21 @@ async def test_pending_stale_session_is_cancelled(persona):
     assert await persona.get_session_id() == "new"
     assert old_future.cancelled()
     persona._init_client_session.assert_awaited_once()
+
+
+async def test_prepared_persona_recovers_without_restarting_prepare():
+    from .test_base_acp_persona import _make_lazy_persona
+
+    cls, persona = _make_lazy_persona()
+    await persona.prepare()
+    old_session = persona._client_session_future
+    old_process = await persona.get_agent_subprocess()
+    old_process.returncode = 1
+    persona._notebook_guidance_sent = True
+
+    assert await persona.get_session_response() == "session"
+    assert persona._client_session_future is not old_session
+    assert await persona.get_agent_subprocess() is not old_process
+    assert persona._session_client_future is cls._client_future
+    assert persona._notebook_guidance_sent is False
+    persona.auth.assert_auth.assert_awaited_once()

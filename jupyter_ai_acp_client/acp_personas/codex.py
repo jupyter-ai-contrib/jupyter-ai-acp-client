@@ -46,13 +46,16 @@ class CodexAcpPersona(BaseAcpPersona):
                 raise
 
             self.log.info("[Codex] Authentication required: %s", error)
-            await self.handle_no_auth(message)
+            await self.handle_message_no_auth(message)
 
-    async def handle_no_auth(self, message: Message) -> None:
+    async def handle_message_no_auth(self, message: Message | None = None) -> None:
+        await super().handle_message_no_auth(message)
         self.send_message(
             "Codex isn't configured yet."
             "\n\n- Set `OPENAI_API_KEY` (or `CODEX_API_KEY`) before starting JupyterLab."
-            "\n\n- Or install the Codex CLI (`npm i -g @openai/codex`)"
-            " and run `codex login` to log in with your ChatGPT account."
+            "\n\n- Or install the Codex CLI:"
+            "\n\n```\nnpm i -g @openai/codex\n```"
+            "\n\nThen log in with your ChatGPT account:"
+            "\n\n```\ncodex login\n```"
             "\n\nRestart the JupyterLab server after either step."
         )

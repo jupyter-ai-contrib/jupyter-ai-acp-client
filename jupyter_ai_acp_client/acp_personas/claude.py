@@ -13,6 +13,25 @@ from jupyterlab_chat.models import Message
 from acp.exceptions import RequestError
 
 from ..base_acp_persona import BaseAcpPersona
+
+
+def _is_auth_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return any(
+        keyword in message
+        for keyword in (
+            "auth",
+            "login",
+            "not signed in",
+            "not authenticated",
+            "token",
+            "credential",
+            "forbidden",
+            "unauthorized",
+        )
+    )
+
+
 class ClaudeAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["claude-agent-acp"]
@@ -52,18 +71,20 @@ class ClaudeAcpPersona(BaseAcpPersona):
         try:
             await super().process_message(message)
         except RequestError as e:
-            if "Authentication required" in str(e):
+            if _is_auth_error(e):
                 self.log.info("[Claude] User is not logged in.")
-                await self.handle_no_auth(message)
+                await self.handle_message_no_auth(message)
             else:
                 raise e
 
 
-    async def handle_no_auth(self, message: Message) -> None:
+    async def handle_message_no_auth(self, message: Message | None = None) -> None:
+        await super().handle_message_no_auth(message)
         # Claude supports several authentication options so we just send a
         # canned response and let the user choose for themselves.
         self.send_message(
             "You're not authenticated with Claude."
-            "\n\n- If you want to log in with a Claude.ai account, you may log in via `claude /login` in a new terminal."
+            "\n\n- If you want to log in with a Claude.ai account, run the following in a new terminal:"
+            "\n\n```\nclaude /login\n```"
             "\n\n- For cloud provider authentication and other options, see the [Claude.ai documentation](https://code.claude.com/docs/en/authentication)."
         )

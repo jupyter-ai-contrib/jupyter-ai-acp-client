@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from pathlib import Path
 from typing import Any, Awaitable
 from time import time
@@ -22,6 +21,7 @@ from acp.schema import (
     AudioContentBlock,
     AvailableCommandsUpdate,
     ClientCapabilities,
+    ConfigOptionUpdate,
     CreateTerminalResponse,
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
@@ -44,6 +44,7 @@ from acp.schema import (
     ToolCall,
     ToolCallProgress,
     ToolCallStart,
+    UsageUpdate,
     UserMessageChunk,
     WaitForTerminalExitResponse,
     WriteTextFileResponse,
@@ -52,7 +53,7 @@ from acp.schema import (
     AllowedOutcome,
     DeniedOutcome
 )
-from jupyter_ai_persona_manager import BasePersona, McpServerStdio
+from jupyter_ai_persona_manager import BasePersona, CommandOption, McpServerStdio
 from jupyterlab_chat.models import Message
 from jupyterlab_chat.utils import find_mentions
 from asyncio.subprocess import Process
@@ -150,7 +151,7 @@ class JaiAcpClient(Client):
         #
         # We need to cast each from the PersonaManager model to the ACP model
         # here. The models are the exact same, but we still need to do this to
-        # avoid a Pydantic error. 
+        # avoid a Pydantic error.
         mcp_settings = persona.get_mcp_settings()
         mcp_servers: list[AcpMcpServerStdio | AcpMcpServerHttp] = []
         if mcp_settings:
@@ -161,7 +162,7 @@ class JaiAcpClient(Client):
                 # agent capabilities returned on session init
                 elif agent_capabilities.mcp_capabilities.http:
                     mcp_servers.append(AcpMcpServerHttp(**mcp_server.model_dump()))
-        
+
         return mcp_servers
 
     async def create_session(self, persona: BasePersona) -> NewSessionResponse:
@@ -172,12 +173,30 @@ class JaiAcpClient(Client):
         """
         conn = await self.get_connection()
         mcp_servers = await self._get_mcp_servers(persona)
-
-        # TODO: change this to chat parent dir
-        session = await conn.new_session(mcp_servers=mcp_servers, cwd=os.getcwd())
+        session = await conn.new_session(cwd=persona.get_chat_dir(), mcp_servers=mcp_servers)
         self._personas_by_session[session.session_id] = persona
         return session
-    
+
+    async def set_session_mode(self, mode_id: str, session_id: str) -> None:
+        """
+        Set the mode for an ACP session. Sends a `session/set_mode` request to
+        the ACP agent.
+        """
+        conn = await self.get_connection()
+        await conn.set_session_mode(mode_id=mode_id, session_id=session_id)
+
+    async def set_config_option(
+        self, config_id: str, value: str | bool, session_id: str
+    ) -> None:
+        """
+        Set a session config option for an ACP session. Sends a
+        `session/set_config_option` request to the ACP agent.
+        """
+        conn = await self.get_connection()
+        await conn.set_config_option(
+            config_id=config_id, value=value, session_id=session_id
+        )
+
     def _is_session_loading(self, session_id: str) -> bool:
         task = self._loading_sessions.get(session_id)
         return task is not None and not task.done()
@@ -201,7 +220,11 @@ class JaiAcpClient(Client):
         self._loading_sessions[session_id] = self.event_loop.create_task(
             self._load_session_rpc(persona, session_id)
         )
-        return await self._loading_sessions[session_id]
+        try:
+            return await self._loading_sessions[session_id]
+        except Exception:
+            self._loading_sessions.pop(session_id, None)
+            raise
 
     async def _load_session_rpc(self, persona: BasePersona, session_id: str) -> LoadSessionResponse:
         """
@@ -210,11 +233,7 @@ class JaiAcpClient(Client):
         """
         conn = await self.get_connection()
         mcp_servers = await self._get_mcp_servers(persona)
-        response = await conn.load_session(
-            cwd=os.getcwd(),
-            mcp_servers=mcp_servers,
-            session_id=session_id,
-        )
+        response = await conn.load_session(cwd=persona.get_chat_dir(), session_id=session_id, mcp_servers=mcp_servers)
         self._personas_by_session[session_id] = persona
         return response
 
@@ -240,7 +259,7 @@ class JaiAcpClient(Client):
         """
         assert session_id in self._personas_by_session
         lock = self._prompt_locks_by_session.setdefault(session_id, asyncio.Lock())
-        # Signal cancellation before cleanup so that any in-flight session_update 
+        # Signal cancellation before cleanup so that any in-flight session_update
         # callbacks are suppressed and don't overwrite the failed status.
         self._cancel_requested[session_id] = True
         self._cancel_pending_work(session_id)
@@ -255,8 +274,8 @@ class JaiAcpClient(Client):
 
             persona.log.info(f"prompt_and_reply: starting for session {session_id}")
 
-            # Set awareness to indicate writing
-            persona.awareness.set_local_state_field("isWriting", True)
+            # Show a status indicator while the persona works
+            persona.set_status()
 
             try:
                 # Build content blocks: text prompt + optional attachment resources
@@ -265,8 +284,8 @@ class JaiAcpClient(Client):
                 ]
                 if attachments:
                     for att in attachments:
-                        att_value = att.get("value", "")
-                        att_type = att.get("type", "file")
+                        att_value = att.value or ""
+                        att_type = att.type
 
                         # Resolve to absolute file:// URI when root_dir is available
                         if root_dir and att_value:
@@ -285,7 +304,7 @@ class JaiAcpClient(Client):
                             uri = att_value
 
                         # Determine MIME type: explicit value or notebook default
-                        mime_type = att.get("mimetype")
+                        mime_type = att.mimetype
                         if mime_type is None and att_type == "notebook":
                             mime_type = "application/x-ipynb+json"
 
@@ -304,15 +323,21 @@ class JaiAcpClient(Client):
                     session_id=session_id,
                 )
 
+                # Store the cumulative session token usage when the agent
+                # reports it on the response.
+                if response.usage is not None:
+                    persona.update_acp_session_usage(response.usage)
+                    self._sync_awareness_usage(persona)
+
                 # If cancelled, message already finalized by stop_streaming()
                 if self._cancel_requested.get(session_id, False):
                     return response
 
                 # Trigger find_mentions on all messages created this turn
                 for message_id in self._tool_call_manager.get_all_message_ids(session_id):
-                    msg = persona.ychat.get_message(message_id)
+                    msg = persona.chat.get_message(message_id)
                     if msg:
-                        persona.ychat.update_message(
+                        persona.chat.update_message(
                             msg,
                             trigger_actions=[find_mentions],
                         )
@@ -323,8 +348,8 @@ class JaiAcpClient(Client):
                 persona.log.exception(f"prompt_and_reply: failed for session {session_id}")
                 raise
             finally:
-                # Clear awareness writing state
-                persona.awareness.set_local_state_field("isWriting", False)
+                # Clear the status indicator
+                persona.clear_status()
 
     def _handle_agent_message_chunk(self, session_id: str, update: AgentMessageChunk) -> None:
         """Handle an AgentMessageChunk event by appending text to the message."""
@@ -356,7 +381,7 @@ class JaiAcpClient(Client):
             sender=persona.id,
             raw_time=False,
         )
-        persona.ychat.update_message(msg, append=True, trigger_actions=[])
+        persona.chat.update_message(msg, append=True, trigger_actions=[])
 
     async def session_update(
         self,
@@ -368,7 +393,9 @@ class JaiAcpClient(Client):
         | ToolCallProgress
         | AgentPlanUpdate
         | AvailableCommandsUpdate
-        | CurrentModeUpdate,
+        | CurrentModeUpdate
+        | ConfigOptionUpdate
+        | UsageUpdate,
         **kwargs: Any,
     ) -> None:
         """
@@ -389,12 +416,44 @@ class JaiAcpClient(Client):
                 return
             if persona and hasattr(persona, 'acp_slash_commands'):
                 persona.acp_slash_commands = update.available_commands
+            # Also advertise the commands over the awareness channel.
+            if persona is not None:
+                persona.report_slash_commands([
+                    CommandOption(
+                        name=cmd.name if cmd.name.startswith("/") else "/" + cmd.name,
+                        description=cmd.description,
+                    )
+                    for cmd in update.available_commands
+                ])
+            return
+
+        # Keep the persona's mode/config state in sync when the agent changes it
+        # itself (e.g. a slash command that switches mode), so the toolbar
+        # controls reflect the current values.
+        if isinstance(update, CurrentModeUpdate):
+            if persona is not None:
+                persona.update_acp_current_mode(update.current_mode_id)
+                self._sync_awareness_config(persona)
+            return
+
+        if isinstance(update, ConfigOptionUpdate):
+            if persona is not None:
+                persona.update_acp_config_options(update.config_options)
+                self._sync_awareness_config(persona)
+            return
+
+        # Keep the persona's context usage current so the toolbar can show how
+        # full the agent's context window is.
+        if isinstance(update, UsageUpdate):
+            if persona is not None:
+                persona.update_acp_context_usage(update)
+                self._sync_awareness_usage(persona)
             return
 
         # Skip message/tool events when cancellation has been requested
         if self._cancel_requested.get(session_id, False):
             if isinstance(update, (ToolCallStart, ToolCallProgress)):
-                pass 
+                pass
             else:
                 return
 
@@ -412,6 +471,23 @@ class JaiAcpClient(Client):
         if isinstance(update, AgentMessageChunk):
             self._handle_agent_message_chunk(session_id, update)
             return
+
+    @staticmethod
+    def _sync_awareness_config(persona: BasePersona) -> None:
+        """
+        Ask the persona to rebuild and rebroadcast its awareness model/settings
+        config.
+        """
+        persona._sync_awareness_config()
+
+    @staticmethod
+    def _sync_awareness_usage(persona: BasePersona) -> None:
+        """
+        Ask the persona to map its raw ACP usage onto the awareness `Usage` model
+        and rebroadcast.
+        """
+        persona._sync_awareness_usage()
+
     def includes_session(self, session_id: str) -> bool:
         """Returns whether this client manages the given session."""
         return session_id in self._personas_by_session
@@ -521,6 +597,18 @@ class JaiAcpClient(Client):
             raise RequestError.invalid_params({"path": "path cannot be empty"})
 
         file_path = Path(path)
+
+        # Block direct notebook writes.
+        if file_path.suffix == ".ipynb":
+            raise RequestError.invalid_params(
+                {
+                    "path": (
+                        "writing .ipynb files directly is not allowed; use the "
+                        "Jupyter notebook MCP tools (e.g. insert_cell, edit_cell) "
+                        "instead"
+                    )
+                }
+            )
 
         # Check if path is a directory
         if file_path.is_dir():
@@ -686,12 +774,12 @@ class JaiAcpClient(Client):
 
         # Finalize all messages created this turn
         for message_id in self._tool_call_manager.get_all_message_ids(session_id):
-            msg = persona.ychat.get_message(message_id)
+            msg = persona.chat.get_message(message_id)
             if msg:
-                persona.ychat.update_message(msg, append=False, trigger_actions=[find_mentions])
+                persona.chat.update_message(msg, append=False, trigger_actions=[find_mentions])
 
-        # Reset awareness
-        persona.awareness.set_local_state_field("isWriting", False)
+        # Reset status
+        persona.clear_status()
 
         self._cancel_pending_work(session_id)
 
@@ -709,6 +797,3 @@ class JaiAcpClient(Client):
             persona.log.info(
                 f"_cancel_pending_work: auto-rejected {rejected} pending permission(s) for session {session_id}"
             )
-
-
-

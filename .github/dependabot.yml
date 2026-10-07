@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    # `schedule.interval` is a REQUIRED key (config fails validation without it),
+    # but it only governs version updates — which are disabled below — so its
+    # value is inert here. Security updates are triggered by Dependabot alerts.
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    groups:
+      npm-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+  - package-ecosystem: "npm"
+    directory: "/ui-tests"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    groups:
+      npm-security-updates-ui-tests:
+        applies-to: security-updates
+        patterns:
+          - "*"

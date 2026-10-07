@@ -1,14 +1,44 @@
-"""Tests for content block building in JaiAcpClient.prompt_and_reply()."""
+"""Tests for content block building and session management in JaiAcpClient."""
 
+import asyncio
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from acp.schema import ResourceContentBlock, TextContentBlock
+import pytest
+from acp.exceptions import RequestError
+from acp.schema import (
+    AvailableCommand,
+    AvailableCommandsUpdate,
+    ConfigOptionUpdate,
+    CurrentModeUpdate,
+    ResourceContentBlock,
+    TextContentBlock,
+    Usage,
+    UsageUpdate,
+)
 
+from jupyterlab_chat.models import FileAttachment, NotebookAttachment
+
+from jupyter_ai_persona_manager.persona_events import PersonaSessionState
+
+from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
 from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
 
 
 SESSION_ID = "sess-1"
+
+
+def _state() -> PersonaSessionState:
+    """A real PersonaSessionState with no event logger, so its typed properties
+    store values in memory without emitting. The report_*/get_* methods
+    round-trip through the real state object."""
+    return PersonaSessionState(
+        event_logger=None,
+        chat_id="test-room",
+        persona_id="test-persona",
+        log=logging.getLogger("test"),
+    )
 
 
 def _make_client_and_persona():
@@ -26,9 +56,9 @@ def _make_client_and_persona():
     # Mock persona
     persona = MagicMock()
     persona.log = MagicMock()
-    persona.awareness = MagicMock()
-    persona.ychat = MagicMock()
-    persona.ychat.get_message.return_value = None
+    persona.state = MagicMock()
+    persona.chat = MagicMock()
+    persona.chat.get_message.return_value = None
 
     # Mock tool call manager
     client._tool_call_manager = MagicMock()
@@ -59,7 +89,7 @@ class TestPromptAndReplyContentBlocks:
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check this",
-            attachments=[{"value": "src/main.py", "type": "file", "mimetype": "text/x-python"}],
+            attachments=[FileAttachment(value="src/main.py", mimetype="text/x-python")],
             root_dir="/home/user/notebooks",
         )
 
@@ -77,7 +107,7 @@ class TestPromptAndReplyContentBlocks:
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="review",
-            attachments=[{"value": "analysis.ipynb", "type": "notebook"}],
+            attachments=[NotebookAttachment(value="analysis.ipynb")],
             root_dir="/home/user",
         )
 
@@ -91,7 +121,7 @@ class TestPromptAndReplyContentBlocks:
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="review",
-            attachments=[{"value": "nb.ipynb", "type": "notebook", "mimetype": "custom/type"}],
+            attachments=[NotebookAttachment(value="nb.ipynb", mimetype="custom/type")],
             root_dir="/home/user",
         )
 
@@ -106,8 +136,8 @@ class TestPromptAndReplyContentBlocks:
             session_id=SESSION_ID,
             prompt="review all",
             attachments=[
-                {"value": "a.py", "type": "file"},
-                {"value": "b.ipynb", "type": "notebook"},
+                FileAttachment(value="a.py"),
+                NotebookAttachment(value="b.ipynb"),
             ],
             root_dir="/tmp",
         )
@@ -152,7 +182,7 @@ class TestPromptAndReplyContentBlocks:
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check",
-            attachments=[{"value": "", "type": "file"}],
+            attachments=[FileAttachment(value="")],
         )
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
@@ -165,7 +195,7 @@ class TestPromptAndReplyContentBlocks:
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check",
-            attachments=[{"value": "data.csv", "type": "file"}],
+            attachments=[FileAttachment(value="data.csv")],
             root_dir="/tmp",
         )
 
@@ -179,7 +209,7 @@ class TestPromptAndReplyContentBlocks:
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check",
-            attachments=[{"value": "subdir/file.py", "type": "file"}],
+            attachments=[FileAttachment(value="subdir/file.py")],
             root_dir=None,
         )
 
@@ -193,7 +223,7 @@ class TestPromptAndReplyContentBlocks:
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check",
-            attachments=[{"value": "test.py", "type": "file"}],
+            attachments=[FileAttachment(value="test.py")],
             root_dir="/home/user",
         )
 
@@ -207,9 +237,205 @@ class TestPromptAndReplyContentBlocks:
         await client.prompt_and_reply(
             session_id=SESSION_ID,
             prompt="check",
-            attachments=[{"value": "../../../etc/passwd", "type": "file"}],
+            attachments=[FileAttachment(value="../../../etc/passwd")],
             root_dir="/home/user/notebooks",
         )
 
         blocks = conn.prompt.call_args.kwargs["prompt"]
         assert blocks[1].uri == "../../../etc/passwd"
+
+
+def _real_usage_persona():
+    """
+    A `BaseAcpPersona` created without `__init__` (no subprocess or session),
+    carrying the real usage setters and properties so tests cover the actual
+    store-then-read round trip. Collaborators the client touches are mocked.
+    """
+
+    class _ConcreteAcpPersona(BaseAcpPersona):
+        @property
+        def defaults(self):  # pragma: no cover - never called in these tests
+            return None
+
+    persona = _ConcreteAcpPersona.__new__(_ConcreteAcpPersona)
+    persona._acp_context_usage = None
+    persona._acp_session_usage = None
+    persona.log = logging.getLogger("test")
+    # A real state slot so `_sync_awareness_usage` -> `report_usage`
+    # round-trips through the real typed properties.
+    persona.state = _state()
+    persona.chat = MagicMock()
+    # `set_status()` (called incidentally by `prompt_and_reply`) builds
+    # `as_user()`, which reads `self.defaults`; this persona has none, so mock it.
+    persona.as_user = MagicMock()
+    return persona
+
+
+class TestUsageStorage:
+    """A usage report received by the client ends up readable on the persona."""
+
+    async def test_usage_update_is_stored_as_context_usage(self):
+        client, _, _ = _make_client_and_persona()
+        client._loading_sessions = {}
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+        update = UsageUpdate(sessionUpdate="usage_update", used=41_000, size=200_000)
+
+        await client.session_update(SESSION_ID, update)
+
+        assert persona.acp_context_usage is update
+
+    async def test_prompt_response_usage_is_stored_as_session_usage(self):
+        client, conn, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+        usage = Usage(inputTokens=900, outputTokens=340, totalTokens=1_240)
+        conn.prompt = AsyncMock(return_value=MagicMock(usage=usage))
+
+        await client.prompt_and_reply(session_id=SESSION_ID, prompt="hello")
+
+        assert persona.acp_session_usage is usage
+
+    async def test_prompt_response_without_usage_stores_nothing(self):
+        client, conn, _ = _make_client_and_persona()
+        persona = _real_usage_persona()
+        client._personas_by_session[SESSION_ID] = persona
+        conn.prompt = AsyncMock(return_value=MagicMock(usage=None))
+
+        await client.prompt_and_reply(session_id=SESSION_ID, prompt="hello")
+
+        assert persona.acp_session_usage is None
+
+
+class TestExtNotification:
+    """The generic client is agent-agnostic: every ext notification (including
+    vendor `kiro.dev/*` methods, now handled only by KiroAcpClient) is unknown
+    to it and rejected as JSON-RPC method-not-found."""
+
+    async def test_ext_notification_raises_method_not_found(self):
+        client, _, _ = _make_client_and_persona()
+
+        for method in ("kiro.dev/metadata", "kiro.dev/commands/available", "other.vendor/thing"):
+            with pytest.raises(RequestError) as exc_info:
+                await client.ext_notification(method, {"sessionId": SESSION_ID})
+            assert exc_info.value.code == -32601, method
+
+    async def test_ext_method_raises_method_not_found(self):
+        client, _, _ = _make_client_and_persona()
+
+        with pytest.raises(RequestError) as exc_info:
+            await client.ext_method("kiro.dev/metadata", {"sessionId": SESSION_ID})
+        assert exc_info.value.code == -32601
+
+
+class TestAwarenessPush:
+    """The client pushes ACP updates onto the persona's awareness API too."""
+
+    async def test_available_commands_update_advertises_over_awareness(self):
+        client, _, persona = _make_client_and_persona()
+        client._loading_sessions = {}
+        persona.report_slash_commands = MagicMock()
+        update = AvailableCommandsUpdate(
+            sessionUpdate="available_commands_update",
+            availableCommands=[
+                AvailableCommand(name="compact", description="Compact context"),
+                AvailableCommand(name="/clear", description="Clear"),
+            ],
+        )
+
+        await client.session_update(SESSION_ID, update)
+
+        commands = persona.report_slash_commands.call_args[0][0]
+        # Names are leading-slash normalized.
+        assert [(c.name, c.description) for c in commands] == [
+            ("/compact", "Compact context"),
+            ("/clear", "Clear"),
+        ]
+
+    async def test_current_mode_update_rebuilds_awareness_config(self):
+        client, _, persona = _make_client_and_persona()
+        client._loading_sessions = {}
+        persona._sync_awareness_config = MagicMock()
+        update = CurrentModeUpdate(sessionUpdate="current_mode_update", currentModeId="code")
+
+        await client.session_update(SESSION_ID, update)
+
+        persona.update_acp_current_mode.assert_called_once_with("code")
+        persona._sync_awareness_config.assert_called_once()
+
+    async def test_config_option_update_rebuilds_awareness_config(self):
+        client, _, persona = _make_client_and_persona()
+        client._loading_sessions = {}
+        persona._sync_awareness_config = MagicMock()
+        update = ConfigOptionUpdate(
+            sessionUpdate="config_option_update", configOptions=[]
+        )
+
+        await client.session_update(SESSION_ID, update)
+
+        persona.update_acp_config_options.assert_called_once()
+        persona._sync_awareness_config.assert_called_once()
+
+    async def test_usage_update_pushes_awareness_usage(self):
+        client, _, persona = _make_client_and_persona()
+        client._loading_sessions = {}
+        persona._sync_awareness_usage = MagicMock()
+        update = UsageUpdate(sessionUpdate="usage_update", used=1, size=2)
+
+        await client.session_update(SESSION_ID, update)
+
+        persona.update_acp_context_usage.assert_called_once_with(update)
+        persona._sync_awareness_usage.assert_called_once()
+
+
+class TestLoadSessionCleanup:
+    """Tests for _loading_sessions cleanup on failure."""
+
+    async def test_failed_load_session_removes_task_from_loading_sessions(self):
+        """A failed load_session cleans up its task so retries can start fresh."""
+        client = object.__new__(JaiAcpClient)
+        client.event_loop = asyncio.get_running_loop()
+        client._loading_sessions = {}
+
+        persona = MagicMock()
+        error = RequestError(-32002, "Resource not found")
+
+        async def _failing_rpc(*args, **kwargs):
+            raise error
+
+        client._load_session_rpc = _failing_rpc
+
+        with pytest.raises(RequestError):
+            await client.load_session(persona, "stale-session-id")
+
+        assert "stale-session-id" not in client._loading_sessions
+
+
+class TestWriteTextFileNotebookGuard:
+    """write_text_file refuses direct writes to .ipynb files (notebooks must be
+    edited via the notebook MCP tools), while other files write normally."""
+
+    async def test_write_to_notebook_is_rejected(self, tmp_path):
+        client, _, _ = _make_client_and_persona()
+        nb_path = str(tmp_path / "analysis.ipynb")
+
+        with pytest.raises(RequestError) as exc_info:
+            await client.write_text_file(
+                content='{"cells": []}', path=nb_path, session_id=SESSION_ID
+            )
+
+        assert exc_info.value.code == -32602  # invalid_params
+        assert "MCP tools" in str(exc_info.value.data)
+        # The notebook file must not have been created.
+        assert not (tmp_path / "analysis.ipynb").exists()
+
+    async def test_write_to_non_notebook_still_succeeds(self, tmp_path):
+        client, _, _ = _make_client_and_persona()
+        txt_path = tmp_path / "notes.txt"
+
+        result = await client.write_text_file(
+            content="hello", path=str(txt_path), session_id=SESSION_ID
+        )
+
+        assert result is not None
+        assert txt_path.read_text(encoding="utf-8") == "hello"

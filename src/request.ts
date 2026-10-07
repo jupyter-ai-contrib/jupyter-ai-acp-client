@@ -3,23 +3,22 @@ import { URLExt } from '@jupyterlab/coreutils';
 import { ServerConnection } from '@jupyterlab/services';
 
 /**
- * Call the server extension
+ * Call a server extension endpoint under the given API namespace.
  *
- * @param endPoint API REST end point for the extension
- * @param init Initial values for the request
- * @returns The response body interpreted as JSON
+ * @param namespace API namespace, e.g. 'ai/acp' (this extension) or 'api/ai'
+ *   (the persona-manager extension).
+ * @param endPoint API REST endpoint, appended to the namespace.
+ * @param init Initial values for the request.
+ * @returns The response body interpreted as JSON.
  */
 export async function requestAPI<T>(
+  namespace: string,
   endPoint = '',
   init: RequestInit = {}
 ): Promise<T> {
   // Make request to Jupyter API
   const settings = ServerConnection.makeSettings();
-  const requestUrl = URLExt.join(
-    settings.baseUrl,
-    'ai/acp', // our server extension's API namespace
-    endPoint
-  );
+  const requestUrl = URLExt.join(settings.baseUrl, namespace, endPoint);
 
   let response: Response;
   try {
@@ -34,7 +33,10 @@ export async function requestAPI<T>(
     try {
       data = JSON.parse(data);
     } catch (error) {
-      console.log('Not a JSON response body.', response);
+      console.warn(
+        'Non-JSON response body returned by ACP endpoint.',
+        response
+      );
     }
   }
 
@@ -45,67 +47,21 @@ export async function requestAPI<T>(
   return data;
 }
 
-type AcpSlashCommand = {
-  name: string;
-  description: string;
-};
-
-type AcpSlashCommandsResponse = {
-  commands: AcpSlashCommand[];
-};
-
-export async function getAcpSlashCommands(
-  chatPath: string,
-  personaMentionName: string | null = null
-): Promise<AcpSlashCommand[]> {
-  let response: AcpSlashCommandsResponse;
-  try {
-    if (personaMentionName === null) {
-      response = await requestAPI(`/slash_commands?chat_path=${chatPath}`);
-    } else {
-      response = await requestAPI(
-        `/slash_commands/${personaMentionName}?chat_path=${chatPath}`
-      );
-    }
-  } catch (e) {
-    console.warn('Error retrieving ACP slash commands: ', e);
-    return [];
-  }
-
-  return response.commands;
-}
 /**
  * Send the user's permission decision to the backend.
  */
 export async function submitPermissionDecision(
-  sessionId: string,
+  targetId: string,
   toolCallId: string,
   optionId: string
 ): Promise<void> {
-  await requestAPI('/permissions', {
+  await requestAPI('ai/acp', 'permissions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      session_id: sessionId,
+      session_id: targetId,
       tool_call_id: toolCallId,
       option_id: optionId
     })
   });
-}
-
-export async function stopStreaming(
-  chatPath: string,
-  personaMentionName: string | null = null
-): Promise<void> {
-  try {
-    if (personaMentionName === null) {
-      await requestAPI(`/stop?chat_path=${chatPath}`, { method: 'POST' });
-    } else {
-      await requestAPI(`/stop/${personaMentionName}?chat_path=${chatPath}`, {
-        method: 'POST'
-      });
-    }
-  } catch (e) {
-    console.warn('Error stopping stream: ', e);
-  }
 }

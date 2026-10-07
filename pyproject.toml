@@ -1,8 +1,8 @@
 [build-system]
 requires = [
     "hatchling>=1.5.0",
-    "jupyterlab>=4.0.0,<5",
     "hatch-nodejs-version>=0.3.2",
+    "jupyter-builder>=1.2.0,<2",
 ]
 build-backend = "hatchling.build"
 
@@ -28,15 +28,19 @@ classifiers = [
 ]
 dependencies = [
     "jupyter_server>=2.4.0,<3",
-    "jupyter_ai_persona_manager>=0.0.9",
-    "jupyterlab_chat>=0.20.0",
-    "agent_client_protocol>=0.9.0,<0.10.0",
+    "jupyter_ai_persona_manager>=0.2.2a0",
+    "jupyterlab_chat>=0.25.0",
+    "jupyter-chat-components>=0.7.0,<0.8.0",
+    "agent_client_protocol>=0.11.0,<0.12.0",
     "pydantic>=2,<3",
 ]
 dynamic = ["version", "description", "authors", "urls", "keywords"]
 
 [project.optional-dependencies]
-dev = ["jupyterlab>=4"]
+dev = [
+    "jupyterlab>=4.6.0,<5",
+    "jupyter-builder>=1.2.0,<2",
+]
 test = [
     "coverage",
     "pytest",
@@ -87,7 +91,7 @@ version_cmd = "hatch version"
 
 [tool.jupyter-releaser.hooks]
 before-build-npm = [
-    "python -m pip install 'jupyterlab>=4.0.0,<5'",
+    "python -m pip install 'jupyter-builder>=1.2.0,<2'",
     "jlpm",
     "jlpm build:prod",
 ]
@@ -100,7 +104,8 @@ ignore = ["W002"]
 claude-acp = "jupyter_ai_acp_client.acp_personas.claude:ClaudeAcpPersona"
 kiro-acp = "jupyter_ai_acp_client.acp_personas.kiro:KiroAcpPersona"
 mistral-vibe-acp = "jupyter_ai_acp_client.acp_personas.mistral_vibe:MistralVibeAcpPersona"
-gemini-acp = "jupyter_ai_acp_client.acp_personas.gemini:GeminiAcpPersona"
 opencode-acp = "jupyter_ai_acp_client.acp_personas.opencode:OpenCodeAcpPersona"
 codex-acp = "jupyter_ai_acp_client.acp_personas.codex:CodexAcpPersona"
+copilot-acp = "jupyter_ai_acp_client.acp_personas.copilot:CopilotAcpPersona"
 goose-acp = "jupyter_ai_acp_client.acp_personas.goose:GooseAcpPersona"
+kilo-acp = "jupyter_ai_acp_client.acp_personas.kilo:KiloAcpPersona"

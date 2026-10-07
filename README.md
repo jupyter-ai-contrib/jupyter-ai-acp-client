@@ -11,6 +11,9 @@ This client provides a `prompt_and_reply()` method which calls the ACP server
 and streams the reply back to the chat. In addition, it provides file read, file
 write, and terminal use capabilities.
 
+Grouped ACP tool call rendering in chat is provided by the
+`jupyter-chat-components` JupyterLab extension.
+
 This package also provides a default `BaseAcpPersona` class which can be easily
 extended to add ACP agents as AI personas in JupyterLab. This base class takes
 an additional `executable` argument which starts the ACP agent server. This
@@ -51,13 +54,13 @@ class ClaudeAcpPersona(BaseAcpPersona):
         )
 ```
 
-Currently, this package provides 7 personas:
+Currently, this package provides 8 personas:
 
 - `@Claude`
   - requires `claude-agent-acp`, installed via `npm install -g @zed-industries/claude-agent-acp`
   - optional env variable `CLAUDE_CODE_EXECUTABLE` points to your custom-installed Claude executable location. By default, claude-agent-acp uses Claude packaged in `@zed-industries/claude-agent-acp`.
-- `@Gemini`
-  - requires `gemini` CLI (>= 0.34.0), installed via https://geminicli.com/
+- `@Kilo`
+  - requires `kilo` CLI (>= 7.0.0), installed via https://kilo.ai/docs/getting-started
 - `@Kiro`
   - requires `kiro-cli` (>= 1.25.0, < 2), installed via https://kiro.dev
 - `@Mistral-Vibe`
@@ -66,6 +69,9 @@ Currently, this package provides 7 personas:
   - requires `opencode` CLI (>= 1.0.0, < 2), installed via `npm install -g opencode-ai` or from https://opencode.ai
 - `@Codex`
   - requires `codex-acp`, installed via `npm install -g @zed-industries/codex-acp`
+- `@Copilot`
+  - requires the `copilot` CLI with built-in ACP support, installed via `npm install -g @github/copilot`, `brew install copilot-cli`, or the [official install docs](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli)
+  - auth via `copilot login` or `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`
 - `@Goose`
   - requires `goose` CLI (>= 1.8.0, < 2), installed via https://github.com/block/goose
   - auth via `goose configure`
@@ -76,16 +82,18 @@ Currently, this package provides 7 personas:
 
 - JupyterLab >= 4.0.0
 - `jupyter-ai-persona-manager>=0.0.5`
+- `jupyter-chat-components>=0.6.0`
 - `agent_client_protocol`
 
 **Optional**
 
 - `claude-agent-acp` (enables `@Claude`)
-- `gemini` CLI (enables `@Gemini`)
+- `kilo` CLI (enables `@Kilo`)
 - `kiro-cli` (enables `@Kiro`)
 - `mistral-vibe` (enables `@Mistral-Vibe` via the `vibe-acp` command)
 - `opencode` v1.0.0+ (enables `@OpenCode`)
 - `codex-acp` (enables `@Codex`)
+- `copilot` CLI with ACP support (enables `@Copilot`)
 - `goose` v1.8.0+ (enables `@Goose`)
 
 ## Install
@@ -140,7 +148,7 @@ source .venv/bin/activate
 pip install --editable ".[dev,test]"
 
 # Link your development version of the extension with JupyterLab
-jupyter labextension develop . --overwrite
+jupyter-builder develop . --overwrite
 # Server extension must be manually installed in develop mode
 jupyter server extension enable jupyter_ai_acp_client
 
@@ -175,7 +183,7 @@ jupyter server extension disable jupyter_ai_acp_client
 pip uninstall jupyter_ai_acp_client
 ```
 
-In development mode, you will also need to remove the symlink created by `jupyter labextension develop`
+In development mode, you will also need to remove the symlink created by `jupyter-builder develop`
 command. To find its location, you can run `jupyter labextension list` to figure out where the `labextensions`
 folder is located. Then you can remove the symlink named `@jupyter-ai/acp-client` within that folder.
 
@@ -188,9 +196,9 @@ This extension is using [Pytest](https://docs.pytest.org/) for Python code testi
 Install test dependencies (needed only once):
 
 ```sh
-pip install -e ".[test]"
+pip install -e ".[dev,test]"
 # Each time you install the Python package, you need to restore the front-end extension link
-jupyter labextension develop . --overwrite
+jupyter-builder develop . --overwrite
 ```
 
 To execute them, run:

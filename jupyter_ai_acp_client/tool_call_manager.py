@@ -3,10 +3,13 @@ from typing import Optional
 
 from acp.schema import ToolCallProgress, ToolCallStart
 from jupyter_ai_persona_manager import BasePersona
-from jupyterlab_chat.models import NewMessage
+from jupyterlab_chat.models import MimeModel, NewMessage
 
 from .tool_call_renderer import (
+    CHAT_COMPONENTS_MIME_TYPE,
+    GROUPED_TOOL_CALLS_COMPONENT,
     ToolCallState,
+    build_grouped_tool_calls_metadata,
     ensure_serializable,
     extract_diffs,
     update_tool_call_from_progress,
@@ -83,14 +86,14 @@ class ToolCallManager:
         """
         session = self._ensure_session(session_id)
 
-        message_id = persona.ychat.add_message(
+        message_id = persona.chat.add_message(
             NewMessage(body="", sender=persona.id),
             trigger_actions=[],
         )
         session.current_message_id = message_id
         session.all_message_ids.append(message_id)
         persona.log.info(f"Created message {message_id} for session {session_id}")
-        persona.awareness.set_local_state_field("isWriting", message_id)
+        persona.set_status()
 
         return message_id
 
@@ -161,7 +164,7 @@ class ToolCallManager:
             )
             return
 
-        msg = persona.ychat.get_message(message_id)
+        msg = persona.chat.get_message(message_id)
         if not msg:
             persona.log.warning(
                 f"flush_tool_call: Yjs message {message_id} not found"
@@ -175,8 +178,13 @@ class ToolCallManager:
             for tc_id in tc_ids
             if tc_id in session.tool_calls
         ]
-        msg.metadata = {"tool_calls": all_tcs}
-        persona.ychat.update_message(msg, trigger_actions=[])
+        msg.mime_model = MimeModel(
+            data={CHAT_COMPONENTS_MIME_TYPE: GROUPED_TOOL_CALLS_COMPONENT},
+            metadata={
+                CHAT_COMPONENTS_MIME_TYPE: build_grouped_tool_calls_metadata(all_tcs)
+            },
+        )
+        persona.chat.update_message(msg, trigger_actions=[])
 
     def cancel_pending_tool_calls(
         self, session_id: str, persona: BasePersona

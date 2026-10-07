@@ -1,4 +1,5 @@
 import asyncio
+import html
 import os
 import signal
 import sys
@@ -8,12 +9,63 @@ from asyncio.subprocess import Process
 from typing import Any, ClassVar, Optional
 
 from acp import NewSessionResponse, LoadSessionResponse
-from acp.schema import AvailableCommand
-from jupyter_ai_persona_manager import BasePersona
-from jupyterlab_chat.models import Message
+from acp.exceptions import RequestError
+from acp.schema import (
+    AvailableCommand,
+    SessionConfigOptionBoolean,
+    SessionConfigOptionSelect,
+    SessionMode,
+    SessionModeState,
+    Usage,
+    UsageUpdate,
+)
+from jupyter_ai_persona_manager import (
+    BasePersona,
+    ModelConfiguration,
+    ModelOption,
+    PersonaAuthManager,
+    PersonaNotAuthenticated,
+    SettingConfiguration,
+    SettingOption,
+)
+from jupyter_ai_persona_manager import Usage as AwarenessUsage
+from jupyterlab_chat.models import FileAttachment, Message, NotebookAttachment
 
 from .default_acp_client import JaiAcpClient
 from .telemetry import emit_event, auto_emit_event
+
+# A single session config option the agent advertises: either a select (one of
+# several values) or a boolean toggle. Set via `session/set_config_option`.
+AcpConfigOption = SessionConfigOptionSelect | SessionConfigOptionBoolean
+
+# Stable setting ID for the ACP session mode in the awareness settings list.
+# Mirrors the REST toolbar's control ID so both surfaces agree. Defined here
+# (rather than in `routes.py`) so `routes.py` can import it without a cycle.
+MODE_CONTROL_ID = "__mode__"
+
+# ACP config-option categories (https://agentclientprotocol.com/protocol/v1/
+# session-config-options#option-categories). Categories are optional semantic
+# labels; the client uses them to place an option in the right toolbar group.
+# When several options share a category, ACP says to break the tie by array
+# order — the earliest wins the prominent slot.
+_MODEL_CATEGORY = "model"
+_MODE_CATEGORY = "mode"
+_MODEL_CONFIG_CATEGORY = "model_config"
+
+
+def _flatten_select_options(options) -> list:
+    """
+    Yield the flat choice items of an ACP select option, whether the agent sent
+    a flat list or grouped options. Unknown shapes are skipped.
+    """
+    flat = []
+    for item in options or []:
+        if hasattr(item, "value"):
+            flat.append(item)
+        elif hasattr(item, "options"):
+            flat.extend(item.options or [])
+    return flat
+
 
 
 class BaseAcpPersona(BasePersona):
@@ -21,6 +73,14 @@ class BaseAcpPersona(BasePersona):
     _RESPAWN_WINDOW: ClassVar[float] = 60.0
     _respawn_timestamps: ClassVar[list[float]] = []
     _stopping_subprocess: ClassVar[bool] = False
+
+    NOTEBOOK_EDITING_GUIDANCE: ClassVar[str] = (
+        "System note: When creating or editing Jupyter notebooks (.ipynb), use "
+        "the Jupyter notebook MCP tools (for example insert_cell, edit_cell, "
+        "delete_cell, read_notebook). Do not write or edit .ipynb files directly "
+        "with generic file-write/edit tools — direct writes are blocked to "
+        "prevent notebook corruption."
+    )
 
     _before_subprocess_future: ClassVar[Task[None] | None] = None
     """
@@ -48,6 +108,13 @@ class BaseAcpPersona(BasePersona):
     Developers should always use `self.get_client()`.
     """
 
+    acp_client_class: ClassVar[type[JaiAcpClient]] = JaiAcpClient
+    """
+    The ACP client class this persona constructs in `_init_client`. Subclasses
+    override this to inject a custom client (e.g. `KiroAcpClient`) that handles
+    agent-specific behavior, keeping the base client agent-agnostic.
+    """
+
     _client_session_future: Task[NewSessionResponse | LoadSessionResponse]
     """
     The future that yields the ACP client session info. Each instance of an ACP
@@ -62,40 +129,89 @@ class BaseAcpPersona(BasePersona):
     This attribute is set automatically by the default ACP client.
     """
 
+    _acp_modes: list[SessionMode]
+    """
+    Modes the ACP agent advertises for the current session. Set by the persona
+    when a session is created or loaded.
+    """
+
+    _acp_current_mode_id: Optional[str]
+    """
+    The mode ID currently selected for the ACP session, if any.
+    """
+
+    _acp_config_options: list[AcpConfigOption]
+    """
+    Session config options (selects and toggles) the ACP agent advertises for
+    the current session, each carrying its current value. Set by the persona
+    when a session is created or loaded.
+    """
+
+    _acp_context_usage: Optional[UsageUpdate]
+    """
+    How full the agent's context window is right now: tokens currently in
+    context, window size, and optional cumulative session cost, from the
+    latest `usage_update`. A live snapshot that can decrease (e.g. after
+    compaction). Distinct from `acp_session_usage`, which counts total
+    session throughput. `None` until the agent sends one; some agents
+    never do. Set by the default ACP client.
+    """
+
+    _acp_session_usage: Optional[Usage]
+    """
+    Cumulative token totals for the whole session from the latest prompt
+    response: never decreases, and includes cache re-reads, so it grows
+    past the context window size. Distinct from `acp_context_usage`, which measures
+    current window occupancy. `None` until a prompt response carries
+    usage. Set by the default ACP client.
+    """
+
+    _MAX_HISTORY_MESSAGES: ClassVar[int] = 50
+    """
+    Maximum number of recent messages to include in the history context injected
+    after load-session recovery. Caps prompt size to avoid exceeding agent
+    context window limits.
+    """
+
     def __init__(self, *args, executable: list[str], **kwargs):
         super().__init__(*args, **kwargs)
 
+        self.auth = PersonaAuthManager(parent=self, check_auth_fn=self.is_authed)
+
         self._executable = executable
-
-        # Ensure each subclass has its own subprocess and client by checking if the
-        # class variable is defined directly on this class (not inherited)
-        if (
-            "_before_subprocess_future" not in self.__class__.__dict__
-            or self.__class__._before_subprocess_future is None
-        ):
-            self.__class__._before_subprocess_future = self.event_loop.create_task(
-                self.before_agent_subprocess()
-            )
-        if (
-            "_subprocess_future" not in self.__class__.__dict__
-            or self.__class__._subprocess_future is None
-        ):
-            self.__class__._subprocess_future = self.event_loop.create_task(
-                self._init_agent_subprocess()
-            )
-        if (
-            "_client_future" not in self.__class__.__dict__
-            or self.__class__._client_future is None
-        ):
-            self.__class__._client_future = self.event_loop.create_task(
-                self._init_client()
-            )
-
-        self._session_client_future = self.__class__._client_future
-        self._client_session_future = self.event_loop.create_task(
-            self._init_client_session()
-        )
+        self._pending_session_recovery_context: bool = False
+        self._was_initially_unauthenticated: bool = False
+        # Whether this session's notebook guidance was injected yet.
+        self._notebook_guidance_sent: bool = False
+        self._emitted: set[str] = set()
+        self._session_client_future: Task[JaiAcpClient] | None = None
+        self._client_session_future: Task[
+            NewSessionResponse | LoadSessionResponse
+        ] | None = None
         self._acp_slash_commands = []
+        self._acp_modes = []
+        self._acp_current_mode_id = None
+        self._acp_config_options = []
+        self._acp_context_usage = None
+        self._acp_session_usage = None
+
+        self.emit_once("acp_requirements_met")
+
+    def emit(self, operation: str, outcome: str = "success") -> None:
+        """Emit a funnel event."""
+        emit_event(
+            self.event_logger,
+            operation,
+            outcome,
+            {"persona_class": self.__class__.__name__},
+        )
+
+    def emit_once(self, operation: str, outcome: str = "success") -> None:
+        """Emit a funnel event at most once per persona instance."""
+        if operation in self._emitted:
+            return
+        self._emitted.add(operation)
+        self.emit(operation, outcome)
 
     async def before_agent_subprocess(self) -> None:
         """
@@ -131,7 +247,7 @@ class BaseAcpPersona(BasePersona):
     @auto_emit_event("acp_server_init")
     async def _init_client(self) -> JaiAcpClient:
         agent_subprocess = await self.__class__._subprocess_future
-        client = JaiAcpClient(
+        client = self.acp_client_class(
             agent_subprocess=agent_subprocess, event_loop=self.event_loop
         )
         self.log.info("Initialized ACP client for '%s'.", self.__class__.__name__)
@@ -139,13 +255,9 @@ class BaseAcpPersona(BasePersona):
 
     def _get_existing_sessions(self) -> dict[str, str]:
         """
-        Returns a dictionary of existing ACP session IDs within this instance's
-        assigned chat, keyed by persona ID (obtained via `self.id`). Each chat
-        may contain 1 session per ACP persona.
-
-        Obtained from the `ychat._ydoc["metadata"]` shared type internally.
+        Returns ACP session IDs from this chat's metadata, keyed by persona ID.
         """
-        sessions = self.ychat.get_metadata().get("acp_session_ids", {})
+        sessions = self.chat.get_metadata().get("acp_session_ids", {})
         return sessions
 
     def _record_new_session(self, new_session_id: str) -> None:
@@ -153,28 +265,27 @@ class BaseAcpPersona(BasePersona):
         Adds a new ACP session ID into this chat's metadata. Always use this
         method to avoid deleting other clients' sessions.
 
-        Updates the `ychat._ydoc["metadata"]` shared type internally.
+        Updates the chat metadata internally.
         """
         existing_session_ids = self._get_existing_sessions()
-        self.ychat.set_metadata(
+        self.chat.set_metadata(
             "acp_session_ids", {**existing_session_ids, self.id: new_session_id}
         )
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "load"})
     async def _load_session(self, client, existing_session_id) -> LoadSessionResponse:
-        try:
-            response = await client.load_session(
-                persona=self, session_id=existing_session_id
-            )
-            self.log.info(
-                "Loaded existing ACP client session for '%s' with ID '%s'.",
-                self.__class__.__name__,
-                existing_session_id,
-            )
-            return response
-        except:
-            self.log.exception("Failed to load client session for %s with ID %s", self.__class__.__name__, existing_session_id)
-            raise
+        response = await client.load_session(
+            persona=self, session_id=existing_session_id
+        )
+        self.log.info(
+            "Loaded existing ACP client session for '%s' with ID '%s'.",
+            self.__class__.__name__,
+            existing_session_id,
+        )
+        self._set_acp_mode_state(response.modes)
+        self.update_acp_config_options(response.config_options)
+        self._sync_awareness_config()
+        return response
 
     @auto_emit_event("acp_session_init", lambda self: {"session_operation": "new"})
     async def _create_session(self, client) -> NewSessionResponse:
@@ -185,6 +296,50 @@ class BaseAcpPersona(BasePersona):
             response.session_id,
         )
         self._record_new_session(response.session_id)
+        self._set_acp_mode_state(response.modes)
+        self.update_acp_config_options(response.config_options)
+
+        # Reapply a previously selected mode so the choice survives session
+        # recreation (e.g. a server restart that creates a fresh ACP session).
+        # A model selection needs no special handling here: models are ordinary
+        # config options now, so they ride the config-option reapply loop below.
+        stored_mode_id = self._get_stored_mode_choice()
+        advertised_mode_ids = {m.id for m in self._acp_modes}
+        if (
+            stored_mode_id
+            and stored_mode_id != self._acp_current_mode_id
+            and stored_mode_id in advertised_mode_ids
+        ):
+            try:
+                await client.set_session_mode(stored_mode_id, response.session_id)
+                self._acp_current_mode_id = stored_mode_id
+            except Exception:
+                self.log.warning(
+                    "Failed to reapply stored mode '%s' for '%s'.",
+                    stored_mode_id,
+                    self.__class__.__name__,
+                    exc_info=True,
+                )
+
+        # Reapply previously selected config option values the same way.
+        stored_config = self._get_stored_config_choices()
+        advertised_options = {opt.id: opt for opt in self._acp_config_options}
+        for config_id, value in stored_config.items():
+            option = advertised_options.get(config_id)
+            if option is None or option.current_value == value:
+                continue
+            try:
+                await client.set_config_option(config_id, value, response.session_id)
+                option.current_value = value
+            except Exception:
+                self.log.warning(
+                    "Failed to reapply stored config option '%s' for '%s'.",
+                    config_id,
+                    self.__class__.__name__,
+                    exc_info=True,
+                )
+
+        self._sync_awareness_config()
         return response
 
     async def _init_client_session(self) -> NewSessionResponse | LoadSessionResponse:
@@ -197,19 +352,161 @@ class BaseAcpPersona(BasePersona):
         supports_session_load = (await client.get_agent_capabilities()).load_session
 
         if existing_session_id and supports_session_load:
-            return await self._load_session(client, existing_session_id)
+            try:
+                return await self._load_session(client, existing_session_id)
+            except Exception:
+                self.log.warning(
+                    "Failed to load ACP client session for '%s' with ID '%s'; "
+                    "creating a new session.",
+                    self.__class__.__name__,
+                    existing_session_id,
+                    exc_info=True,
+                )
+                self._pending_session_recovery_context = True
+                return await self._create_session(client)
         else:
-            return await self._create_session(client)
+            response = await self._create_session(client)
+
+            # If the user was initially unauthenticated and the session was
+            # blocked on auth (e.g. Kiro), proactively resume their
+            # original request now that the session is ready.
+            if self._was_initially_unauthenticated:
+                self._was_initially_unauthenticated = False
+                await self._resume_after_auth(client, response.session_id)
+
+            return response
+
+    async def _resume_after_auth(
+        self, client: JaiAcpClient, session_id: str
+    ) -> None:
+        """
+        After the user signs in, send a hidden prompt with chat history and a
+        prescribed message template for the agent to follow.
+        """
+        history = self._build_history_context(
+            preamble=(
+                "You just became available after the user signed in. "
+                "Here are the messages they sent while you were unavailable:"
+            )
+        )
+        if history:
+            prompt = (
+                history + "\n\n"
+                "Display the following message to the user, filling in the "
+                "bracketed section with a brief summary of their request:\n\n"
+                "\"I'm logged in now. I see you asked about [brief summary of "
+                "their request]. Would you like me to help you with this now?\""
+            )
+        else:
+            prompt = (
+                "Display the following message to the user exactly as written:\n\n"
+                "\"I'm logged in now and ready to help. What can I do for you?\""
+            )
+
+        await client.prompt_and_reply(
+            session_id=session_id,
+            prompt=prompt,
+            root_dir=self.parent.root_dir,
+        )
+
+    def _client_started(self) -> bool:
+        """
+        Whether `prepare()` has created the client task.
+        Does not create it, so callers can probe without spawning.
+        """
+        cls = self.__class__
+        return "_client_future" in cls.__dict__ and cls._client_future is not None
+
+    async def prepare(self) -> None:
+        """
+        ACP startup: gate on auth, then spawn the shared agent subprocess/client
+        and create this chat's session. The manager runs this once via
+        `BasePersona`, awaiting an in-flight run for concurrent messages and
+        re-running it after a failed one.
+
+        If the user is not authenticated, raise `PersonaNotAuthenticated` so the
+        manager marks this NOT_AUTHED and prompts the user to sign in on the
+        next message (retrying login each time). A class-level startup task that
+        previously failed is discarded here so a fresh persona instance
+        recreates it.
+        """
+        # Reset class-level startup tasks that failed so the checks below.
+        self._discard_failed_startup()
+
+        self.emit_once("acp_engagement")
+
+        cls = self.__class__
+        if (
+            "_before_subprocess_future" not in cls.__dict__
+            or cls._before_subprocess_future is None
+        ):
+            cls._before_subprocess_future = self.event_loop.create_task(
+                self.before_agent_subprocess()
+            )
+        if "_subprocess_future" not in cls.__dict__ or cls._subprocess_future is None:
+            cls._subprocess_future = self.event_loop.create_task(
+                self._init_agent_subprocess()
+            )
+        if "_client_future" not in cls.__dict__ or cls._client_future is None:
+            cls._client_future = self.event_loop.create_task(self._init_client())
+        if self._client_session_future is None:
+            self._session_client_future = cls._client_future
+            self._client_session_future = self.event_loop.create_task(
+                self._init_client_session()
+            )
+
+        # Await startup to readiness so success/failure reflects the real
+        # outcome. 
+        try:
+            # Spawn ACP subprocess and initialize the connection.
+            await self.get_agent_subprocess()
+            client = await self.get_client()
+            await client.get_connection()
+            # Assert the authentication requirement is met before the session.
+            await self.auth.assert_auth()
+            self.emit_once("acp_login")
+            # Create or load the session.
+            await self.get_session_response()
+        except PersonaNotAuthenticated:
+            self.emit("acp_login", "failure")
+            raise
+        except Exception:
+            self.emit("acp_success", "failure")
+            raise
+
+        self.emit_once("acp_success")
+
+    def _discard_failed_startup(self) -> None:
+        """
+        Drop the shared (class-level) startup tasks that completed with an
+        exception so `prepare()` recreates them. Tasks still running or
+        completed successfully are left untouched. This is what lets a fresh
+        persona instance recover a subprocess/client that failed to start.
+        """
+        cls = self.__class__
+        for name in (
+            "_before_subprocess_future",
+            "_subprocess_future",
+            "_client_future",
+        ):
+            if self._is_discardable(cls.__dict__.get(name)):
+                setattr(cls, name, None)
+        if self._is_discardable(self._client_session_future):
+            self._client_session_future = None
+
+    @staticmethod
+    def _is_discardable(fut: object) -> bool:
+        """A startup task that ended without success — cancelled or raised — so
+        `prepare()` should recreate it. `.exception()` is guarded by the
+        short-circuit since it raises on a cancelled task."""
+        return (
+            isinstance(fut, Task)
+            and fut.done()
+            and (fut.cancelled() or fut.exception() is not None)
+        )
 
     async def get_agent_subprocess(self) -> asyncio.subprocess.Process:
-        """
-        Safely returns the ACP agent subprocess for this persona.
-
-        If the subprocess has exited (e.g. crash, OOM, external kill),
-        automatically respawns it along with a new client and connection.
-        Without this, a dead subprocess leaves the persona permanently
-        unresponsive until the entire JupyterLab server is restarted.
-        """
+        """Safely returns the ACP agent subprocess (spawned by `prepare()`)."""
         cls = self.__class__
         while True:
             future = cls._subprocess_future
@@ -250,9 +547,7 @@ class BaseAcpPersona(BasePersona):
             cls._client_future = self.event_loop.create_task(self._init_client())
 
     async def get_client(self) -> JaiAcpClient:
-        """
-        Safely returns the ACP client for this persona.
-        """
+        """Safely returns the ACP client (initialized by `prepare()`)."""
         while True:
             await self.get_agent_subprocess()
             future = self.__class__._client_future
@@ -261,13 +556,13 @@ class BaseAcpPersona(BasePersona):
                 return client
 
     async def get_session_response(self) -> NewSessionResponse | LoadSessionResponse:
-        """
-        Safely returns the ACP session response for this chat.
-        """
+        """Safely returns the ACP session response (created by `prepare()`)."""
         if not getattr(self, "_shutting_down", False):
             await self.get_client()
             if self._session_client_future is not self.__class__._client_future:
-                self._client_session_future.cancel()
+                if self._client_session_future is not None:
+                    self._client_session_future.cancel()
+                self._notebook_guidance_sent = False
                 self._session_client_future = self.__class__._client_future
                 self._client_session_future = self.event_loop.create_task(
                     self._init_client_session()
@@ -292,14 +587,50 @@ class BaseAcpPersona(BasePersona):
         """
         return True
 
-    async def handle_no_auth(self, message: Message) -> None:
+    async def handle_message_no_auth(self, message: Message | None = None) -> None:
+        """Prompt the user to sign in and set `_was_initially_unauthenticated` so a reactive agent resumes on its next message. 
+        Subclasses override to add the sign-in instructions/terminal."""
+        self._was_initially_unauthenticated = True
+        self.log.warning(
+            "[%s] Received message while unauthenticated.", self.__class__.__name__
+        )
+
+    async def handle_auth(self) -> None:
+        """Resume after the user signs in."""
+        await self._ensure_prepared()
+
+    def _build_history_context(
+        self,
+        exclude_id: str | None = None,
+        preamble: str = (
+            "The previous ACP session could not be loaded. Use this recent chat "
+            "transcript as historical context for continuity."
+        ),
+    ) -> str:
         """
-        Method called when the persona receives a message while the user is not
-        authenticated. This method should return a canned response to the chat
-        asking the user to log in. Subclasses may override this method to
-        customize the help message sent.
+        Builds a plain-text summary of recent chat history for context injection.
+        Caps at _MAX_HISTORY_MESSAGES to avoid exceeding agent context window
+        limits.
         """
-        self.send_message("You are not authenticated. Please log in.")
+        all_messages = self.chat.get_messages()
+        recent = [
+            m for m in all_messages
+            if not m.deleted and m.id != exclude_id
+        ][-self._MAX_HISTORY_MESSAGES:]
+        if not recent:
+            return ""
+        users = self.chat.get_users()
+        lines = []
+        for msg in recent:
+            user = users.get(msg.sender)
+            name = user.display_name if user else msg.sender
+            lines.append(f"{name}: {msg.body}")
+        return (
+            preamble + "\n"
+            "<conversation_history>\n"
+            + "\n".join(lines)
+            + "\n</conversation_history>"
+        )
 
     @auto_emit_event("acp_chat_message")
     async def process_message(self, message: Message) -> None:
@@ -309,25 +640,46 @@ class BaseAcpPersona(BasePersona):
 
         This method may be overriden by child classes.
         """
-        # If not authenticated, return early
-        if not await self.is_authed():
-            await self.handle_no_auth(message)
+        # Auth is gated in prepare(); reaching here means the user is signed in.
+        # If the user was previously unauthenticated, proactively resume their
+        # original request instead of processing this message normally.
+        if self._was_initially_unauthenticated:
+            self._was_initially_unauthenticated = False
+            session_id = await self.get_session_id()
+            client = await self.get_client()
+            await self._resume_after_auth(client, session_id)
             return
 
         session_id = await self.get_session_id()
         client = await self.get_client()
+        prompt = message.body.strip()
 
-        prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
+        # Inject notebook guidance once per session.
+        if not self._notebook_guidance_sent:
+            self._notebook_guidance_sent = True
+            prompt = self.NOTEBOOK_EDITING_GUIDANCE + "\n\n" + prompt
 
-        # Resolve attachments from YChat by ID
-        attachments: list[dict] | None = None
+        if self._pending_session_recovery_context:
+            self._pending_session_recovery_context = False
+            history = self._build_history_context(exclude_id=message.id)
+            if history:
+                emit_event(
+                    self.event_logger,
+                    "acp_session_recovery",
+                    "success",
+                    {"persona_class": self.__class__.__name__},
+                )
+                prompt = history + "\n\nCurrent user message:\n" + prompt
+
+        # Resolve attachments from the chat by ID
+        attachments: list[FileAttachment | NotebookAttachment] | None = None
         if message.attachments:
-            all_attachments = self.ychat.get_attachments()
+            all_attachments = self.chat.get_attachments()
             resolved = []
             for aid in message.attachments:
                 raw = all_attachments.get(aid)
                 if raw is None:
-                    self.log.warning("Attachment %s not found in YChat", aid)
+                    self.log.warning("Attachment %s not found in chat", aid)
                     continue
                 resolved.append(raw)
             attachments = resolved or None
@@ -338,6 +690,31 @@ class BaseAcpPersona(BasePersona):
             attachments=attachments,
             root_dir=self.parent.root_dir,
         )
+
+    async def cancel_response(self) -> None:
+        """
+        Interrupt this persona's in-progress ACP turn.
+
+        Overrides the `BasePersona` no-op: cancels the agent's current prompt
+        (via the ACP `session/cancel` notification), finalizes any messages
+        streamed so far, rejects pending permissions, and clears the writing
+        state.
+
+        Only called for a persona that's actually processing (the cancel handler
+        gates on `processing`), so ACP's `session/cancel` — defined only for an
+        ongoing prompt turn — always has a turn to cancel. A not-yet-initialized
+        session is still ignored defensively.
+        """
+        # Nothing to cancel if the persona was never prepared (no session yet).
+        if self._client_session_future is None:
+            return
+        try:
+            session_id = await self.get_session_id()
+        except (AssertionError, KeyError):
+            # No ACP session yet -> nothing to cancel.
+            return
+        client = await self.get_client()
+        await client.stop_streaming(session_id)
 
     @property
     def acp_slash_commands(self) -> list[AvailableCommand]:
@@ -357,9 +734,433 @@ class BaseAcpPersona(BasePersona):
             "Setting %d slash commands for '%s' in room '%s'.",
             len(commands),
             self.name,
-            self.parent.room_id,
+            self.parent.chat.get_id(),
         )
         self._acp_slash_commands = commands
+
+    @property
+    def acp_modes(self) -> list[SessionMode]:
+        """
+        Modes the ACP agent advertises for the current session. Empty when the
+        agent does not advertise any. Set by the persona on session create/load.
+        """
+        return self._acp_modes
+
+    @property
+    def acp_current_mode_id(self) -> Optional[str]:
+        """The mode ID currently selected for the ACP session, if any."""
+        return self._acp_current_mode_id
+
+    def _set_acp_mode_state(self, modes: Optional[SessionModeState]) -> None:
+        """
+        Store the mode state from a `session/new` or `session/load` response.
+        `modes` is `None` when the agent does not advertise modes.
+        """
+        if modes is None:
+            self._acp_modes = []
+            self._acp_current_mode_id = None
+            return
+        self._acp_modes = modes.available_modes
+        self._acp_current_mode_id = modes.current_mode_id
+
+    def update_acp_current_mode(self, mode_id: str) -> None:
+        """Record a mode the agent switched to itself (a `current_mode_update`)."""
+        self._acp_current_mode_id = mode_id
+
+    async def set_acp_mode(self, mode_id: str) -> None:
+        """
+        Select a mode for this persona's ACP session and persist the choice
+        with the chat so it survives session recreation.
+        """
+        client = await self.get_client()
+        session_id = await self.get_session_id()
+        await client.set_session_mode(mode_id, session_id)
+        self._acp_current_mode_id = mode_id
+        self._record_mode_choice(mode_id)
+
+    def _record_mode_choice(self, mode_id: str) -> None:
+        """Persist the selected mode in chat metadata, keyed by persona ID."""
+        existing = self.chat.get_metadata().get("acp_modes", {})
+        self.chat.set_metadata("acp_modes", {**existing, self.id: mode_id})
+
+    def _get_stored_mode_choice(self) -> Optional[str]:
+        """Return the mode previously selected for this persona in this chat."""
+        return self.chat.get_metadata().get("acp_modes", {}).get(self.id)
+
+    @property
+    def acp_config_options(self) -> list[AcpConfigOption]:
+        """
+        Session config options the ACP agent advertises for the current session,
+        each carrying its current value. Empty when the agent advertises none.
+        Set by the persona on session create/load.
+        """
+        return self._acp_config_options
+
+    def update_acp_config_options(
+        self, config_options: Optional[list[AcpConfigOption]]
+    ) -> None:
+        """
+        Store the config options from a `session/new`, `session/load`, or
+        `config_option_update` payload. `config_options` is `None` when the agent
+        does not advertise any.
+        """
+        self._acp_config_options = config_options or []
+
+    async def set_acp_config_option(self, config_id: str, value: str | bool) -> None:
+        """
+        Set a session config option for this persona's ACP session and persist
+        the choice with the chat so it survives session recreation.
+        """
+        client = await self.get_client()
+        session_id = await self.get_session_id()
+        await client.set_config_option(config_id, value, session_id)
+        for option in self._acp_config_options:
+            if option.id == config_id:
+                option.current_value = value
+                break
+        self._record_config_choice(config_id, value)
+
+    def _record_config_choice(self, config_id: str, value: str | bool) -> None:
+        """Persist a config option value in chat metadata, keyed by persona ID."""
+        all_choices = self.chat.get_metadata().get("acp_config_options", {})
+        persona_choices = {**all_choices.get(self.id, {}), config_id: value}
+        self.chat.set_metadata(
+            "acp_config_options", {**all_choices, self.id: persona_choices}
+        )
+
+    def _get_stored_config_choices(self) -> dict[str, str | bool]:
+        """Return config option values previously selected for this persona here."""
+        return self.chat.get_metadata().get("acp_config_options", {}).get(self.id, {})
+
+    ################################################
+    # persona-manager awareness API
+    #
+    # Maps the raw ACP state above onto the persona-manager awareness schema
+    # (`ModelConfiguration` + general `SettingConfiguration`s) and implements the
+    # `update_*` methods from `BasePersona` over the ACP RPCs. `BasePersona`
+    # records the new current values and rebroadcasts after an `update_*`; the
+    # `_sync_awareness_config` here publishes the *full* configuration (options
+    # included) when the session is (re)initialized or the agent changes it
+    # itself. The awareness broadcast is the single source of truth for session
+    # info; the frontend reads it directly rather than polling a REST endpoint.
+    ################################################
+    def _config_option_to_setting(
+        self, opt: AcpConfigOption
+    ) -> SettingConfiguration:
+        """
+        Convert an ACP config option into a `SettingConfiguration`.
+
+        Selects map their choices to `SettingOption`s directly. Booleans are
+        represented as a uniform two-option select ("true"/"false"); the ACP
+        `current_value` bool is stringified to match.
+        """
+        if isinstance(opt, SessionConfigOptionSelect):
+            return SettingConfiguration(
+                id=opt.id,
+                current=opt.current_value,
+                name=opt.name,
+                description=opt.description,
+                options=[
+                    SettingOption(id=c.value, name=c.name, description=c.description)
+                    for c in _flatten_select_options(opt.options)
+                ],
+            )
+        # SessionConfigOptionBoolean
+        current = None
+        if opt.current_value is not None:
+            current = "true" if opt.current_value else "false"
+        return SettingConfiguration(
+            id=opt.id,
+            current=current,
+            name=opt.name,
+            description=opt.description,
+            options=[
+                SettingOption(id="true", name="True"),
+                SettingOption(id="false", name="False"),
+            ],
+        )
+
+    def _model_config_option(self) -> Optional[SessionConfigOptionSelect]:
+        """
+        The config option backing the model picker: the first select with
+        category `"model"` (or, as a fallback, id `"model"`).
+
+        ACP models are ordinary config options now — the never-stabilized
+        `session/set_model` API and its response fields were removed from the
+        protocol. When several options share the `"model"` category, ACP breaks
+        the tie by array order, so the earliest wins the prominent model slot;
+        any later model-category options fall through to the general settings
+        list. `None` when the agent advertises no model option.
+        """
+        for opt in self._acp_config_options:
+            if isinstance(opt, SessionConfigOptionSelect) and (
+                opt.category == _MODEL_CATEGORY or opt.id == "model"
+            ):
+                return opt
+        return None
+
+    def _mode_config_option(self) -> Optional[SessionConfigOptionSelect]:
+        """
+        The config option backing the mode selector: the first select with
+        category `"mode"` (or, as a fallback, id `"mode"`).
+
+        ACP v1 lets an agent expose its mode either through the dedicated
+        `session/set_mode` state or as a config option; it tells clients to
+        prefer config options and respect a `"mode"` category. So a mode config
+        option wins over the dedicated mode state (see `_build_awareness_config`),
+        and same-category ties resolve by array order. `None` when no config
+        option advertises a mode.
+        """
+        for opt in self._acp_config_options:
+            if isinstance(opt, SessionConfigOptionSelect) and (
+                opt.category == _MODE_CATEGORY or opt.id == "mode"
+            ):
+                return opt
+        return None
+
+    def _build_awareness_config(
+        self,
+    ) -> tuple[ModelConfiguration, list[SettingConfiguration]]:
+        """
+        Build the awareness `ModelConfiguration` and general
+        `SettingConfiguration` list from the current raw ACP state.
+
+        Bucketing by ACP config-option category:
+
+        - Model: the `"model"`-category config option (`_model_config_option`).
+        - Mode: the `"mode"`-category config option if present, else the
+          dedicated `session/set_mode` state — surfaced as a general setting
+          keyed by `MODE_CONTROL_ID`. A mode config option is preferred, so a
+          duplicate mode advertised through both channels appears only once.
+        - Model settings (`ModelConfiguration.settings`): config options whose
+          category is `"model_config"`.
+        - General settings: every remaining config option.
+
+        The one option consumed as the prominent model picker or mode selector
+        is not also shown as a general setting; any *additional* same-category
+        options are (ACP resolves such ties by array order — earliest wins the
+        prominent slot).
+        """
+        model_opt = self._model_config_option()
+        mode_opt = self._mode_config_option()
+
+        model = ModelConfiguration()
+        if model_opt is not None:
+            model.current = model_opt.current_value
+            model.options = [
+                ModelOption(id=c.value, name=c.name, description=c.description)
+                for c in _flatten_select_options(model_opt.options)
+            ]
+
+        model_settings: list[SettingConfiguration] = []
+        general_settings: list[SettingConfiguration] = []
+
+        # Mode is surfaced as a general setting with a stable pseudo-ID. Prefer a
+        # mode config option; fall back to the dedicated set_mode state.
+        if mode_opt is not None:
+            general_settings.append(
+                SettingConfiguration(
+                    id=MODE_CONTROL_ID,
+                    current=mode_opt.current_value,
+                    name=mode_opt.name or "Mode",
+                    description=mode_opt.description,
+                    options=[
+                        SettingOption(id=c.value, name=c.name, description=c.description)
+                        for c in _flatten_select_options(mode_opt.options)
+                    ],
+                )
+            )
+        elif self._acp_modes:
+            general_settings.append(
+                SettingConfiguration(
+                    id=MODE_CONTROL_ID,
+                    current=self._acp_current_mode_id,
+                    name="Mode",
+                    options=[
+                        SettingOption(id=m.id, name=m.name, description=m.description)
+                        for m in self._acp_modes
+                    ],
+                )
+            )
+
+        for opt in self._acp_config_options:
+            # The option consumed as the model picker / mode selector is not also
+            # shown as a general setting.
+            if opt is model_opt or opt is mode_opt:
+                continue
+            setting = self._config_option_to_setting(opt)
+            if opt.category == _MODEL_CONFIG_CATEGORY:
+                model_settings.append(setting)
+            else:
+                general_settings.append(setting)
+
+        model.settings = model_settings
+        return model, general_settings
+
+    def _sync_awareness_config(self) -> None:
+        """
+        Rebuild the awareness model + settings configuration from current ACP
+        state and broadcast it. Called whenever the ACP state is (re)initialized
+        or changes (session create/load, a control is set, or the agent switches
+        mode/config itself).
+        """
+        model, settings = self._build_awareness_config()
+        self.report_model_configuration(model)
+        self.report_settings_configuration(settings)
+
+    def _sync_awareness_usage(self) -> None:
+        """
+        Map the raw ACP usage state onto the awareness `Usage` model and merge it
+        into the broadcast usage. ACP reports cumulative counts and a live
+        context snapshot, so the default replace semantics of `report_usage` are
+        correct here.
+        """
+        usage = AwarenessUsage()
+        context = self._acp_context_usage
+        if context is not None:
+            usage.context_tokens = context.used
+            usage.context_size = context.size
+            if context.cost is not None:
+                usage.cost_amount = context.cost.amount
+                usage.cost_currency = context.cost.currency
+        tokens = self._acp_session_usage
+        if tokens is not None:
+            usage.input_tokens = tokens.input_tokens
+            usage.output_tokens = tokens.output_tokens
+            usage.total_tokens = tokens.total_tokens
+            usage.cached_read_tokens = tokens.cached_read_tokens
+            usage.cached_write_tokens = tokens.cached_write_tokens
+            usage.thought_tokens = tokens.thought_tokens
+        self.report_usage(usage)
+
+    def _coerce_config_value(self, config_id: str, value: str) -> str | bool:
+        """
+        Coerce an incoming string setting value to the type the ACP option
+        expects. Booleans are advertised to clients as a "true"/"false" select,
+        so convert those strings back to a bool before calling the ACP RPC.
+        """
+        for opt in self._acp_config_options:
+            if opt.id == config_id and isinstance(opt, SessionConfigOptionBoolean):
+                return value == "true"
+        return value
+
+    async def update_model(self, model_id: str) -> None:
+        """
+        Switch the ACP session's model. `BasePersona` rebroadcasts.
+
+        Models are config options now (`session/set_model` was removed from the
+        protocol), so this applies the choice through the backing model config
+        option, matching how `_build_awareness_config` sourced it.
+        """
+        model_opt = self._model_config_option()
+        config_id = model_opt.id if model_opt is not None else "model"
+        await self.set_acp_config_option(
+            config_id, self._coerce_config_value(config_id, model_id)
+        )
+
+    async def update_model_settings(self, settings: dict[str, str | None]) -> None:
+        """
+        Apply model settings — ACP `model_config` category config options — by
+        setting each as a config option. `BasePersona` passes only the settings
+        that changed and rebroadcasts afterward.
+        """
+        for config_id, value in settings.items():
+            await self.set_acp_config_option(
+                config_id, self._coerce_config_value(config_id, value)
+            )
+
+    async def update_settings(self, settings: dict[str, str | None]) -> None:
+        """
+        Apply general settings. The mode pseudo-setting (`MODE_CONTROL_ID`)
+        routes to the mode config option if the agent advertised one, else to
+        the dedicated `session/set_mode`; everything else is a config option.
+        `BasePersona` passes only the settings that changed and rebroadcasts.
+        """
+        for setting_id, value in settings.items():
+            if setting_id == MODE_CONTROL_ID:
+                mode_opt = self._mode_config_option()
+                if mode_opt is not None:
+                    await self.set_acp_config_option(
+                        mode_opt.id, self._coerce_config_value(mode_opt.id, value)
+                    )
+                else:
+                    await self.set_acp_mode(value)
+            else:
+                await self.set_acp_config_option(
+                    setting_id, self._coerce_config_value(setting_id, value)
+                )
+
+    @property
+    def acp_context_usage(self) -> Optional[UsageUpdate]:
+        """
+        How full the agent's context window is right now: tokens currently in
+        context, window size, and optional cumulative session cost, from the
+        latest `usage_update`. A live snapshot that can decrease (e.g. after
+        compaction). Distinct from `acp_session_usage`, which counts total
+        session throughput. `None` when the agent has not reported any.
+        """
+        return self._acp_context_usage
+
+    def update_acp_context_usage(self, usage: UsageUpdate) -> None:
+        """Record a `usage_update` received from the ACP agent."""
+        self._acp_context_usage = usage
+
+    @property
+    def acp_session_usage(self) -> Optional[Usage]:
+        """
+        Cumulative token totals for the whole session from the latest prompt
+        response: never decreases, and includes cache re-reads, so it grows
+        past the context window size. Distinct from `acp_context_usage`, which measures
+        current window occupancy. `None` when no prompt response has carried
+        usage.
+        """
+        return self._acp_session_usage
+
+    def update_acp_session_usage(self, usage: Usage) -> None:
+        """Record the token usage carried on a completed prompt response."""
+        self._acp_session_usage = usage
+
+    async def handle_uncaught_exception(self, exc: Exception) -> None:
+        """Show the login prompt for an auth failure from `prepare()`; show
+        structured info for an ACP RequestError; otherwise fall back."""
+        if isinstance(exc, PersonaNotAuthenticated):
+            await self.handle_message_no_auth(None)
+            return
+        if not isinstance(exc, RequestError):
+            await super().handle_uncaught_exception(exc)
+            return
+
+        import json
+        import traceback
+
+        tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        error_msg = str(exc)
+        if len(error_msg) > 120:
+            error_msg = error_msg[:120] + "…"
+        summary = f"Error {exc.code}: {html.escape(error_msg)}"
+
+        # Build inner content
+        sections = [f"**Error code:** {exc.code}\n\n**Message:** {html.escape(str(exc))}"]
+
+        if exc.data is not None:
+            try:
+                data_str = json.dumps(exc.data, indent=2)
+            except (TypeError, ValueError):
+                data_str = str(exc.data)
+            sections.append(f"**Data:**\n\n```json\n{data_str}\n```")
+
+        sections.append(f"**Traceback:**\n\n```\n{tb}```")
+
+        inner = "\n\n".join(sections)
+
+        body = (
+            f"An error occurred while processing your message.\n\n"
+            f'<details class="jp-jai-error-details">\n'
+            f"<summary>Error details ({summary})</summary>\n\n"
+            f"{inner}\n"
+            f"</details>"
+        )
+        self.send_message(body)
 
     async def shutdown(self):
         if getattr(self, "_shutting_down", False):
@@ -372,8 +1173,25 @@ class BaseAcpPersona(BasePersona):
         self._shutting_down = True
         self.log.info("[shutdown] Starting for '%s'.", self.__class__.__name__)
 
+        if not self._client_started():
+            before_future = self.__class__._before_subprocess_future
+            if isinstance(before_future, Task) and not before_future.done():
+                before_future.cancel()
+            if isinstance(self._client_session_future, Task) and not (
+                self._client_session_future.done()
+            ):
+                self._client_session_future.cancel()
+            self.__class__._before_subprocess_future = None
+            self.__class__._subprocess_future = None
+            self.__class__._client_future = None
+            self.log.info(
+                "[shutdown] Persona '%s' was never engaged; nothing to tear down.",
+                self.__class__.__name__,
+            )
+            return
+
         # Cancel any pending startup futures to avoid hanging on auth-gated
-        # personas (e.g. Kiro, Gemini) that never finished startup.
+        # personas (e.g. Kiro) that never finished startup.
         for future in [
             self.__class__._before_subprocess_future,
             self.__class__._subprocess_future,
@@ -386,12 +1204,14 @@ class BaseAcpPersona(BasePersona):
         # Step 1: Session cleanup
         try:
             client = await self.get_client()
-            session_id = await self.get_session_id()
-            await client.end_session(session_id)
-            self.log.info(
-                "[shutdown] Step 1: session ended for '%s'.",
-                self.__class__.__name__,
-            )
+            # Only end a session that exists.
+            if self._client_session_future is not None:
+                session_id = await self.get_session_id()
+                await client.end_session(session_id)
+                self.log.info(
+                    "[shutdown] Step 1: session ended for '%s'.",
+                    self.__class__.__name__,
+                )
         except asyncio.CancelledError:
             pass
         except Exception:

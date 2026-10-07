@@ -4,10 +4,17 @@ import platform
 import re
 import shutil
 import subprocess
+from typing import ClassVar, Optional
 
-from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
+from jupyter_ai_persona_manager import (
+    ModelOption,
+    PersonaDefaults,
+    PersonaRequirementsUnmet,
+)
 from jupyterlab_chat.models import Message
 from ..base_acp_persona import BaseAcpPersona
+from ..default_acp_client import JaiAcpClient
+from ..kiro_client import KiroAcpClient, KiroModels
 
 # Raise `PersonaRequirementsUnmet` if `kiro-cli` not installed
 if shutil.which("kiro-cli") is None:
@@ -52,9 +59,9 @@ try:
     required_version = (1, 25, 0)
     current_version = tuple(version_parts)
 
-    if current_version < required_version or current_version[0] >= 2:
+    if current_version < required_version or current_version[0] >= 3:
         raise PersonaRequirementsUnmet(
-            f"kiro-cli version {version_str} is installed, but version >=1.25.0,<2 is required."
+            f"kiro-cli version {version_str} is installed, but version >=1.25.0,<3 is required."
             " Please upgrade kiro-cli. See https://kiro.dev for instructions."
         )
 
@@ -72,11 +79,67 @@ except FileNotFoundError:
 
 class KiroAcpPersona(BaseAcpPersona):
     _terminal_opened: bool
+
+    # kiro-cli's ACP surface is non-standard (legacy `models` field, deprecated
+    # `session/set_model`, vendor usage/command notifications), so this persona
+    # uses a Kiro-scoped client that handles all of it. See `kiro_client.py`.
+    acp_client_class: ClassVar[type[JaiAcpClient]] = KiroAcpClient
+
     def __init__(self, *args, **kwargs):
         executable = ["kiro-cli", "acp"]
         super().__init__(*args, executable=executable, **kwargs)
         self._terminal_opened = False
-    
+        # The legacy `models` payload the client captures off the raw session
+        # response (`None` until a session is created/loaded). Kiro advertises
+        # models this way instead of through ACP v1 config options.
+        self._kiro_models: Optional[KiroModels] = None
+
+    def set_kiro_models(self, models: Optional[KiroModels]) -> None:
+        """
+        Store the legacy `models` payload the `KiroAcpClient` captured off the
+        raw session response. Called during session create/load, before the
+        base persona syncs its awareness config, so the models are present when
+        `_build_awareness_config` runs.
+        """
+        self._kiro_models = models
+
+    def _build_awareness_config(self):
+        """
+        Build the awareness config as the base does, then fill the model picker
+        from Kiro's legacy `models` payload when no ACP config option advertised
+        one (Kiro's normal case). A genuine `"model"`-category config option, if
+        the agent ever sends one, still wins.
+        """
+        model, general_settings = super()._build_awareness_config()
+        if not model.options and self._kiro_models:
+            model.current = self._kiro_models.current_model_id
+            model.options = [
+                ModelOption(
+                    id=option.model_id,
+                    name=option.name or option.model_id,
+                    description=option.description,
+                )
+                for option in (self._kiro_models.available_models or [])
+                if option.model_id
+            ]
+        return model, general_settings
+
+    async def update_model(self, model_id: str) -> None:
+        """
+        Switch the model. When models come from Kiro's legacy payload (no ACP
+        model config option), apply the choice via the deprecated
+        `session/set_model` request; otherwise defer to the standard
+        config-option path. The legacy choice is kept agent-side on the session
+        (resumed by ID), not persisted with the chat.
+        """
+        if self._model_config_option() is None and self._kiro_models:
+            client = await self.get_client()
+            session_id = await self.get_session_id()
+            await client.set_session_model(model_id, session_id)
+            self._kiro_models.current_model_id = model_id
+            return
+        await super().update_model(model_id)
+
     @property
     def defaults(self) -> PersonaDefaults:
         avatar_path = str(os.path.abspath(
@@ -91,51 +154,34 @@ class KiroAcpPersona(BaseAcpPersona):
         )
     
     async def before_agent_subprocess(self) -> None:
-        # The Kiro ACP agent subprocess fails to start if the user is not signed
-        # in. Therefore we must implement this method to wait until the user is
-        # signed in. The ACP agent server does not start until this is complete.
-        failed_auth_check = False
-        while True:
-            # If authenticated with Kiro, return
-            if await self._check_kiro_auth():
-                break
+        # The kiro-cli ACP subprocess fails to start unless the user is signed
+        # in, so Kiro must gate auth before the subprocess spawns.
+        await self.auth.assert_auth()
 
-            # Reaching here := user is not signed in
-            if not failed_auth_check:
-                self.log.info("[Kiro] User is not signed in.")
-                failed_auth_check = True
-
-            # Re-check every 2 seconds
-            await asyncio.sleep(2)
-        
-        # Reaching this point := user is authenticated
-        self.log.info("[Kiro] User is signed in.")
-
-        # If initially signed out, send a message letting the user know they are
-        # now signed in.
-        if failed_auth_check:
-            self.send_message("Thanks for signing in! I'm ready to help.")
     
     async def is_authed(self) -> bool:
-        # In Kiro, the user remains signed in even if they sign out while the
-        # ACP agent server is running. Therefore we can just return the status
-        # of the `before_agent_subprocess()` task to check if the user is
-        # authenticated.
-        return self._before_subprocess_future.done()
+        # One-shot auth check. `PersonaAuthManager` caches a True result, so
+        # signed-in users aren't re-checked on every call.
+        return await self._check_kiro_auth()
     
-    async def handle_no_auth(self, message: Message) -> None:
+    async def handle_message_no_auth(self, message: Message | None = None) -> None:
+        await super().handle_message_no_auth(message)
+
         # Determine which command to show
         use_device_flow = await self._should_use_device_flow()
         command = "kiro-cli login --use-device-flow" if use_device_flow else "kiro-cli login"
         
         # Return canned reply with appropriate command
-        self.send_message(f"You're not signed in to Kiro yet. Please run `{command}` in a terminal to sign in.")
+        self.send_message(f"You're not signed in to Kiro yet. Please run the following command in a terminal to sign in:\n\n```\n{command}\n```")
 
         # Open the terminal to help the user login
         if not self._terminal_opened:
             self._terminal_opened = await self._open_kiro_login_terminal()
             if self._terminal_opened:
                 self.send_message("I've opened a new terminal to help with that.")
+
+        # Poll for sign-in and auto-resume once authenticated.
+        self.auth.start_poll()
 
     async def _check_kiro_auth(self) -> bool:
         """
