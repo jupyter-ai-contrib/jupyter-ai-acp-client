@@ -2,6 +2,7 @@ import asyncio
 import os
 import signal
 import sys
+import time
 from asyncio import Task
 from asyncio.subprocess import Process
 from typing import Any, ClassVar, Optional
@@ -16,6 +17,11 @@ from .telemetry import emit_event, auto_emit_event
 
 
 class BaseAcpPersona(BasePersona):
+    _MAX_RESPAWNS: ClassVar[int] = 3
+    _RESPAWN_WINDOW: ClassVar[float] = 60.0
+    _respawn_timestamps: ClassVar[list[float]] = []
+    _stopping_subprocess: ClassVar[bool] = False
+
     _before_subprocess_future: ClassVar[Task[None] | None] = None
     """
     The task that blocks the agent subprocess from starting until resolved.
@@ -85,6 +91,7 @@ class BaseAcpPersona(BasePersona):
                 self._init_client()
             )
 
+        self._session_client_future = self.__class__._client_future
         self._client_session_future = self.event_loop.create_task(
             self._init_client_session()
         )
@@ -123,7 +130,7 @@ class BaseAcpPersona(BasePersona):
 
     @auto_emit_event("acp_server_init")
     async def _init_client(self) -> JaiAcpClient:
-        agent_subprocess = await self.get_agent_subprocess()
+        agent_subprocess = await self.__class__._subprocess_future
         client = JaiAcpClient(
             agent_subprocess=agent_subprocess, event_loop=self.event_loop
         )
@@ -183,6 +190,7 @@ class BaseAcpPersona(BasePersona):
     async def _init_client_session(self) -> NewSessionResponse | LoadSessionResponse:
         # get client
         client = await self.get_client()
+        self._session_client_future = self.__class__._client_future
 
         # check for an existing session ID
         existing_session_id = self._get_existing_sessions().get(self.id, None)
@@ -202,42 +210,75 @@ class BaseAcpPersona(BasePersona):
         Without this, a dead subprocess leaves the persona permanently
         unresponsive until the entire JupyterLab server is restarted.
         """
-        process = await self.__class__._subprocess_future
-        if process.returncode is not None:
+        cls = self.__class__
+        while True:
+            future = cls._subprocess_future
+            process = await future
+            if getattr(self, "_shutting_down", False):
+                return process
+            if cls._stopping_subprocess:
+                raise RuntimeError(f"ACP subprocess for {cls.__name__} is shutting down")
+            if future is not cls._subprocess_future:
+                continue
+            if process.returncode is None:
+                return process
+            now = time.monotonic()
+            cls._respawn_timestamps = [
+                timestamp
+                for timestamp in cls._respawn_timestamps
+                if now - timestamp < cls._RESPAWN_WINDOW
+            ]
+            if len(cls._respawn_timestamps) >= cls._MAX_RESPAWNS:
+                message = (
+                    f"ACP subprocess for {cls.__name__} repeatedly crashed. "
+                    f"Try again after {cls._RESPAWN_WINDOW:g} seconds."
+                )
+                self.log.error(message)
+                raise RuntimeError(message)
+            cls._respawn_timestamps.append(now)
             self.log.warning(
                 "ACP agent subprocess for '%s' exited with code %s. Respawning.",
-                self.__class__.__name__,
+                cls.__name__,
                 process.returncode,
             )
-            self.__class__._before_subprocess_future = self.event_loop.create_task(
+            cls._before_subprocess_future = self.event_loop.create_task(
                 self.before_agent_subprocess()
             )
-            self.__class__._subprocess_future = self.event_loop.create_task(
+            cls._subprocess_future = self.event_loop.create_task(
                 self._init_agent_subprocess()
             )
-            self.__class__._client_future = self.event_loop.create_task(
-                self._init_client()
-            )
-            process = await self.__class__._subprocess_future
-        return process
+            cls._client_future = self.event_loop.create_task(self._init_client())
 
     async def get_client(self) -> JaiAcpClient:
         """
         Safely returns the ACP client for this persona.
         """
-        return await self.__class__._client_future
+        while True:
+            await self.get_agent_subprocess()
+            future = self.__class__._client_future
+            client = await future
+            if future is self.__class__._client_future:
+                return client
 
     async def get_session_response(self) -> NewSessionResponse | LoadSessionResponse:
         """
         Safely returns the ACP session response for this chat.
         """
+        if not getattr(self, "_shutting_down", False):
+            await self.get_client()
+            if self._session_client_future is not self.__class__._client_future:
+                self._client_session_future.cancel()
+                self._session_client_future = self.__class__._client_future
+                self._client_session_future = self.event_loop.create_task(
+                    self._init_client_session()
+                )
         return await self._client_session_future
 
     async def get_session_id(self) -> str:
         """
         Safely returns the ACP session ID assigned to this chat.
         """
-        await self._client_session_future
+        await self.get_session_response()
         # session ID should always be stored in chat metadata after client
         # session was created or loaded.
         session_ids = self._get_existing_sessions()
@@ -273,24 +314,8 @@ class BaseAcpPersona(BasePersona):
             await self.handle_no_auth(message)
             return
 
-        # Ensure subprocess is alive (respawns if dead via get_agent_subprocess)
-        await self.get_agent_subprocess()
-
-        try:
-            client = await self.get_client()
-            session_id = await self.get_session_id()
-        except Exception:
-            # After a subprocess respawn, the old client/session are invalid.
-            # Re-initialize the session against the new client.
-            self.log.warning(
-                "Client or session invalid for '%s', re-initializing after respawn.",
-                self.__class__.__name__,
-            )
-            self._client_session_future = self.event_loop.create_task(
-                self._init_client_session()
-            )
-            client = await self.get_client()
-            session_id = await self.get_session_id()
+        session_id = await self.get_session_id()
+        client = await self.get_client()
 
         prompt = message.body.replace("@" + self.as_user().mention_name, "").strip()
 
@@ -344,6 +369,7 @@ class BaseAcpPersona(BasePersona):
         await self._shutdown()
 
     async def _shutdown(self):
+        self._shutting_down = True
         self.log.info("[shutdown] Starting for '%s'.", self.__class__.__name__)
 
         # Cancel any pending startup futures to avoid hanging on auth-gated
@@ -386,6 +412,8 @@ class BaseAcpPersona(BasePersona):
                 return
         except (asyncio.CancelledError, Exception):
             pass
+
+        self.__class__._stopping_subprocess = True
 
         # Step 2: Close connection
         try:
@@ -442,6 +470,7 @@ class BaseAcpPersona(BasePersona):
         self.__class__._before_subprocess_future = None
         self.__class__._subprocess_future = None
         self.__class__._client_future = None
+        self.__class__._stopping_subprocess = False
 
         self.log.info("[shutdown] Complete for '%s'.", self.__class__.__name__)
 
