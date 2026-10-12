@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from acp.exceptions import RequestError
 from acp.schema import (
+    AgentMessageChunk,
     AvailableCommand,
     AvailableCommandsUpdate,
     ConfigOptionUpdate,
@@ -24,6 +25,7 @@ from jupyter_ai_persona_manager.persona_events import PersonaSessionState
 
 from jupyter_ai_acp_client.base_acp_persona import BaseAcpPersona
 from jupyter_ai_acp_client.default_acp_client import JaiAcpClient
+from jupyter_ai_acp_client.tool_call_manager import ToolCallManager
 
 
 SESSION_ID = "sess-1"
@@ -439,3 +441,28 @@ class TestWriteTextFileNotebookGuard:
 
         assert result is not None
         assert txt_path.read_text(encoding="utf-8") == "hello"
+
+
+class TestLateSessionUpdate:
+    """The ACP SDK runs each notification as its own task, so a session_update
+    can run after prompt_and_reply has returned (#207). It must not bring the
+    typing status back."""
+
+    async def test_late_chunk_does_not_set_status_again(self):
+        client, _, persona = _make_client_and_persona()
+        client._tool_call_manager = ToolCallManager()
+        client._loading_sessions = {}
+        persona.id = "persona-id"
+        persona.chat.add_message.return_value = "msg-late"
+
+        await client.prompt_and_reply(session_id=SESSION_ID, prompt="hello")
+        persona.set_status.reset_mock()
+
+        update = AgentMessageChunk(
+            sessionUpdate="agent_message_chunk",
+            content=TextContentBlock(type="text", text="final"),
+        )
+        await client.session_update(SESSION_ID, update)
+
+        persona.set_status.assert_not_called()
+        persona.chat.add_message.assert_called_once()
