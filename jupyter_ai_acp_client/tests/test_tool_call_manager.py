@@ -193,10 +193,22 @@ class TestGetOrCreateTextMessage:
         mgr = ToolCallManager()
         persona = make_persona("msg-1")
         mgr.reset(SESSION_ID)
+        mgr.mark_prompt_active(SESSION_ID)
 
         mgr.get_or_create_text_message(SESSION_ID, persona)
 
         persona.set_status.assert_called_with()
+
+    def test_skips_status_when_prompt_done(self):
+        mgr = ToolCallManager()
+        persona = make_persona("msg-1")
+        mgr.reset(SESSION_ID)
+        mgr.mark_prompt_active(SESSION_ID)
+        mgr.mark_prompt_done(SESSION_ID)
+
+        mgr.get_or_create_text_message(SESSION_ID, persona)
+
+        persona.set_status.assert_not_called()
 
     def test_does_not_flush_tool_calls_on_creation(self):
         """get_or_create_text_message must not write tool call metadata."""
