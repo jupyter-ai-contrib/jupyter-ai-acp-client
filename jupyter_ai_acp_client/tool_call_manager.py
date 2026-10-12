@@ -29,6 +29,9 @@ class SessionState:
     message_tool_call_ids: dict[str, list[str]] = field(default_factory=dict)
     # All message IDs created this turn (for find_mentions at end)
     all_message_ids: list[str] = field(default_factory=list)
+    # Set to True while a prompt is being processed; prevents set_status() from
+    # being called by late fire-and-forget session_update tasks after clear_status().
+    prompt_active: bool = False
 
 
 class ToolCallManager:
@@ -41,6 +44,16 @@ class ToolCallManager:
 
     def __init__(self) -> None:
         self._sessions: dict[str, SessionState] = {}
+
+    def mark_prompt_active(self, session_id: str) -> None:
+        """Allow set_status() calls when creating messages for this session."""
+        self._ensure_session(session_id).prompt_active = True
+
+    def mark_prompt_done(self, session_id: str) -> None:
+        """Suppress set_status() calls for this session (called before clear_status())."""
+        session = self._sessions.get(session_id)
+        if session is not None:
+            session.prompt_active = False
 
     def _ensure_session(self, session_id: str) -> SessionState:
         """Return the SessionState for a session, creating one if absent."""
@@ -93,7 +106,8 @@ class ToolCallManager:
         session.current_message_id = message_id
         session.all_message_ids.append(message_id)
         persona.log.info(f"Created message {message_id} for session {session_id}")
-        persona.set_status()
+        if session.prompt_active:
+            persona.set_status()
 
         return message_id
 

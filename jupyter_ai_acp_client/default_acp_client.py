@@ -271,6 +271,7 @@ class JaiAcpClient(Client):
 
             # Reset session state for this prompt
             self._tool_call_manager.reset(session_id)
+            self._tool_call_manager.mark_prompt_active(session_id)
 
             persona.log.info(f"prompt_and_reply: starting for session {session_id}")
 
@@ -348,7 +349,12 @@ class JaiAcpClient(Client):
                 persona.log.exception(f"prompt_and_reply: failed for session {session_id}")
                 raise
             finally:
-                # Clear the status indicator
+                # Prevent late session_update notifications from re-setting
+                # the writing indicator after we clear it. The ACP framework
+                # dispatches notifications as fire-and-forget tasks, so a
+                # session_update for the last streaming event can run after
+                # conn.prompt() has already returned and resolved its future.
+                self._tool_call_manager.mark_prompt_done(session_id)
                 persona.clear_status()
 
     def _handle_agent_message_chunk(self, session_id: str, update: AgentMessageChunk) -> None:
