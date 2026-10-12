@@ -189,14 +189,15 @@ class TestGetOrCreateTextMessage:
         assert msg_id == "msg-text"
         assert persona.chat.add_message.call_count == 2
 
-    def test_sets_status_on_creation(self):
+    def test_does_not_set_status_on_creation(self):
+        """The typing status belongs to prompt_and_reply, not to message creation."""
         mgr = ToolCallManager()
         persona = make_persona("msg-1")
         mgr.reset(SESSION_ID)
 
         mgr.get_or_create_text_message(SESSION_ID, persona)
 
-        persona.set_status.assert_called_with()
+        persona.set_status.assert_not_called()
 
     def test_does_not_flush_tool_calls_on_creation(self):
         """get_or_create_text_message must not write tool call metadata."""

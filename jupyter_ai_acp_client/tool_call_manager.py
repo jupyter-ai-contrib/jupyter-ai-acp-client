@@ -82,7 +82,8 @@ class ToolCallManager:
     def _create_message(self, session_id: str, persona: BasePersona) -> str:
         """Create a new Yjs message and return its ID.
 
-        Updates awareness and records the message ID in ``all_message_ids``.
+        Records the message ID in ``all_message_ids``. The typing status is owned
+        by ``prompt_and_reply``, so a late ``session_update`` must not set it again.
         """
         session = self._ensure_session(session_id)
 
@@ -93,7 +94,6 @@ class ToolCallManager:
         session.current_message_id = message_id
         session.all_message_ids.append(message_id)
         persona.log.info(f"Created message {message_id} for session {session_id}")
-        persona.set_status()
 
         return message_id
 
