@@ -1,9 +1,12 @@
 """Tests for the Codex ACP persona error handling."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from acp.exceptions import RequestError
+
+with patch("shutil.which", return_value="/usr/bin/codex-acp"):
+    from jupyter_ai_acp_client.acp_personas.codex import CodexAcpPersona
 
 
 class TestProcessMessageErrorHandling:
@@ -34,3 +37,16 @@ class TestProcessMessageErrorHandling:
         """Resource errors are not auth errors."""
         error = RequestError(-32002, "Resource not found")
         assert error.code != -32000
+
+
+@pytest.mark.asyncio
+async def test_prepare_auth_error_shows_login_prompt():
+    """Auth errors raised while preparing the persona use the login flow."""
+    persona = MagicMock(spec=CodexAcpPersona)
+    persona.handle_message_no_auth = AsyncMock()
+
+    await CodexAcpPersona.handle_uncaught_exception(
+        persona, RequestError(-32000, "Authentication required")
+    )
+
+    persona.handle_message_no_auth.assert_awaited_once_with(None)
