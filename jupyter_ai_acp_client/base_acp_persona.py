@@ -237,7 +237,7 @@ class BaseAcpPersona(BasePersona):
         self.log.info("Spawned ACP agent subprocess for '%s'.", self.__class__.__name__)
         return process
 
-    @auto_emit_event("acp_server_init")
+    @auto_emit_event("acp_server_init", benign=(PersonaNotAuthenticated,))
     async def _init_client(self) -> JaiAcpClient:
         agent_subprocess = await self.get_agent_subprocess()
         client = self.acp_client_class(

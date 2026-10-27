@@ -88,7 +88,14 @@ def emit_event(
     except Exception:
         logger.warning("Failed to emit ACP event to EventLogger: %s", operation, exc_info=True)
 
-def auto_emit_event(operation: str, details_fn=None):
+def auto_emit_event(operation: str, details_fn=None, benign: tuple = ()):
+    """Decorator that emits a success/failure event around a method.
+
+    Exceptions listed in ``benign`` represent expected, non-error control flow
+    (for example, a user who has not yet authenticated). They are re-raised
+    without emitting a ``failure`` event so they are not counted as operational
+    failures.
+    """
     def decorator(method):
         @functools.wraps(method)
         async def wrapper(self, *args, **kwargs):
@@ -99,6 +106,8 @@ def auto_emit_event(operation: str, details_fn=None):
                 result = await method(self, *args, **kwargs)
                 emit_event(self.event_logger, operation, "success", details)
                 return result
+            except benign:
+                raise
             except Exception as e:
                 fail_details = {**details, "error_message": f"{type(e).__name__}: {e}"}
                 emit_event(self.event_logger, operation, "failure", fail_details)
