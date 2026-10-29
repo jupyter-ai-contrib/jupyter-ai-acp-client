@@ -16,20 +16,14 @@ from ..base_acp_persona import BaseAcpPersona
 
 
 def _is_auth_error(error: Exception) -> bool:
-    message = str(error).lower()
-    return any(
-        keyword in message
-        for keyword in (
-            "auth",
-            "login",
-            "not signed in",
-            "not authenticated",
-            "token",
-            "credential",
-            "forbidden",
-            "unauthorized",
-        )
-    )
+    """Check if a prompt failed because the user is not logged in.
+
+    `claude-agent-acp` ends the prompt with the ACP `authRequired` error
+    (code -32000) on authentication failures. Other failures, e.g. hitting
+    the max output tokens limit, arrive as other error codes and must reach
+    the user with their real message, so the error text is not inspected.
+    """
+    return isinstance(error, RequestError) and error.code == -32000
 
 
 class ClaudeAcpPersona(BaseAcpPersona):
