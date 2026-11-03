@@ -85,11 +85,14 @@ def _check_opencode() -> None:
     version_str = version_match.group(1)
     current_version = tuple(int(x) for x in version_str.split("."))
 
-    if current_version < (1, 0, 0) or current_version[0] >= 2:
+    min_version = (1, 0, 0)
+    max_version = (3, 0, 0)
+    if current_version < min_version or current_version >= max_version:
+        remedy = "upgrade" if current_version < min_version else "downgrade"
         raise PersonaRequirementsUnmet(
             f"opencode version {version_str} is installed,"
-            " but version >=1.0.0,<2 is required."
-            " Please upgrade opencode. See https://opencode.ai for instructions."
+            " but version >=1.0.0,<3 is required."
+            f" Please {remedy} opencode. See https://opencode.ai for instructions."
         )
 
 
