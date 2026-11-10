@@ -57,8 +57,8 @@ class ClaudeAcpPersona(BaseAcpPersona):
 Currently, this package provides 8 personas:
 
 - `@Claude`
-  - requires `claude-agent-acp`, installed via `npm install -g @zed-industries/claude-agent-acp`
-  - optional env variable `CLAUDE_CODE_EXECUTABLE` points to your custom-installed Claude executable location. By default, claude-agent-acp uses Claude packaged in `@zed-industries/claude-agent-acp`.
+  - requires `claude-agent-acp`, installed via `npm install -g @agentclientprotocol/claude-agent-acp`
+  - optional env variable `CLAUDE_CODE_EXECUTABLE` points to your custom-installed Claude executable location. By default, claude-agent-acp uses Claude packaged in `@agentclientprotocol/claude-agent-acp`.
 - `@Kilo`
   - requires `kilo` CLI (>= 7.0.0), installed via https://kilo.ai/docs/getting-started
 - `@Kiro`
@@ -68,7 +68,7 @@ Currently, this package provides 8 personas:
 - `@OpenCode`
   - requires `opencode` CLI (>= 1.0.0, < 2), installed via `npm install -g opencode-ai` or from https://opencode.ai
 - `@Codex`
-  - requires `codex-acp`, installed via `npm install -g @zed-industries/codex-acp`
+  - requires `codex-acp`, installed via `npm install -g @agentclientprotocol/codex-acp`
 - `@Copilot`
   - requires the `copilot` CLI with built-in ACP support, installed via `npm install -g @github/copilot`, `brew install copilot-cli`, or the [official install docs](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli)
   - auth via `copilot login` or `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`

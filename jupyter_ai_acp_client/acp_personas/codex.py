@@ -11,7 +11,7 @@ from ..base_acp_persona import BaseAcpPersona
 if shutil.which("codex-acp") is None:
     raise PersonaRequirementsUnmet(
         "This persona requires `codex-acp`, the ACP adapter for OpenAI Codex."
-        " Install it via `npm install -g @zed-industries/codex-acp`"
+        " Install it via `npm install -g @agentclientprotocol/codex-acp`"
         " then restart."
     )
 
