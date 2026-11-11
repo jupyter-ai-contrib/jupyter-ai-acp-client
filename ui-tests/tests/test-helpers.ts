@@ -68,12 +68,10 @@ export const FIXTURE_PERSONAS: Record<FixturePersona, FixturePersonaInfo> = {
 };
 
 const PICKER = '.jp-jai-personaControls-persona-btn';
-// The controls row renders each control twice: a real visible copy and an
-// aria-hidden, `inert` measurement copy (used only to size the row). The
-// direct-child combinator targets the visible buttons — the duplicates in the
-// measurement copy are nested one level deeper and compute as `hidden`.
-const VISIBLE_CONTROL_BTN =
-  '.jp-jai-personaControls-controls > .jp-jai-personaControls-control-btn';
+// Each persona control is its own item in the chat input's ReactiveToolbar.
+// Items that don't fit move into the toolbar's (closed) overflow popup, so
+// filter on visibility to target only the buttons shown in the row.
+const CONTROL_BTN = '.jp-jai-personaControls-control-btn';
 const INPUT = '.jp-chat-input-container';
 const MESSAGE = '.jp-chat-rendered-message';
 // Each slash-command completion in the input's autocomplete popup renders its
@@ -179,25 +177,35 @@ export class TestHelpers {
 
   /** Wait for the selected persona's session controls to render. */
   async waitForControls(): Promise<void> {
-    await expect(this.chat.locator(VISIBLE_CONTROL_BTN).first()).toBeVisible({
+    await expect(this.controls().first()).toBeVisible({
       timeout: TIMEOUT
     });
   }
 
   /** Change a select control (identified by its `title`) to the given option. */
   async setControl(title: string, optionValue: string): Promise<void> {
-    await this.chat.locator(`${VISIBLE_CONTROL_BTN}[title="${title}"]`).click();
+    await this.control(title).click();
     await this.page
       .getByRole('menuitem', { name: optionValue, exact: true })
       .click();
   }
 
+  /** All visible control buttons, in toolbar order. */
+  controls(): Locator {
+    return this.chat.locator(CONTROL_BTN).filter({ visible: true });
+  }
+
+  /** The visible control button carrying the given `title` (its label). */
+  control(title: string): Locator {
+    return this.chat
+      .locator(`${CONTROL_BTN}[title="${title}"]`)
+      .filter({ visible: true });
+  }
+
   /** How many visible controls carry the given `title` (e.g. to assert a mode
    * advertised through two channels renders exactly once). */
   async controlCount(title: string): Promise<number> {
-    return this.chat
-      .locator(`${VISIBLE_CONTROL_BTN}[title="${title}"]`)
-      .count();
+    return this.control(title).count();
   }
 
   /** The usage chip in the toolbar (present only once the agent reports usage). */
