@@ -54,16 +54,25 @@ from acp.schema import (
     DeniedOutcome
 )
 from jupyter_ai_persona_manager import BasePersona, CommandOption, McpServerStdio
-from jupyterlab_chat.models import Message
+from jupyterlab_chat.models import FileAttachment, Message, NotebookAttachment
 from jupyterlab_chat.utils import find_mentions
 from asyncio.subprocess import Process
 
+from .notebook_cells import render_cell_block
 from .terminal_manager import TerminalManager
 from .tool_call_manager import ToolCallManager
 from .tool_call_renderer import ensure_serializable, extract_diffs, extract_diffs_from_raw_input
 from .permission_manager import PermissionManager
 
 import traceback as tb_mod
+
+NOTEBOOK_MIME_TYPE = "application/x-ipynb+json"
+"""Not forwarded on a ``resource_link``. The chat frontend sets it on every
+notebook-cell attachment, and an agent may refuse a media type it does not
+know: OpenCode fails the whole prompt with JSON-RPC -32603 on this one
+(anomalyco/opencode#50928). The ``.ipynb`` name already says what the file
+is, and a notebook attached from the file browser arrives with no media type
+at all."""
 
 class JaiAcpClient(Client):
     """
@@ -241,7 +250,7 @@ class JaiAcpClient(Client):
         self,
         session_id: str,
         prompt: str,
-        attachments: list[dict] | None = None,
+        attachments: list[FileAttachment | NotebookAttachment] | None = None,
         root_dir: str | None = None,
     ) -> PromptResponse:
         """
@@ -249,10 +258,13 @@ class JaiAcpClient(Client):
         to the assigned ACP server. This method writes back to the chat by
         handling all events in session_update().
 
-        Attachments are plain dicts from ``YChat.get_attachments()``, keyed by
-        ``value`` (relative path), ``type`` (``"file"`` or ``"notebook"``), and
-        optionally ``mimetype``.  When *root_dir* is provided the relative path
-        is resolved to an absolute ``file://`` URI.
+        Attachments are the ``FileAttachment`` / ``NotebookAttachment`` values
+        of the chat model's ``get_attachments()``. Each becomes a
+        ``resource_link`` block carrying the attachment's own ``mimetype``, if
+        any, other than ``NOTEBOOK_MIME_TYPE``; when *root_dir* is provided the
+        relative path is resolved to an absolute ``file://`` URI.
+        A ``NotebookAttachment`` that names ``cells`` is sent instead as a text
+        block holding those cells (see ``notebook_cells``).
 
         Uses a per-session lock to serialize concurrent calls, preventing
         state corruption if multiple messages arrive before the first completes.
@@ -285,13 +297,13 @@ class JaiAcpClient(Client):
                 if attachments:
                     for att in attachments:
                         att_value = att.value or ""
-                        att_type = att.type
 
                         # Resolve to absolute file:// URI when root_dir is available
+                        abs_path: Path | None = None
                         if root_dir and att_value:
-                            abs_path = (Path(root_dir) / att_value).resolve()
+                            candidate = (Path(root_dir) / att_value).resolve()
                             root_resolved = Path(root_dir).resolve()
-                            if not abs_path.is_relative_to(root_resolved):
+                            if not candidate.is_relative_to(root_resolved):
                                 persona.log.warning(
                                     "Attachment path %r escapes root_dir %r",
                                     att_value,
@@ -299,15 +311,45 @@ class JaiAcpClient(Client):
                                 )
                                 uri = att_value
                             else:
+                                abs_path = candidate
                                 uri = abs_path.as_uri()
                         else:
                             uri = att_value
 
-                        # Determine MIME type: explicit value or notebook default
-                        mime_type = att.mimetype
-                        if mime_type is None and att_type == "notebook":
-                            mime_type = "application/x-ipynb+json"
+                        # A notebook attachment that names cells is a dragged
+                        # cell. Send those cells as text rather than a link to
+                        # the whole notebook, which says nothing about which
+                        # cell was meant and which an agent may read only the
+                        # head of. Any failure here falls back to the link.
+                        if isinstance(att, NotebookAttachment) and att.cells:
+                            block = None
+                            if abs_path is None:
+                                persona.log.debug(
+                                    "Notebook attachment %r names %d cell(s) but its "
+                                    "path did not resolve under root_dir; sending a "
+                                    "resource link instead",
+                                    att_value,
+                                    len(att.cells),
+                                )
+                            else:
+                                try:
+                                    block = await render_cell_block(att, abs_path, persona.log)
+                                except Exception:
+                                    persona.log.warning(
+                                        "Could not render the cells of notebook "
+                                        "attachment %r; sending a resource link instead",
+                                        att_value,
+                                        exc_info=True,
+                                    )
+                            if block is not None:
+                                content_blocks.append(block)
+                                continue
 
+                        # The link carries the attachment's own media type,
+                        # except the notebook type (see NOTEBOOK_MIME_TYPE).
+                        mime_type = att.mimetype
+                        if mime_type == NOTEBOOK_MIME_TYPE:
+                            mime_type = None
                         content_blocks.append(
                             ResourceContentBlock(
                                 uri=uri,
@@ -316,6 +358,15 @@ class JaiAcpClient(Client):
                                 mime_type=mime_type,
                             )
                         )
+
+                # Rendering cells above awaits a live-document lookup and a
+                # file read. If stop_streaming() ran meanwhile, it has already
+                # finalized this turn, so do not start one the user stopped.
+                if self._cancel_requested.get(session_id, False):
+                    persona.log.info(
+                        f"prompt_and_reply: cancelled before sending for session {session_id}"
+                    )
+                    return PromptResponse(stop_reason="cancelled")
 
                 # Call the model and await — session_update() handles all events
                 response = await conn.prompt(
