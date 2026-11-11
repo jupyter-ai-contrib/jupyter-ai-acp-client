@@ -146,12 +146,10 @@ toolbar controls and asserting the effect. Load-bearing selectors:
   PersonaManager registers personas, so wait for it with a generous timeout
   (personas + ACP session init take seconds). Click it and pick by name via
   `getByRole('menuitem', { name })`.
-- **Session controls** (model/mode/config): the controls row renders each control
-  **twice** — a real visible copy and an `aria-hidden`, `inert` measurement copy
-  used to size the row. A naive `.control-btn` locator matches the hidden copy
-  first (resolves but computes `hidden`, so `toBeVisible` fails). Target the
-  visible ones with the direct-child combinator
-  `.…-controls > .…-control-btn` (see `ui-controls.spec.ts`).
+- **Session controls** (model/mode/config): each control is a
+  `.jp-jai-personaControls-control-btn` item in the chat input toolbar. Items
+  that don't fit move into the toolbar's closed overflow popup, so filter on
+  visibility (`TestHelpers#controls` / `TestHelpers#control(title)`).
 - **Send:** type into `.jp-chat-input-container` `getByRole('combobox')`, click
   `.jp-chat-send-button`.
 - **Assert the reply:** rendered messages are `.jp-chat-rendered-message`. The
