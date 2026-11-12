@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -80,6 +81,8 @@ def _make_session_init_persona(
     capabilities.load_session = supports_session_load
     client.get_agent_capabilities = AsyncMock(return_value=capabilities)
     persona.get_client = AsyncMock(return_value=client)
+    type(persona)._client_future = asyncio.get_running_loop().create_future()
+    type(persona)._client_future.set_result(client)
 
     sessions = {}
     if existing_session_id:
@@ -580,7 +583,7 @@ def _make_lazy_persona(persona_cls=None, subprocess_impl=None):
     persona.auth.assert_auth = AsyncMock()
 
     async def _fake_subprocess():
-        return "subprocess"
+        return SimpleNamespace(returncode=None)
 
     async def _fake_client():
         # Client whose get_connection() is awaitable.
@@ -623,7 +626,7 @@ class TestPrepareLifecycle:
         assert persona._client_session_future is not None
         assert persona._client_started() is True
         # The futures resolve to the stubbed startup results.
-        assert await persona.get_agent_subprocess() == "subprocess"
+        assert (await persona.get_agent_subprocess()).returncode is None
         assert await persona.get_client() is not None
         assert await persona.get_session_response() == "session"
 
@@ -694,7 +697,7 @@ class TestPrepareConcurrencyAndRetry:
 
         async def counting_subprocess():
             calls.append(1)
-            return "subprocess"
+            return SimpleNamespace(returncode=None)
 
         cls, persona = _make_lazy_persona(subprocess_impl=counting_subprocess)
 
@@ -716,7 +719,7 @@ class TestPrepareConcurrencyAndRetry:
 
         async def counting_subprocess():
             calls.append(1)
-            return "subprocess"
+            return SimpleNamespace(returncode=None)
 
         cls, p1 = _make_lazy_persona(subprocess_impl=counting_subprocess)
         _, p2 = _make_lazy_persona(persona_cls=cls, subprocess_impl=counting_subprocess)
@@ -727,7 +730,8 @@ class TestPrepareConcurrencyAndRetry:
         s2 = await p2.get_agent_subprocess()
 
         assert sum(calls) == 1
-        assert s1 == s2 == "subprocess"
+        assert s1 is s2
+        assert s1.returncode is None
         assert p1.__class__._subprocess_future is p2.__class__._subprocess_future
 
     async def test_failed_startup_is_retried_on_next_prepare(self):
@@ -739,7 +743,7 @@ class TestPrepareConcurrencyAndRetry:
             state["calls"] += 1
             if state["fail"]:
                 raise RuntimeError("spawn boom")
-            return "subprocess"
+            return SimpleNamespace(returncode=None)
 
         cls, persona = _make_lazy_persona(subprocess_impl=flaky_subprocess)
 
@@ -750,7 +754,7 @@ class TestPrepareConcurrencyAndRetry:
         # Clear the fault and prepare again: the failed task is discarded and recreated.
         state["fail"] = False
         await persona.prepare()
-        assert await persona.get_agent_subprocess() == "subprocess"
+        assert (await persona.get_agent_subprocess()).returncode is None
         assert state["calls"] == 2  # retried, not cached-failed
 
     async def test_cancelled_startup_is_discarded_on_next_prepare(self):
@@ -770,7 +774,7 @@ class TestPrepareConcurrencyAndRetry:
 
         # prepare() must discard the cancelled task and create a live one.
         await persona.prepare()
-        assert await persona.get_agent_subprocess() == "subprocess"
+        assert (await persona.get_agent_subprocess()).returncode is None
 
     async def test_engagement_re_emits_only_after_reset(self):
         """A successful prepare() emits engagement once even across retries of a
