@@ -86,6 +86,23 @@ class TestCheckOpencode:
              patch("subprocess.run", return_value=_mock_result("opencode v1.2.3")):
             _check_opencode()  # should not raise
 
+    def test_valid_v2_version(self):
+        with patch("shutil.which", return_value="/usr/bin/opencode"), \
+             patch("subprocess.run", return_value=_mock_result("opencode v2.2.5")):
+            _check_opencode()  # should not raise
+
+    def test_too_old_version_says_upgrade(self):
+        with patch("shutil.which", return_value="/usr/bin/opencode"), \
+             patch("subprocess.run", return_value=_mock_result("opencode v0.9.0")):
+            with pytest.raises(PersonaRequirementsUnmet, match="Please upgrade opencode"):
+                _check_opencode()
+
+    def test_too_new_version_says_downgrade(self):
+        with patch("shutil.which", return_value="/usr/bin/opencode"), \
+             patch("subprocess.run", return_value=_mock_result("opencode v3.0.0")):
+            with pytest.raises(PersonaRequirementsUnmet, match="Please downgrade opencode"):
+                _check_opencode()
+
 
 class TestHasUserConfig:
     """Tests for _has_user_config() global config detection."""
