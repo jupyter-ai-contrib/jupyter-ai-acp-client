@@ -43,16 +43,11 @@ from jupyter_ai_persona_manager import Usage as AwarenessUsage
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from .default_acp_client import JaiAcpClient
+from .legacy_models import AcpModelOption, AcpModels, _safe_parse, _str_or_none
 
 import logging
 
 log = logging.getLogger(__name__)
-
-
-def _str_or_none(value: Any) -> Any:
-    """Keep a value only if it's a string; otherwise drop it to ``None`` so a
-    mistyped field never raises during validation."""
-    return value if isinstance(value, str) else None
 
 
 def _float_or_none(value: Any) -> Any:
@@ -65,66 +60,8 @@ def _float_or_none(value: Any) -> Any:
     return float(value)
 
 
-_TModel = TypeVar("_TModel", bound=BaseModel)
-
-
-def _safe_parse(model: type[_TModel], data: Any) -> _TModel:
-    """
-    Validate ``data`` into ``model``, never raising. Each field is already
-    tolerant of missing / added / wrong-typed values, so this only backstops a
-    wholesale surprise (e.g. Kiro sends a non-object where an object is
-    expected). On any validation error it logs and returns an empty model, so a
-    payload shape change can never crash session setup or notification handling.
-    """
-    try:
-        return model.model_validate(data)
-    except ValidationError:
-        log.warning(
-            "Ignoring unexpected Kiro %s payload shape: %r", model.__name__, data
-        )
-        return model()
-
-
-class KiroModelOption(BaseModel):
-    """One selectable model in Kiro's legacy ``models`` payload."""
-
-    model_config = ConfigDict(
-        populate_by_name=True, extra="ignore", protected_namespaces=()
-    )
-
-    model_id: Optional[str] = Field(default=None, alias="modelId")
-    name: Optional[str] = None
-    description: Optional[str] = None
-
-    _coerce_strings = field_validator(
-        "model_id", "name", "description", mode="before"
-    )(_str_or_none)
-
-
-class KiroModels(BaseModel):
-    """
-    The ``models`` block Kiro attaches to a raw session response: the current
-    model plus the list of available models.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True, extra="ignore", protected_namespaces=()
-    )
-
-    current_model_id: Optional[str] = Field(default=None, alias="currentModelId")
-    available_models: Optional[list[KiroModelOption]] = Field(
-        default=None, alias="availableModels"
-    )
-
-    _coerce_current = field_validator("current_model_id", mode="before")(_str_or_none)
-
-    @field_validator("available_models", mode="before")
-    @classmethod
-    def _keep_dict_entries(cls, value: Any) -> Any:
-        """Drop the whole list if it isn't one; drop any non-dict entries."""
-        if not isinstance(value, list):
-            return None
-        return [item for item in value if isinstance(item, dict)]
+KiroModelOption = AcpModelOption
+KiroModels = AcpModels
 
 
 class KiroMeteringUsage(BaseModel):
