@@ -3,7 +3,7 @@ from jupyter_ai_persona_manager import PersonaRequirementsUnmet
 if shutil.which("claude-agent-acp") is None:
     raise PersonaRequirementsUnmet(
         "This persona requires the Claude Agent ACP adapter to be installed."
-        " Install it via `npm install -g @zed-industries/claude-agent-acp`"
+        " Install it via `npm install -g @agentclientprotocol/claude-agent-acp`"
         " then restart."
     )
 
