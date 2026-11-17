@@ -66,7 +66,7 @@ Currently, this package provides 8 personas:
 - `@Mistral-Vibe`
   - requires `vibe-acp`, installed via `uv tool install mistral-vibe` or `pip install mistral-vibe`
 - `@OpenCode`
-  - requires `opencode` CLI (>= 1.0.0, < 2), installed via `npm install -g opencode-ai` or from https://opencode.ai
+  - requires `opencode` CLI (>= 1.0.0, < 3), installed via `npm install -g opencode-ai` or from https://opencode.ai
 - `@Codex`
   - requires `codex-acp`, installed via `npm install -g @agentclientprotocol/codex-acp`
 - `@Copilot`
