@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Awaitable
+from typing import Any, Awaitable, Optional
 from time import time
 
 log = logging.getLogger(__name__)
@@ -13,6 +13,7 @@ from acp import (
     connect_to_agent,
 )
 from acp.core import ClientSideConnection
+from acp.meta import AGENT_METHODS
 from acp.schema import (
     AgentCapabilities,
     AgentMessageChunk,
@@ -31,7 +32,9 @@ from acp.schema import (
     InitializeResponse,
     Implementation,
     KillTerminalResponse,
+    LoadSessionRequest,
     LoadSessionResponse,
+    NewSessionRequest,
     NewSessionResponse,
     PermissionOption,
     PromptResponse,
@@ -53,6 +56,8 @@ from acp.schema import (
     AllowedOutcome,
     DeniedOutcome
 )
+from acp.utils import serialize_params, validate_model, validate_model_from_dict
+from .legacy_models import AcpModels, _safe_parse
 from jupyter_ai_persona_manager import BasePersona, CommandOption, McpServerStdio
 from jupyterlab_chat.models import Message
 from jupyterlab_chat.utils import find_mentions
@@ -173,9 +178,47 @@ class JaiAcpClient(Client):
         """
         conn = await self.get_connection()
         mcp_servers = await self._get_mcp_servers(persona)
-        session = await conn.new_session(cwd=persona.get_chat_dir(), mcp_servers=mcp_servers)
+        raw = await conn._conn.send_request(
+            AGENT_METHODS["session_new"],
+            serialize_params(
+                NewSessionRequest(
+                    cwd=persona.get_chat_dir(),
+                    mcp_servers=mcp_servers or [],
+                )
+            ),
+        )
+        self._push_models(persona, self._parse_models(raw))
+        session = validate_model(raw, NewSessionResponse)
         self._personas_by_session[session.session_id] = persona
         return session
+
+    @staticmethod
+    def _parse_models(raw: Any) -> Optional[AcpModels]:
+        """Parse the legacy ``models`` block off a raw session response, if any."""
+        if isinstance(raw, dict) and isinstance(raw.get("models"), dict):
+            return _safe_parse(AcpModels, raw["models"])
+        return None
+
+    @staticmethod
+    def _push_models(persona: BasePersona, models: Optional[AcpModels]) -> None:
+        """
+        Hand the captured models to the persona if it accepts them.
+        """
+        setter = getattr(persona, "set_legacy_models", None) or getattr(
+            persona, "set_kiro_models", None
+        )
+        if callable(setter):
+            setter(models)
+
+    async def set_session_model(self, model_id: str, session_id: str) -> None:
+        """
+        Switch the session's model via the legacy/deprecated ``session/set_model``
+        request.
+        """
+        conn = await self.get_connection()
+        await conn._conn.send_request(
+            "session/set_model", {"sessionId": session_id, "modelId": model_id}
+        )
 
     async def set_session_mode(self, mode_id: str, session_id: str) -> None:
         """
@@ -233,7 +276,18 @@ class JaiAcpClient(Client):
         """
         conn = await self.get_connection()
         mcp_servers = await self._get_mcp_servers(persona)
-        response = await conn.load_session(cwd=persona.get_chat_dir(), session_id=session_id, mcp_servers=mcp_servers)
+        raw = await conn._conn.send_request(
+            AGENT_METHODS["session_load"],
+            serialize_params(
+                LoadSessionRequest(
+                    cwd=persona.get_chat_dir(),
+                    session_id=session_id,
+                    mcp_servers=mcp_servers or [],
+                )
+            ),
+        )
+        self._push_models(persona, self._parse_models(raw))
+        response = validate_model_from_dict(raw, LoadSessionResponse)
         self._personas_by_session[session_id] = persona
         return response
 

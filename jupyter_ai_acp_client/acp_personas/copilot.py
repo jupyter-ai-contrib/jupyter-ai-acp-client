@@ -6,6 +6,46 @@ from jupyter_ai_persona_manager import PersonaDefaults, PersonaRequirementsUnmet
 from jupyterlab_chat.models import Message
 
 from ..base_acp_persona import BaseAcpPersona
+from ..legacy_models import AcpModelOption, AcpModels
+
+
+DEFAULT_COPILOT_MODELS: list[AcpModelOption] = [
+    AcpModelOption(
+        model_id="auto",
+        name="Auto",
+        description="Let Copilot pick automatically based on the task",
+    ),
+    AcpModelOption(
+        model_id="claude-sonnet-5.5",
+        name="Claude 3.5 Sonnet",
+        description="Anthropic Claude 3.5 Sonnet",
+    ),
+    AcpModelOption(
+        model_id="claude-opus-5.5",
+        name="Claude 3.5 Opus",
+        description="Anthropic Claude 3.5 Opus",
+    ),
+    AcpModelOption(
+        model_id="claude-haiku-5.5",
+        name="Claude 3.5 Haiku",
+        description="Anthropic Claude 3.5 Haiku",
+    ),
+    AcpModelOption(
+        model_id="gpt-5.6-sol",
+        name="GPT-4o",
+        description="OpenAI GPT-4o",
+    ),
+    AcpModelOption(
+        model_id="gpt-5.3-codex",
+        name="GPT-5.3 Codex",
+        description="OpenAI Codex",
+    ),
+    AcpModelOption(
+        model_id="gemini-3.8-flash",
+        name="Gemini 1.5 Flash",
+        description="Google Gemini Flash",
+    ),
+]
 
 
 def _is_auth_error(error: Exception) -> bool:
@@ -41,6 +81,13 @@ class CopilotAcpPersona(BaseAcpPersona):
     def __init__(self, *args, **kwargs):
         executable = ["copilot", "--acp", "--stdio"]
         super().__init__(*args, executable=executable, **kwargs)
+        # Copilot ACP does not advertise models in session/new, but supports
+        # switching models via session/set_model. Initialize default Copilot
+        # models so the chat interface displays a model picker.
+        self._legacy_models = AcpModels(
+            current_model_id="auto",
+            available_models=list(DEFAULT_COPILOT_MODELS),
+        )
 
     @property
     def defaults(self) -> PersonaDefaults:

@@ -31,6 +31,7 @@ from jupyter_ai_persona_manager import Usage as AwarenessUsage
 from jupyterlab_chat.models import FileAttachment, Message, NotebookAttachment
 
 from .default_acp_client import JaiAcpClient
+from .legacy_models import AcpModels
 from .telemetry import emit_event, auto_emit_event
 
 # A single session config option the agent advertises: either a select (one of
@@ -167,6 +168,12 @@ class BaseAcpPersona(BasePersona):
     context window limits.
     """
 
+    _legacy_models: Optional[AcpModels] = None
+    """
+    Legacy models payload for ACP agents that advertise models via non-standard
+    session payloads or default catalogs rather than ACP v1 config options.
+    """
+
     def __init__(self, *args, executable: list[str], **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -187,6 +194,7 @@ class BaseAcpPersona(BasePersona):
         self._acp_config_options = []
         self._acp_context_usage = None
         self._acp_session_usage = None
+        self._legacy_models: Optional[AcpModels] = None
 
         self.emit_once("acp_requirements_met")
 
@@ -332,6 +340,30 @@ class BaseAcpPersona(BasePersona):
                     exc_info=True,
                 )
 
+        # Reapply stored legacy model choice if applicable
+        if (
+            "model" in stored_config
+            and self._model_config_option() is None
+            and self._legacy_models
+        ):
+            stored_model_id = str(stored_config["model"])
+            if (
+                stored_model_id
+                and stored_model_id != self._legacy_models.current_model_id
+            ):
+                try:
+                    await client.set_session_model(
+                        stored_model_id, response.session_id
+                    )
+                    self._legacy_models.current_model_id = stored_model_id
+                except Exception:
+                    self.log.warning(
+                        "Failed to reapply stored model '%s' for '%s'.",
+                        stored_model_id,
+                        self.__class__.__name__,
+                        exc_info=True,
+                    )
+
         self._sync_awareness_config()
         return response
 
@@ -447,7 +479,7 @@ class BaseAcpPersona(BasePersona):
             )
 
         # Await startup to readiness so success/failure reflects the real
-        # outcome. 
+        # outcome.
         try:
             # Spawn ACP subprocess and initialize the connection.
             await self.get_agent_subprocess()
@@ -527,7 +559,7 @@ class BaseAcpPersona(BasePersona):
         return True
 
     async def handle_message_no_auth(self, message: Message | None = None) -> None:
-        """Prompt the user to sign in and set `_was_initially_unauthenticated` so a reactive agent resumes on its next message. 
+        """Prompt the user to sign in and set `_was_initially_unauthenticated` so a reactive agent resumes on its next message.
         Subclasses override to add the sign-in instructions/terminal."""
         self._was_initially_unauthenticated = True
         self.log.warning(
@@ -727,6 +759,38 @@ class BaseAcpPersona(BasePersona):
         return self.chat.get_metadata().get("acp_modes", {}).get(self.id)
 
     @property
+    def acp_legacy_models(self) -> Optional[AcpModels]:
+        """
+        The legacy `models` payload (`currentModelId` plus `availableModels`)
+        for agents that advertise models outside config options (e.g. Kiro,
+        Copilot). Set on session create/load from what the client captured off
+        the raw session response, or by subclasses defining a fallback catalog.
+        """
+        return self._legacy_models
+
+    def set_legacy_models(self, models: Optional[AcpModels]) -> None:
+        """
+        Store the legacy `models` payload captured off the raw session response.
+        Called during session create/load, before the base persona syncs its
+        awareness config, so the models are present when `_build_awareness_config`
+        runs.
+        """
+        self._legacy_models = models
+
+    def set_kiro_models(self, models: Optional[AcpModels]) -> None:
+        """Backward-compatible alias for set_legacy_models."""
+        self.set_legacy_models(models)
+
+    @property
+    def _kiro_models(self) -> Optional[AcpModels]:
+        """Backward-compatible property for Kiro personas and tests."""
+        return self._legacy_models
+
+    @_kiro_models.setter
+    def _kiro_models(self, value: Optional[AcpModels]) -> None:
+        self._legacy_models = value
+
+    @property
     def acp_config_options(self) -> list[AcpConfigOption]:
         """
         Session config options the ACP agent advertises for the current session,
@@ -890,6 +954,17 @@ class BaseAcpPersona(BasePersona):
                 ModelOption(id=c.value, name=c.name, description=c.description)
                 for c in _flatten_select_options(model_opt.options)
             ]
+        elif self._legacy_models:
+            model.current = self._legacy_models.current_model_id
+            model.options = [
+                ModelOption(
+                    id=option.model_id,
+                    name=option.name or option.model_id,
+                    description=option.description,
+                )
+                for option in (self._legacy_models.available_models or [])
+                if option.model_id
+            ]
 
         model_settings: list[SettingConfiguration] = []
         general_settings: list[SettingConfiguration] = []
@@ -990,11 +1065,27 @@ class BaseAcpPersona(BasePersona):
         Models are config options now (`session/set_model` was removed from the
         protocol), so this applies the choice through the backing model config
         option, matching how `_build_awareness_config` sourced it.
+        When legacy models are used instead of config options (e.g. Kiro,
+        Copilot), route the choice through `session/set_model`.
         """
         model_opt = self._model_config_option()
-        config_id = model_opt.id if model_opt is not None else "model"
+        if model_opt is not None:
+            config_id = model_opt.id
+            await self.set_acp_config_option(
+                config_id, self._coerce_config_value(config_id, model_id)
+            )
+            return
+
+        if self._legacy_models:
+            client = await self.get_client()
+            session_id = await self.get_session_id()
+            await client.set_session_model(model_id, session_id)
+            self._legacy_models.current_model_id = model_id
+            self._record_config_choice("model", model_id)
+            return
+
         await self.set_acp_config_option(
-            config_id, self._coerce_config_value(config_id, model_id)
+            "model", self._coerce_config_value("model", model_id)
         )
 
     async def update_model_settings(self, settings: dict[str, str | None]) -> None:
