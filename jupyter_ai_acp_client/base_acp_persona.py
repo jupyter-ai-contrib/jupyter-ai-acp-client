@@ -3,6 +3,7 @@ import html
 import os
 import signal
 import sys
+import time
 from asyncio import Task
 from asyncio.subprocess import Process
 from typing import Any, ClassVar, Optional
@@ -68,6 +69,11 @@ def _flatten_select_options(options) -> list:
 
 
 class BaseAcpPersona(BasePersona):
+    _MAX_RESPAWNS: ClassVar[int] = 3
+    _RESPAWN_WINDOW: ClassVar[float] = 60.0
+    _respawn_timestamps: ClassVar[list[float]] = []
+    _stopping_subprocess: ClassVar[bool] = False
+
     NOTEBOOK_EDITING_GUIDANCE: ClassVar[str] = (
         "System note: When creating or editing Jupyter notebooks (.ipynb), use "
         "the Jupyter notebook MCP tools (for example insert_cell, edit_cell, "
@@ -178,6 +184,7 @@ class BaseAcpPersona(BasePersona):
         # Whether this session's notebook guidance was injected yet.
         self._notebook_guidance_sent: bool = False
         self._emitted: set[str] = set()
+        self._session_client_future: Task[JaiAcpClient] | None = None
         self._client_session_future: Task[
             NewSessionResponse | LoadSessionResponse
         ] | None = None
@@ -239,7 +246,7 @@ class BaseAcpPersona(BasePersona):
 
     @auto_emit_event("acp_server_init")
     async def _init_client(self) -> JaiAcpClient:
-        agent_subprocess = await self.get_agent_subprocess()
+        agent_subprocess = await self.__class__._subprocess_future
         client = self.acp_client_class(
             agent_subprocess=agent_subprocess, event_loop=self.event_loop
         )
@@ -338,6 +345,7 @@ class BaseAcpPersona(BasePersona):
     async def _init_client_session(self) -> NewSessionResponse | LoadSessionResponse:
         # get client
         client = await self.get_client()
+        self._session_client_future = self.__class__._client_future
 
         # check for an existing session ID
         existing_session_id = self._get_existing_sessions().get(self.id, None)
@@ -442,6 +450,7 @@ class BaseAcpPersona(BasePersona):
         if "_client_future" not in cls.__dict__ or cls._client_future is None:
             cls._client_future = self.event_loop.create_task(self._init_client())
         if self._client_session_future is None:
+            self._session_client_future = cls._client_future
             self._client_session_future = self.event_loop.create_task(
                 self._init_client_session()
             )
@@ -498,21 +507,73 @@ class BaseAcpPersona(BasePersona):
 
     async def get_agent_subprocess(self) -> asyncio.subprocess.Process:
         """Safely returns the ACP agent subprocess (spawned by `prepare()`)."""
-        return await self.__class__._subprocess_future
+        cls = self.__class__
+        while True:
+            future = cls._subprocess_future
+            process = await future
+            if getattr(self, "_shutting_down", False):
+                return process
+            if cls._stopping_subprocess:
+                raise RuntimeError(f"ACP subprocess for {cls.__name__} is shutting down")
+            if future is not cls._subprocess_future:
+                continue
+            if process.returncode is None:
+                return process
+            now = time.monotonic()
+            cls._respawn_timestamps = [
+                timestamp
+                for timestamp in cls._respawn_timestamps
+                if now - timestamp < cls._RESPAWN_WINDOW
+            ]
+            if len(cls._respawn_timestamps) >= cls._MAX_RESPAWNS:
+                message = (
+                    f"ACP subprocess for {cls.__name__} repeatedly crashed. "
+                    f"Try again after {cls._RESPAWN_WINDOW:g} seconds."
+                )
+                self.log.error(message)
+                raise RuntimeError(message)
+            cls._respawn_timestamps.append(now)
+            self.log.warning(
+                "ACP agent subprocess for '%s' exited with code %s. Respawning.",
+                cls.__name__,
+                process.returncode,
+            )
+            cls._before_subprocess_future = self.event_loop.create_task(
+                self.before_agent_subprocess()
+            )
+            cls._subprocess_future = self.event_loop.create_task(
+                self._init_agent_subprocess()
+            )
+            cls._client_future = self.event_loop.create_task(self._init_client())
 
     async def get_client(self) -> JaiAcpClient:
         """Safely returns the ACP client (initialized by `prepare()`)."""
-        return await self.__class__._client_future
+        while True:
+            await self.get_agent_subprocess()
+            future = self.__class__._client_future
+            client = await future
+            if future is self.__class__._client_future:
+                return client
 
     async def get_session_response(self) -> NewSessionResponse | LoadSessionResponse:
         """Safely returns the ACP session response (created by `prepare()`)."""
+        if not getattr(self, "_shutting_down", False):
+            await self.get_client()
+            if self._session_client_future is not self.__class__._client_future:
+                if self._client_session_future is not None:
+                    self._client_session_future.cancel()
+                self._notebook_guidance_sent = False
+                self._session_client_future = self.__class__._client_future
+                self._client_session_future = self.event_loop.create_task(
+                    self._init_client_session()
+                )
         return await self._client_session_future
 
     async def get_session_id(self) -> str:
         """
         Safely returns the ACP session ID assigned to this chat.
         """
-        await self._client_session_future
+        await self.get_session_response()
         # session ID should always be stored in chat metadata after client
         # session was created or loaded.
         session_ids = self._get_existing_sessions()
@@ -584,13 +645,13 @@ class BaseAcpPersona(BasePersona):
         # original request instead of processing this message normally.
         if self._was_initially_unauthenticated:
             self._was_initially_unauthenticated = False
-            client = await self.get_client()
             session_id = await self.get_session_id()
+            client = await self.get_client()
             await self._resume_after_auth(client, session_id)
             return
 
-        client = await self.get_client()
         session_id = await self.get_session_id()
+        client = await self.get_client()
         prompt = message.body.strip()
 
         # Inject notebook guidance once per session.
@@ -1109,6 +1170,7 @@ class BaseAcpPersona(BasePersona):
         await self._shutdown()
 
     async def _shutdown(self):
+        self._shutting_down = True
         self.log.info("[shutdown] Starting for '%s'.", self.__class__.__name__)
 
         if not self._client_started():
@@ -1171,6 +1233,8 @@ class BaseAcpPersona(BasePersona):
         except (asyncio.CancelledError, Exception):
             pass
 
+        self.__class__._stopping_subprocess = True
+
         # Step 2: Close connection
         try:
             client = await self.get_client()
@@ -1226,6 +1290,7 @@ class BaseAcpPersona(BasePersona):
         self.__class__._before_subprocess_future = None
         self.__class__._subprocess_future = None
         self.__class__._client_future = None
+        self.__class__._stopping_subprocess = False
 
         self.log.info("[shutdown] Complete for '%s'.", self.__class__.__name__)
 
