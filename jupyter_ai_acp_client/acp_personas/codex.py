@@ -7,7 +7,6 @@ from jupyterlab_chat.models import Message
 
 from ..base_acp_persona import BaseAcpPersona
 
-
 if shutil.which("codex-acp") is None:
     raise PersonaRequirementsUnmet(
         "This persona requires `codex-acp`, the ACP adapter for OpenAI Codex."
@@ -47,6 +46,13 @@ class CodexAcpPersona(BaseAcpPersona):
 
             self.log.info("[Codex] Authentication required: %s", error)
             await self.handle_message_no_auth(message)
+
+    async def handle_uncaught_exception(self, exc: Exception) -> None:
+        if isinstance(exc, RequestError) and exc.code == -32000:
+            self.log.info("[Codex] Authentication required: %s", exc)
+            await self.handle_message_no_auth(None)
+            return
+        await super().handle_uncaught_exception(exc)
 
     async def handle_message_no_auth(self, message: Message | None = None) -> None:
         await super().handle_message_no_auth(message)
