@@ -530,6 +530,7 @@ class BaseAcpPersona(BasePersona):
         """Prompt the user to sign in and set `_was_initially_unauthenticated` so a reactive agent resumes on its next message. 
         Subclasses override to add the sign-in instructions/terminal."""
         self._was_initially_unauthenticated = True
+        self.auth.start_poll()
         self.log.warning(
             "[%s] Received message while unauthenticated.", self.__class__.__name__
         )

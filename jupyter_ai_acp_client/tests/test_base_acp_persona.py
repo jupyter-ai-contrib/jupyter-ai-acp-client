@@ -893,11 +893,11 @@ class TestUnauthenticated:
         assert cls._client_future is not None
         assert persona._client_session_future is not None
 
-    async def test_handle_message_no_auth_sets_resume_flag(self):
+    async def test_handle_message_no_auth_sets_resume_flag_and_starts_poll(self):
         cls, persona = _make_lazy_persona()
         persona._was_initially_unauthenticated = False
 
         await BaseAcpPersona.handle_message_no_auth(persona, None)
 
         assert persona._was_initially_unauthenticated is True
-
+        persona.auth.start_poll.assert_called_once_with()
